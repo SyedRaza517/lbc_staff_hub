@@ -138,11 +138,16 @@ router.delete("/programmes/:id", requireAuth, requireAdmin, async (req, res) => 
 /* ============================== modules ============================== */
 
 router.get("/modules", requireAuth, async (_req, res) => {
-  const rows = await prisma.hndModule.findMany({
-    orderBy: { code: "asc" },
-    include: { _count: { select: { sessions: true, enrolments: true } } },
-  });
-  res.json(rows.map(sModule));
+  // Two grouped aggregations instead of a per-module _count (which issues a
+  // correlated subquery per row and collapsed at scale). Same response shape.
+  const [rows, enrolAgg, sessAgg] = await Promise.all([
+    prisma.hndModule.findMany({ orderBy: { code: "asc" } }),
+    prisma.enrolment.groupBy({ by: ["moduleId"], _count: { _all: true } }),
+    prisma.hndSession.groupBy({ by: ["moduleId"], _count: { _all: true } }),
+  ]);
+  const eMap = new Map(enrolAgg.map((e) => [e.moduleId, e._count._all]));
+  const sMap = new Map(sessAgg.map((s) => [s.moduleId, s._count._all]));
+  res.json(rows.map((m) => ({ ...sModule(m), studentCount: eMap.get(m.id) || 0, sessionCount: sMap.get(m.id) || 0 })));
 });
 
 router.post("/modules", requireAuth, requireAdmin, async (req, res) => {
@@ -339,12 +344,12 @@ router.put("/students/:id/enrolments", requireAuth, requireAdmin, async (req, re
 
 router.get("/sessions", requireAuth, async (req, res) => {
   const moduleId = str(req.query?.moduleId);
-  const rows = await prisma.hndSession.findMany({
-    where: moduleId ? { moduleId } : undefined,
-    orderBy: [{ date: "desc" }, { startTime: "asc" }],
-    include: { _count: { select: { marks: true } } },
-  });
-  res.json(rows.map(sSession));
+  const [rows, agg] = await Promise.all([
+    prisma.hndSession.findMany({ where: moduleId ? { moduleId } : undefined, orderBy: [{ date: "desc" }, { startTime: "asc" }] }),
+    prisma.attendanceMark.groupBy({ by: ["sessionId"], _count: { _all: true }, where: moduleId ? { session: { moduleId } } : undefined }),
+  ]);
+  const cMap = new Map(agg.map((a) => [a.sessionId, a._count._all]));
+  res.json(rows.map((s) => ({ ...sSession(s), markedCount: cMap.get(s.id) || 0 })));
 });
 
 router.post("/sessions", requireAuth, requireAdmin, async (req, res) => {
@@ -545,70 +550,68 @@ router.get("/attendance", requireAuth, async (req, res) => {
     scope = (date) => inRange(date, sem);
   }
 
-  const [modules, students, allMarks, allSessions] = await Promise.all([
-    prisma.hndModule.findMany({
-      orderBy: { code: "asc" },
-      include: { _count: { select: { sessions: true, enrolments: true } } },
-    }),
+  const [modules, students, allMarks, allSessions, enrolAgg] = await Promise.all([
+    prisma.hndModule.findMany({ orderBy: { code: "asc" } }),
     prisma.student.findMany({
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
       include: { enrolments: { select: { moduleId: true } } },
     }),
-    // Only the three columns the matrix needs. A per-row join (include session)
-    // dominated the request once there were thousands of marks; we resolve each
-    // mark's module/date from an in-memory session lookup instead.
+    // Only the three columns the matrix needs; resolve module/date from an
+    // in-memory session lookup rather than a per-row join.
     prisma.attendanceMark.findMany({ select: { studentId: true, status: true, sessionId: true } }),
     prisma.hndSession.findMany({ select: { id: true, moduleId: true, date: true } }),
+    prisma.enrolment.groupBy({ by: ["moduleId"], _count: { _all: true } }),
   ]);
 
   const sessById = new Map(allSessions.map((s) => [s.id, s]));
-  for (const m of allMarks) m.session = sessById.get(m.sessionId) || { moduleId: null, date: null };
+  for (const m of allMarks) { const se = sessById.get(m.sessionId); m.moduleId = se ? se.moduleId : null; m.date = se ? se.date : null; }
 
-  const marks = scope ? allMarks.filter((m) => scope(m.session.date)) : allMarks;
+  const marks = scope ? allMarks.filter((m) => scope(m.date)) : allMarks;
   const sessions = scope ? allSessions.filter((s) => scope(s.date)) : allSessions;
 
-  // studentId -> moduleId -> marks[]
-  const index = new Map();
+  // Single pass: group marks by student→module AND by module (cohort totals),
+  // instead of re-filtering the whole mark set per module.
+  const index = new Map();          // studentId -> Map(moduleId -> marks[])
+  const marksByModule = new Map();  // moduleId  -> marks[]
   for (const m of marks) {
     if (!index.has(m.studentId)) index.set(m.studentId, new Map());
-    const perModule = index.get(m.studentId);
-    const key = m.session.moduleId;
-    if (!perModule.has(key)) perModule.set(key, []);
-    perModule.get(key).push(m);
+    const per = index.get(m.studentId);
+    if (!per.has(m.moduleId)) per.set(m.moduleId, []);
+    per.get(m.moduleId).push(m);
+    if (!marksByModule.has(m.moduleId)) marksByModule.set(m.moduleId, []);
+    marksByModule.get(m.moduleId).push(m);
   }
 
+  // Per student, iterate only the modules they're enrolled on or have marks for
+  // — not every module in the college (was O(students × all modules)).
   const rows = students.map((s) => {
-    const perModule = index.get(s.id) || new Map();
-    const enrolledIds = s.enrolments.map((e) => e.moduleId);
+    const per = index.get(s.id) || new Map();
+    const enrolledIds = new Set(s.enrolments.map((e) => e.moduleId));
+    const relevant = new Set([...enrolledIds, ...per.keys()]);
     const modulesOut = {};
-    for (const mod of modules) {
-      const mine = perModule.get(mod.id) || [];
-      // Only report a figure for modules the student is enrolled on, or has
-      // marks for (kept from a previous enrolment).
-      if (!enrolledIds.includes(mod.id) && mine.length === 0) continue;
-      modulesOut[mod.id] = { ...summarise(mine), enrolled: enrolledIds.includes(mod.id) };
+    for (const modId of relevant) {
+      modulesOut[modId] = { ...summarise(per.get(modId) || []), enrolled: enrolledIds.has(modId) };
     }
-    const all = [...perModule.values()].flat();
+    const all = [...per.values()].flat();
     return { student: sStudent(s), modules: modulesOut, overall: summarise(all) };
   });
 
-  // Cohort figures: all marks for a module, and all marks everywhere.
-  // sessionCount is scoped too, so the UI can say "6 sessions this semester"
-  // rather than the module's all-time total.
+  // Session counts per module: scoped (for moduleTotals) and all-time (module shape).
+  const scopedSess = new Map(), allSess = new Map();
+  for (const se of sessions) scopedSess.set(se.moduleId, (scopedSess.get(se.moduleId) || 0) + 1);
+  for (const se of allSessions) allSess.set(se.moduleId, (allSess.get(se.moduleId) || 0) + 1);
+  const enrolCount = new Map(enrolAgg.map((e) => [e.moduleId, e._count._all]));
+
   const moduleTotals = {};
   for (const mod of modules) {
-    moduleTotals[mod.id] = {
-      ...summarise(marks.filter((m) => m.session.moduleId === mod.id)),
-      sessionCount: sessions.filter((s) => s.moduleId === mod.id).length,
-    };
+    moduleTotals[mod.id] = { ...summarise(marksByModule.get(mod.id) || []), sessionCount: scopedSess.get(mod.id) || 0 };
   }
 
   res.json({
-    modules: modules.map(sModule),
+    modules: modules.map((m) => ({ ...sModule(m), studentCount: enrolCount.get(m.id) || 0, sessionCount: allSess.get(m.id) || 0 })),
     rows,
     moduleTotals,
     overall: summarise(marks),
-    // Echo back what was actually counted, so the UI can explain an empty table.
     scope: { semesterId: semesterId || "", sessionCount: sessions.length },
   });
 });
