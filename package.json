@@ -1,0 +1,17 @@
+{
+  "name": "lbc-staff-hub",
+  "version": "1.0.0",
+  "description": "London Brookes College Staff Hub — full-stack (server + client)",
+  "private": true,
+  "workspaces": ["server", "client"],
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "concurrently -n SERVER,CLIENT -c blue,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm --workspace server run dev",
+    "dev:client": "npm --workspace client run dev",
+    "studio": "npm --workspace server run studio"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

@@ -1,0 +1,43 @@
+# Render Blueprint for the LBC Staff Hub API.
+# In Render:  New +  →  Blueprint  →  connect this repo.
+# It creates the web service below; paste the secret values when prompted.
+#
+# The database is already hosted on Supabase — nothing to provision here.
+services:
+  - type: web
+    name: lbc-staff-hub-api
+    runtime: node
+    region: frankfurt          # closest EU region to your Supabase DB (eu-north-1)
+    plan: free                 # change to "starter" ($7/mo) to stop it sleeping after 15 min idle
+    rootDir: server            # the API lives in /server
+    buildCommand: npm install  # runs the server's postinstall → prisma generate
+    startCommand: npm start    # node src/index.js  (binds to Render's $PORT automatically)
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production        # forces the JWT_SECRET check on; enables prod behaviour
+      - key: JWT_EXPIRES
+        value: 1d
+      # --- secrets: set these in the Render dashboard (never committed) ---
+      - key: DATABASE_URL
+        sync: false              # your Supabase session-pooler URL (from server/.env)
+      - key: JWT_SECRET
+        sync: false              # the long random secret from server/.env
+      - key: CLIENT_URL
+        sync: false              # your dashboard URL, e.g. https://lbc-hub.vercel.app  (set after step 2)
+      - key: CORS_ORIGINS
+        sync: false              # dashboard URL + mobile: "https://lbc-hub.vercel.app,capacitor://localhost,http://localhost"
+      # --- email (optional; console-stub if omitted) ---
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_SECURE
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: MAIL_FROM
+        sync: false

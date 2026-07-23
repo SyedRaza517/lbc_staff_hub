@@ -1,0 +1,155 @@
+// Thin REST client.
+//
+// Where the API lives:
+//   1. VITE_API_URL wins if set — this is what a real deployment uses, and what a
+//      packaged mobile app MUST set, because "localhost" inside the app means the
+//      phone itself, not the machine running the server.
+//   2. Otherwise, follow the host the page was opened from. Opening the dev client
+//      at http://192.168.1.5:5173 on a phone therefore talks to the API on
+//      http://192.168.1.5:4000 with no configuration.
+//   3. Falling back to localhost keeps `npm run dev` on this machine working.
+const API_PORT = 4000;
+function resolveBase() {
+  const configured = import.meta.env.VITE_API_URL;
+  if (configured) return configured.replace(/\/$/, "");
+  if (typeof window !== "undefined") {
+    const { protocol, hostname } = window.location;
+    // capacitor:// and file:// have no useful host — those builds must set VITE_API_URL.
+    if (protocol.startsWith("http") && hostname) return `${protocol}//${hostname}:${API_PORT}/api`;
+  }
+  return `http://localhost:${API_PORT}/api`;
+}
+const BASE = resolveBase();
+
+// NOTE for the packaged app: localStorage inside the Capacitor WebView is private
+// to the app, but it is not the Keychain / Android Keystore. Before shipping,
+// consider moving the JWT to secure storage — see MOBILE.md.
+const TOKEN_KEY = "lbc_token";
+
+export const getToken = () => localStorage.getItem(TOKEN_KEY);
+export const setToken = (t) => (t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY));
+
+async function request(path, { method = "GET", body } = {}) {
+  const headers = { "Content-Type": "application/json" };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  if (res.status === 401) {
+    setToken(null);
+    // Signal the app to drop the user and show <Login>, rather than leaving a
+    // broken authenticated UI where every subsequent request also 401s.
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("auth:unauthorized"));
+  }
+  let data = null;
+  try { data = await res.json(); } catch (_) {}
+  if (!res.ok) {
+    // Carry the status on the error. A network-level failure makes fetch itself
+    // reject, so that error has no `status` — which is how callers tell "the
+    // server rejected me" apart from "I never reached the server".
+    const err = new Error(data?.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+export const api = {
+  // auth
+  login: (email, password) => request("/auth/login", { method: "POST", body: { email, password } }),
+  me: () => request("/auth/me"),
+  changePassword: (currentPassword, newPassword) => request("/auth/change-password", { method: "PUT", body: { currentPassword, newPassword } }),
+  // forgotten password
+  forgotPassword: (email) => request("/auth/forgot-password", { method: "POST", body: { email } }),
+  verifyResetToken: (token) => request("/auth/reset-password/verify", { method: "POST", body: { token } }),
+  resetPassword: (token, newPassword, code) => request("/auth/reset-password", { method: "POST", body: { token, newPassword, code } }),
+  // activating an admin-created account from its invitation link
+  verifyInvite: (token) => request("/auth/invite/verify", { method: "POST", body: { token } }),
+  acceptInvite: (token, newPassword) => request("/auth/invite/accept", { method: "POST", body: { token, newPassword } }),
+  resendInvite: (id) => request(`/staff/${id}/invite`, { method: "POST" }),
+  // two-factor (authenticator app)
+  totpSetup: (challengeToken) => request("/auth/totp/setup", { method: "POST", body: { challengeToken } }),
+  totpEnable: (challengeToken, code) => request("/auth/totp/enable", { method: "POST", body: { challengeToken, code } }),
+  totpVerify: (challengeToken, code) => request("/auth/totp/verify", { method: "POST", body: { challengeToken, code } }),
+  totpDisable: (password) => request("/auth/totp", { method: "DELETE", body: { password } }),
+  // permanently delete your own account (App Store / Play Store requirement)
+  deleteAccount: (password, confirm, code) => request("/auth/account", { method: "DELETE", body: { password, confirm, code } }),
+  // self-service sign-up (public) + admin approval queue
+  signUp: (data) => request("/signup", { method: "POST", body: data }),
+  listSignups: (status) => request(`/signup${status ? `?status=${status}` : ""}`),
+  decideSignup: (id, status, note, allowance) => request(`/signup/${id}/decision`, { method: "PUT", body: { status, note, allowance } }),
+  // notifications
+  listNotifications: () => request("/notifications"),
+  markNotificationsRead: () => request("/notifications/read", { method: "PUT" }),
+  markNotificationRead: (id) => request(`/notifications/${id}/read`, { method: "PUT" }),
+  clearNotifications: () => request("/notifications", { method: "DELETE" }),
+  // push-notification devices
+  registerDevice: (token, platform) => request("/devices", { method: "POST", body: { token, platform } }),
+  unregisterDevice: (token) => request("/devices", { method: "DELETE", body: { token } }),
+  listDevices: () => request("/devices"),
+  // staff
+  listStaff: () => request("/staff"),
+  addStaff: (data) => request("/staff", { method: "POST", body: data }),
+  updateStaff: (id, data) => request(`/staff/${id}`, { method: "PUT", body: data }),
+  removeStaff: (id) => request(`/staff/${id}`, { method: "DELETE" }),
+  resetStaffTotp: (id) => request(`/staff/${id}/totp`, { method: "DELETE" }),
+  // check-ins
+  listCheckins: (date) => request(`/checkins${date ? `?date=${date}` : ""}`),
+  checkIn: () => request("/checkins/check-in", { method: "POST" }),
+  checkOut: (id) => request(`/checkins/${id}/check-out`, { method: "POST" }),
+  upsertCheckin: (data) => request("/checkins", { method: "PUT", body: data }),
+  saveSummary: (date, summary) => request("/checkins/summary", { method: "PUT", body: { date, summary } }),
+  // leave
+  listLeave: () => request("/leave"),
+  requestLeave: (data) => request("/leave", { method: "POST", body: data }),
+  decideLeave: (id, status, note) => request(`/leave/${id}/decision`, { method: "PUT", body: { status, note } }),
+  // adjustments
+  listAdjustments: () => request("/adjustments"),
+  addAdjustment: (data) => request("/adjustments", { method: "POST", body: data }),
+  // documents
+  listDocuments: () => request("/documents"),
+  addDocument: (data) => request("/documents", { method: "POST", body: data }),
+  deleteDocument: (id) => request(`/documents/${id}`, { method: "DELETE" }),
+  // HND attendance registers
+  listSemesters: () => request("/hnd/semesters"),
+  addSemester: (data) => request("/hnd/semesters", { method: "POST", body: data }),
+  updateSemester: (id, data) => request(`/hnd/semesters/${id}`, { method: "PUT", body: data }),
+  removeSemester: (id) => request(`/hnd/semesters/${id}`, { method: "DELETE" }),
+  listProgrammes: () => request("/hnd/programmes"),
+  addProgramme: (data) => request("/hnd/programmes", { method: "POST", body: data }),
+  updateProgramme: (id, data) => request(`/hnd/programmes/${id}`, { method: "PUT", body: data }),
+  removeProgramme: (id) => request(`/hnd/programmes/${id}`, { method: "DELETE" }),
+  listModules: () => request("/hnd/modules"),
+  addModule: (data) => request("/hnd/modules", { method: "POST", body: data }),
+  updateModule: (id, data) => request(`/hnd/modules/${id}`, { method: "PUT", body: data }),
+  removeModule: (id) => request(`/hnd/modules/${id}`, { method: "DELETE" }),
+  setModuleEnrolments: (id, studentIds) => request(`/hnd/modules/${id}/enrolments`, { method: "PUT", body: { studentIds } }),
+  generateSessions: (id, data) => request(`/hnd/modules/${id}/sessions/generate`, { method: "POST", body: data }),
+  listStudents: () => request("/hnd/students"),
+  addStudent: (data) => request("/hnd/students", { method: "POST", body: data }),
+  updateStudent: (id, data) => request(`/hnd/students/${id}`, { method: "PUT", body: data }),
+  removeStudent: (id) => request(`/hnd/students/${id}`, { method: "DELETE" }),
+  setEnrolments: (id, moduleIds) => request(`/hnd/students/${id}/enrolments`, { method: "PUT", body: { moduleIds } }),
+  listSessions: (moduleId) => request(`/hnd/sessions${moduleId ? `?moduleId=${moduleId}` : ""}`),
+  addSession: (data) => request("/hnd/sessions", { method: "POST", body: data }),
+  updateSession: (id, data) => request(`/hnd/sessions/${id}`, { method: "PUT", body: data }),
+  removeSession: (id) => request(`/hnd/sessions/${id}`, { method: "DELETE" }),
+  getRegister: (sessionId) => request(`/hnd/sessions/${sessionId}/register`),
+  saveRegister: (sessionId, marks) => request(`/hnd/sessions/${sessionId}/register`, { method: "PUT", body: { marks } }),
+  // semesterId: "" = all semesters, "unassigned" = sessions outside every semester
+  getAttendance: (semesterId) => request(`/hnd/attendance${semesterId ? `?semesterId=${encodeURIComponent(semesterId)}` : ""}`),
+  // PAT (Personal Academic Tutor) interactions
+  listInteractions: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/interactions${q ? `?${q}` : ""}`); },
+  addInteraction: (data) => request("/interactions", { method: "POST", body: data }),
+  updateInteraction: (id, data) => request(`/interactions/${id}`, { method: "PUT", body: data }),
+  removeInteraction: (id) => request(`/interactions/${id}`, { method: "DELETE" }),
+  // assessments (gradebook)
+  listAssessments: (moduleId) => request(`/assessments${moduleId ? `?moduleId=${moduleId}` : ""}`),
+  addAssessment: (data) => request("/assessments", { method: "POST", body: data }),
+  updateAssessment: (id, data) => request(`/assessments/${id}`, { method: "PUT", body: data }),
+  removeAssessment: (id) => request(`/assessments/${id}`, { method: "DELETE" }),
+  getGrades: (id) => request(`/assessments/${id}/grades`),
+  saveGrades: (id, grades) => request(`/assessments/${id}/grades`, { method: "PUT", body: { grades } }),
+  listGrades: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/assessments/grades${q ? `?${q}` : ""}`); },
+  assessmentOverview: () => request("/assessments/overview"),
+  studentAssessments: (studentId) => request(`/assessments/student/${studentId}`),
+};

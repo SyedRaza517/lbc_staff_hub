@@ -1,0 +1,16 @@
+node_modules
+dist
+.env
+.env.production
+
+# Capacitor build output. The android/ and ios/ PROJECTS are committed (they hold
+# app config, icons and signing setup); only their build artefacts are ignored.
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/app/release/
+ios/App/Pods/
+ios/App/build/
+ios/App/public/
+android/app/src/main/assets/public/

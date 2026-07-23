@@ -1,0 +1,30 @@
+{
+  "appId": "uk.ac.lbc.staffhub",
+  "appName": "LBC Staff Hub",
+  "webDir": "dist",
+  "backgroundColor": "#1a3a8fff",
+  "android": {
+    "backgroundColor": "#1a3a8fff",
+    "allowMixedContent": false
+  },
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#1a3a8fff"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 800,
+      "backgroundColor": "#1a3a8fff",
+      "showSpinner": false,
+      "androidScaleType": "CENTER_CROP"
+    },
+    "StatusBar": {
+      "style": "LIGHT",
+      "backgroundColor": "#14306f",
+      "overlaysWebView": false
+    }
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

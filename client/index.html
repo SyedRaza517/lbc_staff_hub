@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover is what makes env(safe-area-inset-*) report real values
+         on notched iPhones; without it the insets are always 0. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>London Brookes College — Staff Hub</title>
+    <meta name="description" content="Staff attendance, leave and HND attendance registers for London Brookes College." />
+
+    <!-- Installable web app / packaged app metadata -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1a3a8f" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- iOS home-screen behaviour -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Staff Hub" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- Tailwind is compiled at build time (see tailwind.config.js). It used to be
+         loaded from the Play CDN, which needs the internet on every launch — not
+         viable in a packaged mobile app. -->
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

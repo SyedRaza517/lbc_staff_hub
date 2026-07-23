@@ -1,0 +1,359 @@
+// London Brookes College — Staff Hub database schema
+// SQLite for zero-config local dev. To use PostgreSQL in production,
+// change provider to "postgresql" and set DATABASE_URL accordingly.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// A person who can log in. accountRole is "ADMIN" or "STAFF".
+// (SQLite via Prisma has no native enums, so we use validated strings.)
+model Staff {
+  id           String   @id @default(cuid())
+  name         String
+  jobTitle     String
+  dept         String
+  email        String   @unique
+  passwordHash String
+  accountRole  String   @default("STAFF") // ADMIN | STAFF
+  allowance    Int      @default(28)
+  initials     String
+  colour       String
+  // When true, the user must set a new password before using the app
+  // (set for admin-created accounts that start on a temporary password).
+  mustChangePassword Boolean @default(false)
+
+  // --- Two-factor authentication (TOTP / authenticator app) ---
+  // totpSecret is the base32 shared secret. It is NEVER returned by the API once
+  // enrolment is complete — it is only shown during the setup step.
+  totpSecret    String?
+  // True once the user has proved they can generate a valid code. Login then
+  // requires a second step. Seeded/admin accounts leave this false, so the
+  // existing one-step dashboard login is unchanged.
+  totpEnabled   Boolean @default(false)
+  // True for accounts created by approving a sign-up request: 2FA is MANDATORY.
+  // They must enrol an authenticator on first sign-in before reaching the app,
+  // and (unlike a voluntary enroller) they cannot switch it off afterwards.
+  // Stays true once enrolled — totpEnabled is what tracks enrolment state.
+  mustSetupTotp Boolean @default(false)
+
+  // Bumped whenever every existing session must be invalidated — a password
+  // reset, or a password change. Signed into each JWT and compared on every
+  // request, which gives us revocation without a server-side session store.
+  tokenVersion Int @default(0)
+
+  // True between "an admin added this person" and "that person set their own
+  // password from the invitation email". Such an account CANNOT be signed into.
+  // Previously admin-created accounts were given the shared default password, so
+  // anyone who guessed the email address could sign straight in as them.
+  pendingActivation Boolean @default(false)
+
+  createdAt    DateTime @default(now())
+
+  checkIns       CheckIn[]
+  leaves         Leave[]
+  adjustments    Adjustment[]
+  documents      Document[]      @relation("AssignedDocs")
+  notifications  Notification[]  @relation("StaffNotifications")
+  passwordResets PasswordReset[]
+  devices        DeviceToken[]
+}
+
+// A phone (or browser) registered to receive push notifications.
+//
+// The token is issued by Firebase Cloud Messaging and identifies one install of
+// the app on one device. It is unique because the same handset must not end up
+// registered to two people — when someone else signs in on a shared phone the row
+// is reassigned rather than duplicated, so the previous user stops receiving
+// notifications for an account they no longer hold.
+model DeviceToken {
+  id         String   @id @default(cuid())
+  staff      Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  staffId    String
+  token      String   @unique
+  platform   String   @default("unknown") // ios | android | web
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  @@index([staffId])
+}
+
+// A single-use "forgot password" token.
+//
+// Only the SHA-256 HASH of the token is stored: the raw value exists solely in
+// the emailed link. Anyone who reads this table therefore cannot reset anything,
+// the same reasoning that applies to storing password hashes rather than passwords.
+model PasswordReset {
+  id        String    @id @default(cuid())
+  staff     Staff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  staffId   String
+  tokenHash String    @unique
+  // "reset"  — forgotten password, 30 minutes
+  // "invite" — first-time activation of an admin-created account, 7 days, because
+  //            the person may not read their email the same day
+  purpose   String    @default("reset")
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([staffId])
+}
+
+// A self-service sign-up from the staff mobile app, awaiting admin approval.
+//
+// Applicants deliberately live here rather than in Staff: an unapproved person
+// must not appear in calendars, registers or the staff list, and must not be able
+// to sign in. On approval the row is copied into Staff (password hash included,
+// so the applicant keeps the password they chose) and marked approved.
+model SignupRequest {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  jobTitle     String   // "position" on the sign-up form
+  dept         String
+  status       String   @default("pending") // pending | approved | rejected
+  note         String?  // admin's reason, shown to nobody yet but kept for audit
+  decidedBy    String?
+  decidedAt    String?
+  createdAt    DateTime @default(now())
+
+  @@index([status])
+}
+
+// A persisted, per-user notification (survives reload, unlike the in-memory toasts).
+model Notification {
+  id        String   @id @default(cuid())
+  staff     Staff    @relation("StaffNotifications", fields: [staffId], references: [id], onDelete: Cascade)
+  staffId   String
+  type      String   @default("info") // info | success | error
+  message   String
+  link      String?  // optional client route hint, e.g. "balance"
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([staffId, read])
+}
+
+model CheckIn {
+  id        String   @id @default(cuid())
+  staff     Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  staffId   String
+  date      String   // YYYY-MM-DD
+  timeIn    String
+  timeOut   String?
+  summary   String   @default("")
+  createdAt DateTime @default(now())
+
+  @@unique([staffId, date])
+}
+
+model Leave {
+  id          String  @id @default(cuid())
+  staff       Staff   @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  staffId     String
+  type        String  // annual | sick | personal | training
+  start       String  // YYYY-MM-DD
+  end         String  // YYYY-MM-DD
+  days        Int     @default(0) // inclusive day count, computed from start/end at creation
+  reason      String  @default("—")
+  status      String  @default("pending") // pending | approved | rejected
+  requestedAt String
+  decidedBy   String?
+  decidedAt   String?
+  note        String?
+}
+
+model Adjustment {
+  id      String @id @default(cuid())
+  staff   Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  staffId String
+  days    Int
+  note    String
+  date    String
+}
+
+model Document {
+  id           String  @id @default(cuid())
+  name         String
+  type         String  // Policy | Payroll | HR | Calendar | Form
+  date         String
+  scope        String  @default("all") // all | personal
+  assignedTo   Staff?  @relation("AssignedDocs", fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedToId String?
+}
+
+// ============================================================
+// HND student attendance registers
+// A module runs many timetabled sessions; students enrol on
+// modules; each session has one mark per enrolled student.
+// ============================================================
+
+// A teaching period, e.g. "Semester 2" running 01 Feb -> 30 Jun.
+// Sessions are not tagged with a semester: a session belongs to whichever
+// semester its date falls inside. Ranges are kept non-overlapping (enforced in
+// the route layer) so that mapping is always unambiguous.
+model Semester {
+  id        String   @id @default(cuid())
+  name      String
+  start     String   // YYYY-MM-DD, inclusive
+  end       String   // YYYY-MM-DD, inclusive
+  createdAt DateTime @default(now())
+}
+
+// A programme of study, e.g. "HND Business". Groups the modules (courses) taught
+// under it. A module belongs to at most one programme; deleting a programme leaves
+// its modules intact but unassigned (onDelete: SetNull), so registers never vanish.
+model Programme {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  colour    String   @default("#1a3a8f")
+  createdAt DateTime @default(now())
+
+  modules HndModule[]
+}
+
+// A taught HND module, e.g. code "OBM" / name "Organisational Behaviour Management".
+model HndModule {
+  id          String     @id @default(cuid())
+  code        String     @unique
+  name        String
+  tutor       String     @default("")
+  programme   Programme? @relation(fields: [programmeId], references: [id], onDelete: SetNull)
+  programmeId String?
+  createdAt   DateTime   @default(now())
+
+  sessions    HndSession[]
+  enrolments  Enrolment[]
+  assessments Assessment[]
+
+  @@index([programmeId])
+}
+
+// An assessment belonging to a module (course) — e.g. "Assignment 1" worth 40%.
+// Enrolled students each receive a mark (AssessmentGrade).
+model Assessment {
+  id        String   @id @default(cuid())
+  module    HndModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  moduleId  String
+  title     String
+  type      String   @default("Assignment") // Assignment | Exam | Presentation | Project | Portfolio
+  maxMarks  Int      @default(100)
+  weight    Int      @default(0)  // percentage weighting toward the module (0 = unset)
+  dueDate   String?               // YYYY-MM-DD
+  createdAt DateTime @default(now())
+
+  grades AssessmentGrade[]
+
+  @@index([moduleId])
+}
+
+// One student's mark for one assessment. marks is 0..assessment.maxMarks.
+model AssessmentGrade {
+  id           String     @id @default(cuid())
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  assessmentId String
+  student      Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId    String
+  marks        Int
+  feedback     String     @default("")
+  gradedBy     String?
+  gradedAt     DateTime   @default(now())
+
+  @@unique([assessmentId, studentId])
+  @@index([studentId])
+}
+
+// A student on the HND programme. studentRef is the college number used in
+// their email (e.g. 100121 -> 100121@londonbrookescollege.co.uk).
+model Student {
+  id         String   @id @default(cuid())
+  firstName  String
+  lastName   String
+  studentRef String   @unique
+  email      String   @unique
+  initials   String
+  colour     String
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  enrolments   Enrolment[]
+  marks        AttendanceMark[]
+  interactions Interaction[]
+  grades       AssessmentGrade[]
+}
+
+// A PAT (Personal Academic Tutor) interaction — a logged meeting/contact with a
+// student: what it was about (queryType), a summary, actions and whether a
+// follow-up is needed. Mirrors the college's PAT toolkit.
+model Interaction {
+  id               String   @id @default(cuid())
+  student          Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId        String
+  date             String   // YYYY-MM-DD
+  time             String   // HH:MM
+  queryType        String   // e.g. "1 to 1 Meeting", "No Show", "Personal Wellbeing"
+  summary          String   @default("")
+  followUpActions  String   @default("")
+  followUpRequired Boolean  @default(false)
+  tutor            String   @default("")  // staff member who conducted the meeting
+  loggedBy         String?                // who recorded the interaction
+  createdAt        DateTime @default(now())
+
+  @@index([studentId])
+  @@index([followUpRequired])
+}
+
+// Links a student to a module. A student is only listed on a module's
+// register while this row exists.
+model Enrolment {
+  id        String    @id @default(cuid())
+  student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId String
+  module    HndModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  moduleId  String
+  createdAt DateTime  @default(now())
+
+  @@unique([studentId, moduleId])
+  @@index([moduleId])
+}
+
+// One timetabled class for a module — the row shown in the sessions list.
+model HndSession {
+  id          String    @id @default(cuid())
+  module      HndModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  moduleId    String
+  date        String    // YYYY-MM-DD
+  startTime   String    // HH:MM
+  endTime     String    // HH:MM
+  description String    @default("")
+  audience    String    @default("All students")
+  createdAt   DateTime  @default(now())
+
+  marks AttendanceMark[]
+
+  @@index([moduleId, date])
+}
+
+// One student's mark for one session. status is P | L | E | A
+// (Present | Late | Excused | Absent) — validated in the route layer,
+// since SQLite via Prisma has no native enums.
+model AttendanceMark {
+  id        String     @id @default(cuid())
+  session   HndSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String
+  student   Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId String
+  status    String     // P | L | E | A
+  remark    String     @default("")
+  takenBy   String?    // staff name who took the register
+  takenAt   DateTime   @default(now())
+
+  @@unique([sessionId, studentId])
+  @@index([studentId])
+}

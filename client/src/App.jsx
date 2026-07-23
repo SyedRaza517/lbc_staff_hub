@@ -1,0 +1,411 @@
+import React, { useState, useCallback, useEffect } from "react";
+import { useAuth } from "./auth";
+import { useApiStore } from "./store";
+import { api } from "./api";
+import Login from "./Login";
+import Landing from "./Landing";
+import MobileAuth from "./MobileAuth";
+import ResetPasswordPage from "./ResetPassword";
+import AcceptInvite from "./AcceptInvite";
+import { useIsHandset } from "./PhoneShell";
+import BiometricGate, { useAppLock } from "./BiometricGate";
+import { StaffApp, AdminDashboard } from "./StaffHub";
+import { Smartphone, Monitor, LogOut, CheckCircle2, XCircle, Sparkles, Loader2, GraduationCap, Clock, KeyRound, Lock, ShieldCheck, X, WifiOff } from "lucide-react";
+
+const NAVY = "#1a3a8f", NAVY_DARK = "#14306f", MAROON = "#9e1b32";
+const initialsOf = (name) => String(name || "").trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+
+// Small live clock for the top bar (ticks every 30s).
+function LiveClock() {
+  const [t, setT] = useState(new Date());
+  useEffect(() => { const i = setInterval(() => setT(new Date()), 30000); return () => clearInterval(i); }, []);
+  return <span className="hidden items-center gap-1 tabular-nums text-slate-300 md:inline-flex"><Clock size={12} /> {t.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span>;
+}
+
+// Shared change-password form. Used both by the forced-reset gate (full screen)
+// and by the in-app modal for already-onboarded users. On success it calls
+// onSuccess() — the parent decides what to do (refresh user / close modal).
+function ChangePassword({ onSuccess, busyLabel = "Updating…", submitLabel = "Update password" }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (next.length < 8) { setError("New password must be at least 8 characters."); return; }
+    if (next !== confirm) { setError("New password and confirmation do not match."); return; }
+    if (next === current) { setError("New password must be different from your current one."); return; }
+    setBusy(true);
+    try {
+      // The server bumps tokenVersion to sign out every other device, so it hands
+      // back a fresh token for THIS session — the caller must store it or we'd
+      // immediately 401 ourselves.
+      const res = await api.changePassword(current, next);
+      await onSuccess?.(res);
+    } catch (err) {
+      setError(err.message || "Could not change password.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field = (label, value, setValue, Icon) => (
+    <label className="block">
+      <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
+      <div className="relative">
+        <Icon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          disabled={busy}
+          autoComplete="off"
+          className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-transparent focus:ring-2 disabled:opacity-60"
+          style={{ "--tw-ring-color": NAVY }}
+        />
+      </div>
+    </label>
+  );
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-3.5">
+      {field("Current password", current, setCurrent, Lock)}
+      {field("New password", next, setNext, KeyRound)}
+      {field("Confirm new password", confirm, setConfirm, KeyRound)}
+      <p className="text-[11px] text-slate-400">Use at least 8 characters. Choose something you haven't used here before.</p>
+      {error && (
+        <div className="pop flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 ring-1 ring-rose-200">
+          <XCircle size={14} /> {error}
+        </div>
+      )}
+      <button
+        type="submit"
+        disabled={busy}
+        className="press shine mt-1 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold text-white shadow-lg transition disabled:cursor-not-allowed disabled:opacity-70"
+        style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}
+      >
+        {busy ? <><Loader2 size={16} className="animate-spin" /> {busyLabel}</> : <><ShieldCheck size={16} /> {submitLabel}</>}
+      </button>
+    </form>
+  );
+}
+
+// Full-screen branded gate shown when user.mustChangePassword is true.
+function ChangePasswordGate({ user, onDone, logout }) {
+  return (
+    <div
+      className="animated-gradient flex min-h-screen w-full items-center justify-center p-4"
+      style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", background: `linear-gradient(160deg, ${NAVY} 0%, ${NAVY_DARK} 55%, #0f172a 100%)`, backgroundSize: "220% 220%" }}
+    >
+      <style>{GLOBAL_STYLE}</style>
+      <div className="scale-in w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl ring-1 ring-black/5">
+        <div className="fade-up flex flex-col items-center text-center">
+          <div className="float relative mb-3 flex h-14 w-14 items-center justify-center rounded-2xl text-white shadow-lg" style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}>
+            <KeyRound size={26} />
+          </div>
+          <h1 className="text-xl font-extrabold tracking-tight gradient-text" style={{ fontFamily: "'Lora', serif" }}>Set a new password</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Welcome{user?.name ? `, ${user.name.split(/\s+/)[0]}` : ""}. For your security you must choose a new password before continuing.
+          </p>
+        </div>
+        <div className="fade-up mt-5">
+          <ChangePassword onSuccess={onDone} busyLabel="Securing account…" submitLabel="Set password & continue" />
+        </div>
+        <button onClick={logout} className="press mt-4 w-full text-center text-xs font-semibold text-slate-400 transition hover:text-slate-600">
+          Sign out instead
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const GLOBAL_STYLE = `
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Lora:ital,wght@0,500;0,600;1,500&display=swap');
+
+/* ---- entrance keyframes (subtle) ---- */
+@keyframes fadeUp{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+@keyframes pop{0%{transform:scale(.96);opacity:0}100%{transform:scale(1);opacity:1}}
+@keyframes slideIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
+@keyframes slideDown{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+@keyframes scaleIn{from{opacity:0;transform:scale(.975)}to{opacity:1;transform:scale(1)}}
+@keyframes bounceIn{0%{opacity:0;transform:scale(.8)}60%{transform:scale(1.015)}100%{opacity:1;transform:scale(1)}}
+
+/* ---- ambient / looping (gentle) ---- */
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes floatySlow{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-5px) rotate(1.5deg)}}
+@keyframes shimmer{0%{background-position:-468px 0}100%{background-position:468px 0}}
+@keyframes gradientShift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+@keyframes glowPulse{0%,100%{box-shadow:0 0 0 0 rgba(26,58,143,0)}50%{box-shadow:0 0 14px 1px rgba(26,58,143,.12)}}
+@keyframes shine{0%{left:-60%}100%{left:140%}}
+@keyframes pulseRing{0%{transform:scale(.9);opacity:.5}80%,100%{transform:scale(1.4);opacity:0}}
+
+/* ---- entrance utility classes ---- */
+.fade-up{animation:fadeUp .45s cubic-bezier(.2,.7,.3,1) both}
+.pop{animation:pop .3s cubic-bezier(.2,.8,.3,1) both}
+.slide-in{animation:slideIn .35s cubic-bezier(.2,.8,.3,1) both}
+.slide-down{animation:slideDown .25s ease both}
+.scale-in{animation:scaleIn .4s cubic-bezier(.2,.7,.3,1) both}
+.bounce-in{animation:bounceIn .5s cubic-bezier(.2,.7,.3,1.1) both}
+.float{animation:floaty 6s ease-in-out infinite}
+.float-slow{animation:floatySlow 9s ease-in-out infinite}
+.glow-pulse{animation:glowPulse 3.6s ease-in-out infinite}
+
+/* ---- hover micro-interactions (restrained) ---- */
+.hover-lift{transition:transform .25s cubic-bezier(.2,.7,.3,1),box-shadow .25s ease}
+.hover-lift:hover{transform:translateY(-2px);box-shadow:0 10px 24px -14px rgba(20,48,111,.3)}
+.hover-glow{transition:box-shadow .3s ease,transform .3s ease}
+.hover-glow:hover{box-shadow:0 8px 22px -10px rgba(26,58,143,.25)}
+.press{transition:transform .12s ease}
+.press:active{transform:scale(.97)}
+
+/* ---- animated gradients & text (slow drift) ---- */
+.animated-gradient{background-size:180% 180%;animation:gradientShift 16s ease infinite}
+.gradient-text{background:linear-gradient(90deg,#1a3a8f,#6d28d9,#9e1b32,#1a3a8f);background-size:300% auto;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;animation:gradientShift 12s ease infinite}
+
+/* ---- shine sweep (buttons/cards) ---- */
+.shine{position:relative;overflow:hidden}
+.shine::after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(110deg,transparent,rgba(255,255,255,.3),transparent);transform:skewX(-18deg);pointer-events:none}
+.shine:hover::after{animation:shine 1s ease}
+
+/* ---- skeleton shimmer ---- */
+.skeleton{background:linear-gradient(90deg,#eef1f6 25%,#e2e8f0 37%,#eef1f6 63%);background-size:800px 100%;animation:shimmer 1.5s linear infinite}
+
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:#c5ccda;border-radius:8px;transition:background .2s}
+::-webkit-scrollbar-thumb:hover{background:#a3adc2}
+::-webkit-scrollbar-track{background:transparent}
+input,select,textarea,button{font-family:inherit}
+html{scroll-behavior:smooth}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+}
+`;
+
+export default function App() {
+  const { user, loading, logout, refreshUser, applySession, offline, retryRestore, abandonRestore } = useAuth();
+  // Which front door the visitor picked: null = still on the landing screen,
+  // "app" = the staff mobile app's own sign in / sign up, "admin" = dashboard login.
+  // It also decides which view they land in once signed in.
+  const [entry, setEntry] = useState(null);
+  // A "?reset=<token>" link from a password-reset email. Read once on mount so that
+  // clearing the query string later doesn't yank the screen away mid-flow.
+  const [resetToken, setResetToken] = useState(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("reset");
+  });
+  // "?invite=<token>" — an admin-created account being activated for the first time.
+  const [inviteToken, setInviteToken] = useState(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("invite");
+  });
+  // Biometric app lock — only ever active inside the packaged app, and only when
+  // the user has switched it on.
+  const { locked, unlock } = useAppLock();
+
+  const clearTokenFromUrl = () => {
+    // Drop the token from the address bar so a refresh (or a shared screenshot of
+    // the URL) can't replay it, then land on the sign-in choice.
+    if (typeof window !== "undefined") window.history.replaceState({}, "", window.location.pathname);
+    setResetToken(null);
+    setInviteToken(null);
+    setEntry(null);
+  };
+
+  // Both of these are valid whether or not a stale session exists, and deliberately
+  // run before the auth gate below.
+  if (inviteToken) return (<><style>{GLOBAL_STYLE}</style><AcceptInvite token={inviteToken} onDone={clearTokenFromUrl} /></>);
+  if (resetToken) return (<><style>{GLOBAL_STYLE}</style><ResetPasswordPage token={resetToken} onDone={clearTokenFromUrl} /></>);
+
+  if (loading) return (
+    <div className="animated-gradient flex min-h-screen flex-col items-center justify-center gap-3 text-white" style={{ background: `linear-gradient(160deg, ${NAVY} 0%, #14306f 55%, #0f172a 100%)`, backgroundSize: "220% 220%" }}>
+      <div className="relative flex h-16 w-16 items-center justify-center">
+        <span className="absolute inset-0 rounded-2xl bg-white/15 glow-pulse" />
+        <Loader2 className="animate-spin" size={30} />
+      </div>
+      <p className="text-sm font-semibold tracking-wide text-white/80">Loading Staff Hub…</p>
+    </div>
+  );
+  // Signed in, but the server could not be reached to confirm it. The token is
+  // still good — say so and offer a retry, rather than silently ejecting them to
+  // the sign-in screen the moment the signal drops.
+  if (!user && offline) return (
+    <>
+      <style>{GLOBAL_STYLE}</style>
+      <div className="flex flex-col items-center justify-center gap-4 px-8 text-center" style={{ minHeight: "100dvh", fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", background: "radial-gradient(1200px 600px at 50% -10%, #e7ecf6 0%, #f1f5f9 45%, #eef1f6 100%)" }}>
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+          <WifiOff size={28} className="text-slate-400" />
+        </div>
+        <div>
+          <p className="text-lg font-extrabold" style={{ color: NAVY }}>Can’t reach the server</p>
+          <p className="mt-1 text-sm text-slate-500">You’re still signed in. Check your connection and try again.</p>
+        </div>
+        <button onClick={retryRestore} className="min-h-[44px] rounded-xl px-6 text-sm font-bold text-white shadow-sm active:scale-95" style={{ background: NAVY }}>Try again</button>
+        <button onClick={abandonRestore} className="min-h-[44px] text-sm font-semibold text-slate-500 underline">Sign in as someone else</button>
+      </div>
+    </>
+  );
+
+  if (!user) {
+    if (entry === "app") return (
+      // 100dvh (not vh) so collapsing mobile browser chrome can't clip the page.
+      <div className="w-full" style={{ minHeight: "100dvh", height: "100dvh", fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", background: "radial-gradient(1200px 600px at 50% -10%, #e7ecf6 0%, #f1f5f9 45%, #eef1f6 100%)" }}>
+        <style>{GLOBAL_STYLE}</style>
+        <MobileAuth onExit={() => setEntry(null)} />
+      </div>
+    );
+    if (entry === "admin") return (<><style>{GLOBAL_STYLE}</style><Login onBack={() => setEntry(null)} /></>);
+    return (<><style>{GLOBAL_STYLE}</style><Landing onStaffApp={() => setEntry("app")} onAdmin={() => setEntry("admin")} /></>);
+  }
+
+  // App lock sits in front of everything a signed-in user can see, including the
+  // forced password change below.
+  if (locked) return (<><style>{GLOBAL_STYLE}</style><BiometricGate user={user} onUnlock={unlock} logout={logout} /></>);
+
+  if (user.mustChangePassword) return (
+    <ChangePasswordGate
+      user={user}
+      onDone={async (res) => { if (res?.token) applySession(res); else await refreshUser(); }}
+      logout={logout}
+    />
+  );
+  // Someone who came in through the staff app lands in the staff app, even if
+  // they're an admin — otherwise picking "Staff App" would drop them on the dashboard.
+  return <Shell user={user} logout={logout} initialView={entry === "app" ? "app" : undefined} />;
+}
+
+function Shell({ user, logout, initialView }) {
+  const { applySession } = useAuth();
+  const handset = useIsHandset();
+  const isAdmin = user.accountRole === "ADMIN";
+  const [view, setView] = useState(initialView || (isAdmin ? "admin" : "app"));
+  const [currentStaffId, setCurrentStaffId] = useState(user.id);
+  const [toasts, setToasts] = useState([]);
+  const [notes, setNotes] = useState([]);
+  const [showChangePw, setShowChangePw] = useState(false);
+
+  const notify = useCallback((msg, type = "info") => {
+    const id = Date.now() + Math.random();
+    setToasts((t) => [...t, { id, msg, type }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
+    setNotes((n) => [{ id, msg, type, at: new Date() }, ...n].slice(0, 30));
+  }, []);
+
+  // Seed the bell with the user's UNREAD persisted notifications on mount,
+  // mapped to the exact shape the existing bell/NotePanel expects.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await api.listNotifications();
+        if (cancelled) return;
+        const seed = (list || [])
+          .filter((n) => n.read === false)
+          .map((n) => ({ id: n.id, msg: n.message, type: n.type, at: new Date(n.at) }));
+        if (seed.length) setNotes((n) => [...seed, ...n].slice(0, 30));
+      } catch (_) { /* non-fatal: bell just stays toast-only */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // When the existing "Clear" button empties the notes (setNotes([])), also
+  // persist that by marking all of the caller's notifications read on the server.
+  const setNotesPersisted = useCallback((updater) => {
+    setNotes((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (Array.isArray(next) && next.length === 0) api.markNotificationsRead().catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const store = useApiStore(notify, user);
+  store.notes = notes; store.setNotes = setNotesPersisted; // notifications feed for the app bell
+
+  return (
+    <div
+      style={{
+        fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+        background: "radial-gradient(1200px 600px at 50% -10%, #e7ecf6 0%, #f1f5f9 45%, #eef1f6 100%)",
+        // On a handset the top bar and the app share one screen height, so the
+        // shell becomes a flex column rather than a scrolling page.
+        ...(handset ? { height: "100dvh" } : {}),
+      }}
+      className={handset ? "flex w-full flex-col overflow-hidden text-slate-800" : "min-h-screen w-full text-slate-800"}
+    >
+      <style>{GLOBAL_STYLE}</style>
+
+      <div className={`animated-gradient slide-down z-50 flex shrink-0 items-center gap-2 px-3 py-2 text-xs text-white shadow-lg ${handset ? "" : "sticky top-0"}`} style={{ background: "linear-gradient(90deg, #0f172a 0%, #14306f 50%, #0f172a 100%)", backgroundSize: "220% 220%", ...(handset ? { paddingTop: "max(env(safe-area-inset-top), 8px)" } : {}) }}>
+        <div className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/15"><GraduationCap size={15} className="text-white" /></div>
+          <span className="hidden font-extrabold tracking-tight text-white sm:inline" style={{ fontFamily: "'Lora', serif" }}>LBC</span>
+        </div>
+        <div className="flex flex-1 items-center justify-center gap-2">
+          {isAdmin ? (
+            <>
+              <span className="mr-1 hidden font-semibold tracking-wide text-slate-400 sm:inline">VIEW MODE:</span>
+              <button onClick={() => setView("app")} className={`press flex items-center gap-1.5 rounded-full px-3.5 py-1.5 font-semibold transition-all duration-300 ${view === "app" ? "bg-white text-slate-900 shadow-md" : "text-slate-300 hover:bg-white/10"}`}><Smartphone size={14} /> Staff App</button>
+              <button onClick={() => setView("admin")} className={`press flex items-center gap-1.5 rounded-full px-3.5 py-1.5 font-semibold transition-all duration-300 ${view === "admin" ? "bg-white text-slate-900 shadow-md" : "text-slate-300 hover:bg-white/10"}`}><Monitor size={14} /> Admin Dashboard</button>
+            </>
+          ) : (
+            <span className="font-semibold tracking-wide text-slate-200">London Brookes College · Staff Hub</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2.5">
+          <LiveClock />
+          <div className="hidden items-center gap-2 sm:flex">
+            <div className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white ring-1 ring-white/20" style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}>{initialsOf(user.name)}</div>
+            <span className="text-slate-300">{user.name}</span>
+          </div>
+          <button onClick={() => setShowChangePw(true)} title="Change password" className="press flex items-center gap-1 rounded-full px-2.5 py-1.5 font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"><KeyRound size={13} /> <span className="hidden md:inline">Change password</span></button>
+          <button onClick={logout} className="press flex items-center gap-1 rounded-full px-2.5 py-1.5 font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"><LogOut size={13} /> Sign out</button>
+        </div>
+      </div>
+
+      <div key={view} className={handset ? "min-h-0 flex-1" : "fade-up"}>
+        {view === "app"
+          ? <StaffApp store={store} currentStaffId={isAdmin ? currentStaffId : user.id} setCurrentStaffId={setCurrentStaffId} />
+          : <AdminDashboard store={store} />}
+      </div>
+
+      {/* The overlay below is scrollable and top-aligned: on a landscape iPhone
+          (320px tall) a centred, non-scrolling overlay pushed the close button —
+          and on an iPhone SE the submit button too — off the screen entirely. */}
+      {showChangePw && (
+        <div
+          className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto p-4 sm:items-center"
+          style={{ height: "100dvh", paddingTop: "max(env(safe-area-inset-top), 1rem)", paddingBottom: "max(env(safe-area-inset-bottom), 1rem)" }}
+        >
+          <div className="fade-up fixed inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setShowChangePw(false)} />
+          <div className="scale-in relative my-auto w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl ring-1 ring-black/5">
+            <button onClick={() => setShowChangePw(false)} aria-label="Close" className="press absolute right-2 top-2 flex h-11 w-11 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"><X size={16} /></button>
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow-md" style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}><KeyRound size={20} /></div>
+              <div>
+                <h2 className="text-lg font-extrabold tracking-tight text-slate-800">Change password</h2>
+                <p className="text-xs text-slate-500">Update the password for your account.</p>
+              </div>
+            </div>
+            <div className="mt-5">
+              <ChangePassword onSuccess={(res) => { if (res?.token) applySession(res); setShowChangePw(false); notify("Password updated — other devices signed out", "success"); }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="pointer-events-none fixed bottom-5 right-5 z-[80] flex flex-col gap-2">
+        {toasts.map((t) => {
+          const tone = t.type === "success" ? "#059669" : t.type === "error" ? MAROON : NAVY;
+          const I = t.type === "success" ? CheckCircle2 : t.type === "error" ? XCircle : Sparkles;
+          return (
+            <div key={t.id} className="slide-in pointer-events-auto flex items-center gap-2.5 rounded-xl bg-white px-4 py-3 shadow-2xl ring-1 ring-slate-200" style={{ borderLeft: `4px solid ${tone}` }}>
+              <I size={18} style={{ color: tone }} /><span className="text-sm font-semibold text-slate-700">{t.msg}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="London Brookes College Staff Hub">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a3a8f"/>
+      <stop offset="1" stop-color="#9e1b32"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#g)"/>
+  <!-- graduation cap -->
+  <g fill="#ffffff">
+    <path d="M256 128 96 200l160 72 160-72-160-72zm0 40.6L326.6 200 256 231.4 185.4 200 256 168.6z"/>
+    <path d="M256 292l-96-43.2V320c0 30.9 43 56 96 56s96-25.1 96-56v-71.2L256 292z"/>
+    <path d="M400 214v92a12 12 0 0 1-24 0v-92l12-5.4 12 5.4z"/>
+  </g>
+</svg>

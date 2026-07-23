@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Mobile-app behaviours that a plain web page doesn't need.
+   These apply everywhere but only matter on a touch device. */
+@layer base {
+  html {
+    /* Stop iOS enlarging text when the phone is rotated. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    /* No rubber-band bounce past the top/bottom, which reads as "broken" in a
+       packaged app where there is no browser chrome to bounce against. */
+    overscroll-behavior-y: none;
+  }
+
+  /* Suppress the grey tap flash on Android/iOS; the UI has its own press states. */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* iOS zooms the whole page when a focused input's font is under 16px, and does
+     NOT zoom back out on blur — so every tap into a field leaves the app zoomed.
+     Inputs here carry Tailwind's .text-sm (14px), and a class beats a bare element
+     selector, so this rule silently lost until it was made !important. Verified on
+     real WebKit: without this, every field computed to 14px and iOS zoomed.
+     Element selectors are kept narrow so nothing else is affected. */
+  @media (pointer: coarse) {
+    input:not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
+  }
+
+  /* Text selection is a desktop affordance; in an app it mostly gets in the way.
+     Deliberately left ON for the fields users need to copy, such as the 2FA
+     setup key. */
+  @media (pointer: coarse) {
+    body {
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    input,
+    textarea,
+    code,
+    [data-selectable] {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+  }
+}

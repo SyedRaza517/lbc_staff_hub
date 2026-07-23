@@ -1,0 +1,23 @@
+# dependencies
+node_modules
+
+# secrets — never commit (contains DB password, JWT secret, SMTP creds)
+.env
+*/.env
+.env.production
+*/.env.production
+
+# databases & backups (data — never commit)
+*.db
+*.db-journal
+
+# build output
+dist
+
+# scratch / temp scripts (migration, seeding)
+server/_*.cjs
+migration-data.json
+
+# OS / editor
+.DS_Store
+Thumbs.db

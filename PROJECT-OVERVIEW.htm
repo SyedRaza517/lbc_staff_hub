@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LBC Staff Hub — Project Overview</title>
+<style>
+  :root{
+    --ground:#f3f5f9;
+    --panel:#ffffff;
+    --panel-2:#eef1f6;
+    --ink:#16202e;
+    --ink-soft:#43526a;
+    --ink-faint:#738398;
+    --line:#dbe1ea;
+    --line-strong:#c3ccda;
+    --brass:#b8813a;
+    --brass-soft:#e9d9bd;
+    --teal:#1f8a7b;
+    --teal-soft:#cfe9e4;
+    --violet:#5b57b0;
+    --violet-soft:#ddd9f2;
+    --rose:#b5455f;
+    --rose-soft:#f2d5dc;
+    --shadow:0 1px 2px rgba(20,32,46,.06), 0 8px 24px -14px rgba(20,32,46,.25);
+    --radius:14px;
+    --font-body:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --font-mono:ui-monospace,"SF Mono","Cascadia Code","Segoe UI Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --ground:#0d1622;
+      --panel:#141f2e;
+      --panel-2:#1b283a;
+      --ink:#eaf0f8;
+      --ink-soft:#a9b7c9;
+      --ink-faint:#6d7d92;
+      --line:#243247;
+      --line-strong:#31425c;
+      --brass:#e0ab5c;
+      --brass-soft:#3a2f1c;
+      --teal:#43c3b1;
+      --teal-soft:#153029;
+      --violet:#9a95ea;
+      --violet-soft:#211f3d;
+      --rose:#e8859a;
+      --rose-soft:#3a1f28;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 30px -18px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="light"]{
+    --ground:#f3f5f9;--panel:#ffffff;--panel-2:#eef1f6;--ink:#16202e;--ink-soft:#43526a;--ink-faint:#738398;--line:#dbe1ea;--line-strong:#c3ccda;--brass:#b8813a;--brass-soft:#e9d9bd;--teal:#1f8a7b;--teal-soft:#cfe9e4;--violet:#5b57b0;--violet-soft:#ddd9f2;--rose:#b5455f;--rose-soft:#f2d5dc;--shadow:0 1px 2px rgba(20,32,46,.06), 0 8px 24px -14px rgba(20,32,46,.25);
+  }
+  :root[data-theme="dark"]{
+    --ground:#0d1622;--panel:#141f2e;--panel-2:#1b283a;--ink:#eaf0f8;--ink-soft:#a9b7c9;--ink-faint:#6d7d92;--line:#243247;--line-strong:#31425c;--brass:#e0ab5c;--brass-soft:#3a2f1c;--teal:#43c3b1;--teal-soft:#153029;--violet:#9a95ea;--violet-soft:#211f3d;--rose:#e8859a;--rose-soft:#3a1f28;--shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 30px -18px rgba(0,0,0,.7);
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--ground);color:var(--ink);
+    font-family:var(--font-body);line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+
+  /* ---------- header ---------- */
+  header.hero{
+    border-bottom:1px solid var(--line);
+    background:
+      radial-gradient(1200px 400px at 15% -10%, var(--brass-soft), transparent 60%),
+      radial-gradient(1000px 380px at 95% -20%, var(--violet-soft), transparent 55%);
+  }
+  .crest{
+    display:inline-flex;align-items:center;gap:10px;
+    font-family:var(--font-mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--ink-soft);
+    padding:22px 0 0;
+  }
+  .crest .dot{width:9px;height:9px;border-radius:50%;background:var(--brass);box-shadow:0 0 0 4px var(--brass-soft)}
+  h1.title{
+    font-size:clamp(30px,5vw,52px);line-height:1.05;letter-spacing:-.02em;
+    margin:14px 0 8px;text-wrap:balance;font-weight:800;
+  }
+  h1.title .thin{font-weight:400;color:var(--ink-soft)}
+  .lede{font-size:clamp(16px,2.2vw,19px);color:var(--ink-soft);max-width:60ch;margin:0 0 22px}
+  .oneliner{
+    display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+    font-family:var(--font-mono);font-size:13px;color:var(--ink);
+    padding:14px 16px;margin:0 0 26px;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);
+    max-width:max-content;
+  }
+  .oneliner b{color:var(--brass)}
+  .oneliner .arw{color:var(--ink-faint)}
+  .stat-row{display:flex;flex-wrap:wrap;gap:10px;padding-bottom:30px}
+  .stat{
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:12px 16px;min-width:120px;box-shadow:var(--shadow);
+  }
+  .stat .n{font-size:22px;font-weight:800;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+  .stat .l{font-size:12px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.08em}
+
+  /* ---------- section scaffolding ---------- */
+  section{padding:48px 0}
+  section + section{border-top:1px solid var(--line)}
+  .eyebrow{
+    font-family:var(--font-mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--brass);margin:0 0 6px;display:flex;align-items:center;gap:10px;
+  }
+  .eyebrow::before{content:"";width:26px;height:1px;background:var(--brass)}
+  h2{font-size:clamp(22px,3.2vw,30px);letter-spacing:-.01em;margin:0 0 6px;font-weight:800;text-wrap:balance}
+  .sub{color:var(--ink-soft);margin:0 0 26px;max-width:66ch}
+
+  /* ---------- architecture diagram ---------- */
+  .arch-scroll{overflow-x:auto;padding-bottom:6px}
+  .arch{
+    display:grid;grid-template-columns:repeat(4,minmax(210px,1fr));gap:0;
+    align-items:stretch;min-width:900px;
+  }
+  .layer{position:relative;padding:0 26px}
+  .layer:not(:last-child)::after{
+    content:"";position:absolute;top:50%;right:-2px;width:26px;height:2px;
+    background:linear-gradient(90deg,var(--line-strong),var(--brass));
+    z-index:2;
+  }
+  .layer:not(:last-child)::before{
+    content:"";position:absolute;top:50%;right:-11px;transform:translateY(-50%);
+    border-left:9px solid var(--brass);border-top:6px solid transparent;border-bottom:6px solid transparent;
+    z-index:3;
+  }
+  .node{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:18px;height:100%;
+    display:flex;flex-direction:column;gap:10px;
+  }
+  .node .cap{font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+  .node h3{margin:0;font-size:17px;letter-spacing:-.01em}
+  .node ul{margin:2px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+  .node li{font-size:13px;color:var(--ink-soft);display:flex;gap:8px;align-items:baseline}
+  .node li::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--brass);flex:none;transform:translateY(-2px)}
+  .badge{align-self:flex-start;font-family:var(--font-mono);font-size:11px;padding:3px 9px;border-radius:20px;font-weight:600}
+  .b-client{background:var(--violet-soft);color:var(--violet)}
+  .b-api{background:var(--brass-soft);color:var(--brass)}
+  .b-orm{background:var(--teal-soft);color:var(--teal)}
+  .b-db{background:var(--rose-soft);color:var(--rose)}
+
+  .crosscut{
+    margin-top:20px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+    padding:14px 16px;background:var(--panel-2);border:1px dashed var(--line-strong);border-radius:12px;
+  }
+  .crosscut .lbl{font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin-right:4px}
+  .chip{font-size:13px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 11px;color:var(--ink)}
+  .chip b{color:var(--brass);font-weight:700}
+
+  /* ---------- generic card grid ---------- */
+  .grid{display:grid;gap:16px}
+  .g-stack{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+  .g-feat{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px 20px;box-shadow:var(--shadow);
+  }
+  .card h3{margin:0 0 4px;font-size:16px;display:flex;align-items:center;gap:9px}
+  .card .tag{font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:12px}
+  .kv{display:flex;flex-direction:column;gap:9px}
+  .kv .row{display:flex;justify-content:space-between;gap:14px;font-size:14px;border-bottom:1px dotted var(--line);padding-bottom:9px}
+  .kv .row:last-child{border-bottom:0;padding-bottom:0}
+  .kv .k{color:var(--ink-soft)}
+  .kv .v{font-weight:600;text-align:right}
+  .card p{margin:0;color:var(--ink-soft);font-size:14px}
+  .swatch{width:10px;height:10px;border-radius:3px;flex:none}
+
+  /* feature cards */
+  .feat h3 .mono{font-family:var(--font-mono);font-size:12px;color:var(--brass);background:var(--brass-soft);padding:2px 8px;border-radius:6px;font-weight:600}
+  .feat ul{margin:10px 0 0;padding-left:18px;color:var(--ink-soft);font-size:13.5px;display:flex;flex-direction:column;gap:5px}
+  .feat ul li::marker{color:var(--brass)}
+
+  /* ---------- data model ---------- */
+  .models{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+  .model{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
+  .model .hd{padding:11px 14px;font-family:var(--font-mono);font-size:13px;font-weight:700;letter-spacing:.02em;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+  .model .hd .d{width:8px;height:8px;border-radius:2px}
+  .model .bd{padding:11px 14px;font-size:12.5px;color:var(--ink-soft);line-height:1.55}
+  .model .bd code{font-family:var(--font-mono);font-size:11.5px;background:var(--panel-2);padding:1px 5px;border-radius:4px;color:var(--ink)}
+  .rel{color:var(--teal);font-weight:600}
+
+  /* ---------- security strip ---------- */
+  .sec-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .sec{display:flex;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+  .sec .ico{width:34px;height:34px;border-radius:9px;flex:none;display:grid;place-items:center;background:var(--teal-soft);color:var(--teal);font-family:var(--font-mono);font-weight:700;font-size:15px}
+  .sec h4{margin:0 0 2px;font-size:14px}
+  .sec p{margin:0;font-size:12.5px;color:var(--ink-soft)}
+
+  /* ---------- run panel ---------- */
+  .run{display:grid;gap:18px;grid-template-columns:1.2fr .8fr}
+  .terminal{background:#0c141f;border:1px solid #223249;border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
+  .terminal .bar{display:flex;gap:7px;padding:11px 14px;border-bottom:1px solid #1c2b40;background:#0f1a28}
+  .terminal .bar i{width:11px;height:11px;border-radius:50%;display:block}
+  .terminal .bar i:nth-child(1){background:#e0574f}.terminal .bar i:nth-child(2){background:#e5b23c}.terminal .bar i:nth-child(3){background:#3fb56b}
+  .terminal pre{margin:0;padding:16px 18px;font-family:var(--font-mono);font-size:12.5px;line-height:1.7;color:#c9d6e8;overflow-x:auto}
+  .terminal .cmt{color:#5f7793}
+  .terminal .cmd{color:#f0e5cf}
+  .terminal .ok{color:#5fd08a}
+  .terminal .url{color:#69b7ee;text-decoration:underline}
+  .accounts .card{height:100%}
+  table.acct{width:100%;border-collapse:collapse;font-size:13.5px}
+  table.acct th{text-align:left;font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);padding:0 0 8px;border-bottom:1px solid var(--line)}
+  table.acct td{padding:9px 0;border-bottom:1px dotted var(--line);vertical-align:top}
+  table.acct tr:last-child td{border-bottom:0}
+  .pill{font-family:var(--font-mono);font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px}
+  .pill.admin{background:var(--brass-soft);color:var(--brass)}
+  .pill.staff{background:var(--violet-soft);color:var(--violet)}
+  code.inline{font-family:var(--font-mono);font-size:12.5px;background:var(--panel-2);border:1px solid var(--line);padding:1px 6px;border-radius:5px}
+
+  .note{margin-top:16px;font-size:13px;color:var(--ink-soft);background:var(--panel-2);border-left:3px solid var(--brass);padding:12px 14px;border-radius:0 8px 8px 0}
+
+  footer{border-top:1px solid var(--line);padding:26px 0 40px;color:var(--ink-faint);font-size:13px;text-align:center}
+
+  /* theme toggle */
+  .toggle{position:fixed;top:16px;right:16px;z-index:20;background:var(--panel);border:1px solid var(--line);color:var(--ink);
+    font-family:var(--font-mono);font-size:12px;padding:8px 12px;border-radius:20px;cursor:pointer;box-shadow:var(--shadow)}
+  .toggle:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+
+  @media (max-width:760px){
+    .run{grid-template-columns:1fr}
+    section{padding:38px 0}
+  }
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<button class="toggle" id="themeBtn" aria-label="Toggle colour theme">◐ theme</button>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="crest"><span class="dot"></span>London Brookes College · Full-Stack</div>
+    <h1 class="title">Staff Hub <span class="thin">— attendance, leave &amp; registers</span></h1>
+    <p class="lede">A connected staff system: a phone-framed staff app with its own sign-in, and an admin dashboard with one handling page per feature — wired together by a real database, JWT auth and role-based access.</p>
+
+    <div class="oneliner">
+      <b>React&nbsp;(Vite)</b><span class="arw">→</span> REST/JSON over fetch <span class="arw">→</span> <b>Express</b> + JWT&nbsp;+&nbsp;RBAC <span class="arw">→</span> <b>Prisma</b> <span class="arw">→</span> <b>SQLite</b>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat"><div class="n">2</div><div class="l">Workspaces</div></div>
+      <div class="stat"><div class="n">10</div><div class="l">API route groups</div></div>
+      <div class="stat"><div class="n">13</div><div class="l">Data models</div></div>
+      <div class="stat"><div class="n">4000<span style="color:var(--ink-faint)">/</span>5173</div><div class="l">API / client ports</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ARCHITECTURE -->
+<section id="architecture">
+  <div class="wrap">
+    <p class="eyebrow">How it fits together</p>
+    <h2>Architecture at a glance</h2>
+    <p class="sub">Every action hits the API and writes to the database, then the client refetches — so the staff app and the admin dashboard stay in sync. Data flows left to right; cross-cutting services sit beside the request path.</p>
+
+    <div class="arch-scroll">
+      <div class="arch">
+        <div class="layer">
+          <div class="node">
+            <span class="badge b-client">CLIENT</span>
+            <div class="cap">client/ · browser + mobile</div>
+            <h3>React 18 + Vite 6</h3>
+            <ul>
+              <li>Staff app &amp; admin dashboard</li>
+              <li>Tailwind · lucide · Recharts</li>
+              <li>Capacitor iOS / Android shell</li>
+              <li>JWT held in localStorage</li>
+            </ul>
+          </div>
+        </div>
+        <div class="layer">
+          <div class="node">
+            <span class="badge b-api">API</span>
+            <div class="cap">server/src · :4000/api</div>
+            <h3>Express 4</h3>
+            <ul>
+              <li>requireAuth / requireAdmin</li>
+              <li>Role-based access per route</li>
+              <li>Rate-limited login &amp; reset</li>
+              <li>Smart 400 / 413 / 500 errors</li>
+            </ul>
+          </div>
+        </div>
+        <div class="layer">
+          <div class="node">
+            <span class="badge b-orm">ORM</span>
+            <div class="cap">Prisma 5 client</div>
+            <h3>Prisma</h3>
+            <ul>
+              <li>Type-safe query layer</li>
+              <li>Single shared client (db.js)</li>
+              <li>Serializers strip secrets</li>
+              <li>Swap to Postgres in 1 line</li>
+            </ul>
+          </div>
+        </div>
+        <div class="layer">
+          <div class="node">
+            <span class="badge b-db">DATA</span>
+            <div class="cap">server/prisma/dev.db</div>
+            <h3>SQLite</h3>
+            <ul>
+              <li>Single-file database</li>
+              <li>Zero external services</li>
+              <li>Seeded demo data</li>
+              <li>Browse via Prisma Studio</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="crosscut">
+      <span class="lbl">Cross-cutting</span>
+      <span class="chip"><b>TOTP</b> two-factor · RFC 6238, no deps</span>
+      <span class="chip"><b>bcrypt</b> password hashing</span>
+      <span class="chip"><b>nodemailer</b> SMTP · Ethereal test box</span>
+      <span class="chip"><b>FCM</b> push · console stub</span>
+      <span class="chip"><b>notify</b> DB + email + push fan-out</span>
+    </div>
+  </div>
+</section>
+
+<!-- TECH STACK -->
+<section id="stack">
+  <div class="wrap">
+    <p class="eyebrow">What it's built with</p>
+    <h2>Tech stack</h2>
+    <p class="sub">A full-stack JavaScript monorepo managed with npm workspaces — one install drives both halves; <code class="inline">concurrently</code> runs them together.</p>
+    <div class="grid g-stack">
+      <div class="card">
+        <div class="tag">Frontend · client/</div>
+        <h3><span class="swatch" style="background:var(--violet)"></span>What you see</h3>
+        <div class="kv">
+          <div class="row"><span class="k">Framework</span><span class="v">React 18</span></div>
+          <div class="row"><span class="k">Build / dev server</span><span class="v">Vite 6</span></div>
+          <div class="row"><span class="k">Styling</span><span class="v">Tailwind CSS</span></div>
+          <div class="row"><span class="k">Icons / charts</span><span class="v">lucide · Recharts</span></div>
+          <div class="row"><span class="k">Mobile</span><span class="v">Capacitor</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="tag">Backend · server/</div>
+        <h3><span class="swatch" style="background:var(--brass)"></span>The logic</h3>
+        <div class="kv">
+          <div class="row"><span class="k">Runtime</span><span class="v">Node.js</span></div>
+          <div class="row"><span class="k">Web framework</span><span class="v">Express 4</span></div>
+          <div class="row"><span class="k">Auth</span><span class="v">JWT (7-day)</span></div>
+          <div class="row"><span class="k">Password hashing</span><span class="v">bcrypt</span></div>
+          <div class="row"><span class="k">Two-factor</span><span class="v">TOTP (crypto)</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="tag">Data</div>
+        <h3><span class="swatch" style="background:var(--rose)"></span>Where it's stored</h3>
+        <div class="kv">
+          <div class="row"><span class="k">Database</span><span class="v">SQLite</span></div>
+          <div class="row"><span class="k">ORM</span><span class="v">Prisma 5</span></div>
+          <div class="row"><span class="k">Production swap</span><span class="v">PostgreSQL</span></div>
+          <div class="row"><span class="k">Email</span><span class="v">nodemailer</span></div>
+          <div class="row"><span class="k">Push</span><span class="v">Firebase FCM</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="tag">Tooling</div>
+        <h3><span class="swatch" style="background:var(--teal)"></span>Glue</h3>
+        <div class="kv">
+          <div class="row"><span class="k">Monorepo</span><span class="v">npm workspaces</span></div>
+          <div class="row"><span class="k">Run together</span><span class="v">concurrently</span></div>
+          <div class="row"><span class="k">DB browser</span><span class="v">Prisma Studio</span></div>
+          <div class="row"><span class="k">Scripts</span><span class="v">setup · seed · smoke</span></div>
+          <div class="row"><span class="k">Dev reload</span><span class="v">node --watch</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES / ROUTES -->
+<section id="features">
+  <div class="wrap">
+    <p class="eyebrow">What it does</p>
+    <h2>Features &amp; API route groups</h2>
+    <p class="sub">Ten routers mount under <code class="inline">/api/*</code>. Reads need a valid session; every mutation is gated by role server-side.</p>
+    <div class="grid g-feat">
+      <div class="card feat">
+        <h3><span class="mono">/auth</span> Identity</h3>
+        <p>Sign-in, sessions &amp; account security.</p>
+        <ul>
+          <li>Login with per-IP+email rate limiting</li>
+          <li>TOTP set-up / enable / verify / disable</li>
+          <li>Forgot &amp; reset password (hashed, single-use)</li>
+          <li>Change password · self-service deletion</li>
+        </ul>
+      </div>
+      <div class="card feat">
+        <h3><span class="mono">/signup</span> · <span class="mono">/staff</span> People</h3>
+        <p>Two ways an account is created.</p>
+        <ul>
+          <li>In-app sign-up → admin approval queue</li>
+          <li>Admin adds staff → email invite link</li>
+          <li>Reduced public shape for non-admins</li>
+          <li>Admin 2FA reset · resend invite</li>
+        </ul>
+      </div>
+      <div class="card feat">
+        <h3><span class="mono">/checkins</span> · <span class="mono">/leave</span> Attendance</h3>
+        <p>Daily attendance &amp; time off.</p>
+        <ul>
+          <li>Check-in / check-out · daily summary</li>
+          <li>Leave requests (staff)</li>
+          <li>Approve / decline (admin)</li>
+          <li>Balance updates flow back to staff</li>
+        </ul>
+      </div>
+      <div class="card feat">
+        <h3><span class="mono">/adjustments</span> · <span class="mono">/documents</span></h3>
+        <p>Allowances &amp; shared files.</p>
+        <ul>
+          <li>Manual allowance adjustments (days)</li>
+          <li>Org-wide or personal documents</li>
+          <li>Admin upload / delete</li>
+          <li>Derived balances on the client</li>
+        </ul>
+      </div>
+      <div class="card feat">
+        <h3><span class="mono">/notifications</span> · <span class="mono">/devices</span></h3>
+        <p>The bell &amp; push.</p>
+        <ul>
+          <li>DB-backed per-user notifications</li>
+          <li>Mark read · clear</li>
+          <li>Register / unregister FCM tokens</li>
+          <li>Admins told of requests; staff of decisions</li>
+        </ul>
+      </div>
+      <div class="card feat">
+        <h3><span class="mono">/hnd</span> Registers</h3>
+        <p>HND student attendance registers.</p>
+        <ul>
+          <li>Semesters · modules · students · enrolments</li>
+          <li>Timetabled sessions, mark P / L / E / A</li>
+          <li>Percentages per module &amp; overall</li>
+          <li>CSV export throughout</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DATA MODEL -->
+<section id="models">
+  <div class="wrap">
+    <p class="eyebrow">The database</p>
+    <h2>Prisma data models</h2>
+    <p class="sub">Thirteen models in <code class="inline">schema.prisma</code>. <span class="rel">Green</span> notes key relations; HND registers cascade-delete from their parents.</p>
+    <div class="models">
+      <div class="model"><div class="hd"><span class="d" style="background:var(--brass)"></span>Staff</div><div class="bd">Login identity · <code>accountRole</code> ADMIN/STAFF, allowance, TOTP fields, <code>tokenVersion</code>. <span class="rel">has many</span> CheckIn, Leave, Adjustment, Notification.</div></div>
+      <div class="model"><div class="hd"><span class="d" style="background:var(--violet)"></span>SignupRequest</div><div class="bd">Pending applicant, separate from Staff until an admin approves.</div></div>
+      <div class="model"><div class="hd"><span class="d" style="background:var(--violet)"></span>PasswordReset</div><div class="bd">Hashed single-use token · <code>purpose</code> reset (30m) or invite (7d).</div></div>
+      <div class="model"><div class="hd"><span class="d" style="background:var(--rose)"></span>DeviceToken</div><div class="bd">FCM push token per device · <span class="rel">belongs to</span> Staff.</div></div>
+      <div class="model"><div class="hd"><span class="d" style="background:var(--teal)"></span>CheckIn</div><div class="bd">Daily attendance · <code>unique(staffId, date)</code>.</div></div>
+      <div class="model"><div class="hd"><span class="d" style="background:var(--teal)"></span>Leave</div><div class="bd">Request · type / status / day count.</div></div>
+      <div class="model"><div class="hd"><span class="d" style="background:var(--teal)"></span>Adjustment</div><div class="bd">Manual allowance change, in days.</div></div>
+      <div class="model"><div class="hd"><span class="d" style="background:var(--teal)"></span>Document</div><div class="bd">Org-wide or personal file · optional <code>assignedTo</code>.</div></div>
+      <div class="model"><div class="hd"><span class="d" style="background:var(--brass)"></span>Notification</div><div class="bd">Persisted per-user, survives reload.</div></div>
+      <div class="model"><div class="hd"><span class="d" style="background:var(--rose)"></span>Semester</div><div class="bd">Non-overlapping date range · scopes HND %.</div></div>
+      <div class="model"><div class="hd"><span class="d" style="background:var(--rose)"></span>HndModule · Student</div><div class="bd"><span class="rel">joined by</span> Enrolment (unique pair).</div></div>
+      <div class="model"><div class="hd"><span class="d" style="background:var(--rose)"></span>HndSession</div><div class="bd">Timetabled class · dated into a semester.</div></div>
+      <div class="model"><div class="hd"><span class="d" style="background:var(--rose)"></span>AttendanceMark</div><div class="bd">P / L / E / A per session+student · unique pair.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- SECURITY -->
+<section id="security">
+  <div class="wrap">
+    <p class="eyebrow">Built-in from the start</p>
+    <h2>Security model</h2>
+    <p class="sub">Enforced server-side — the client can't grant itself anything the API won't.</p>
+    <div class="sec-grid">
+      <div class="sec"><div class="ico">2FA</div><div><h4>TOTP two-factor</h4><p>RFC 6238 on Node crypto — works offline, no third-party cost.</p></div></div>
+      <div class="sec"><div class="ico">#</div><div><h4>bcrypt hashing</h4><p>Cost 10 · password hashes never leave the API.</p></div></div>
+      <div class="sec"><div class="ico">JWT</div><div><h4>Revocable sessions</h4><p><code style="font-family:var(--font-mono)">tokenVersion</code> bumps on reset — old tokens die instantly.</p></div></div>
+      <div class="sec"><div class="ico">RL</div><div><h4>Rate limiting</h4><p>Login &amp; reset locked after repeated attempts (HTTP 429).</p></div></div>
+      <div class="sec"><div class="ico">✓</div><div><h4>Admin-approved sign-up</h4><p>No account exists until an admin approves the request.</p></div></div>
+      <div class="sec"><div class="ico">↺</div><div><h4>Hashed reset links</h4><p>Single-use, 30-min, revokes sessions on every device.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- RUN IT -->
+<section id="run">
+  <div class="wrap">
+    <p class="eyebrow">It's running right now</p>
+    <h2>Run it &amp; sign in</h2>
+    <p class="sub">Dependencies are installed, the Prisma client is generated and the database is seeded — one command starts both halves together.</p>
+    <div class="run">
+      <div class="terminal" aria-label="terminal">
+        <div class="bar"><i></i><i></i><i></i></div>
+<pre><span class="cmt"># from the project root (one command)</span>
+<span class="cmd">npm run dev</span>
+
+<span class="cmt"># first time only, if needed:</span>
+<span class="cmt">#   npm install   &amp;&amp;   npm run setup</span>
+
+[SERVER] <span class="ok">API running on</span> <span class="url">http://localhost:4000</span>
+[SERVER] Email: SMTP via smtp.ethereal.email:587
+[SERVER] Push:  console stub
+[CLIENT] <span class="ok">VITE ready</span> ➜ <span class="url">http://localhost:5173</span>
+</pre>
+      </div>
+      <div class="accounts">
+        <div class="card">
+          <div class="tag">Seeded logins · password <code class="inline">password123</code></div>
+          <table class="acct">
+            <thead><tr><th>Role</th><th>Email</th></tr></thead>
+            <tbody>
+              <tr><td><span class="pill admin">ADMIN</span></td><td><code class="inline">admin@lbc.ac.uk</code></td></tr>
+              <tr><td><span class="pill staff">STAFF</span></td><td><code class="inline">j.whitfield@lbc.ac.uk</code></td></tr>
+              <tr><td><span class="pill staff">STAFF</span></td><td><code class="inline">a.rahman@lbc.ac.uk</code></td></tr>
+              <tr><td><span class="pill staff">STAFF</span></td><td><code class="inline">d.okoye@lbc.ac.uk</code></td></tr>
+              <tr><td><span class="pill staff">STAFF</span></td><td><code class="inline">s.marin@lbc.ac.uk</code>, <code class="inline">p.nair@lbc.ac.uk</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="note"><b>Open →</b> <a href="http://localhost:5173" style="color:var(--brass);font-weight:700">http://localhost:5173</a>. The admin account has a <b>VIEW MODE</b> toggle to switch between the Staff App and the Admin Dashboard. Reset / invite emails are captured — look for the <code class="inline">preview:</code> link in the server console.</div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">London Brookes College — Staff Hub · React (Vite) + Express + Prisma + SQLite · overview generated for local review</div>
+</footer>
+
+<script>
+  (function(){
+    var btn=document.getElementById('themeBtn');
+    var root=document.documentElement;
+    function current(){
+      var set=root.getAttribute('data-theme');
+      if(set) return set;
+      return window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+    }
+    btn.addEventListener('click',function(){
+      var next=current()==='dark'?'light':'dark';
+      root.setAttribute('data-theme',next);
+    });
+  })();
+</script>
+</body>
+</html>

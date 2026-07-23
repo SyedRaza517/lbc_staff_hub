@@ -1,0 +1,70 @@
+// Convert DB rows -> the shape the React client expects.
+// NOTE: totpSecret is deliberately absent — only the enrolment endpoint ever
+// returns it, and only to the person enrolling.
+const sStaff = (s) => ({
+  id: s.id, name: s.name, role: s.jobTitle, dept: s.dept, email: s.email,
+  allowance: s.allowance, initials: s.initials, colour: s.colour, accountRole: s.accountRole,
+  mustChangePassword: s.mustChangePassword ?? false,
+  totpEnabled: s.totpEnabled ?? false,
+  totpRequired: s.mustSetupTotp ?? false,
+  // True while an admin-created account is waiting for the person to set their
+  // own password from the invitation email. Such an account cannot be signed into.
+  pendingActivation: s.pendingActivation ?? false,
+});
+
+const sSignup = (r) => ({
+  id: r.id, name: r.name, email: r.email, role: r.jobTitle, dept: r.dept,
+  status: r.status, note: r.note, decidedBy: r.decidedBy, decidedAt: r.decidedAt,
+  requestedAt: r.createdAt,
+});
+const sNotification = (n) => ({ id: n.id, type: n.type, message: n.message, link: n.link, read: n.read, at: n.createdAt });
+const sCheckin = (c) => ({ id: c.id, staffId: c.staffId, date: c.date, in: c.timeIn, out: c.timeOut, summary: c.summary });
+const sLeave = (l) => ({
+  id: l.id, staffId: l.staffId, type: l.type, start: l.start, end: l.end, days: l.days, reason: l.reason,
+  status: l.status, requestedAt: l.requestedAt, decidedBy: l.decidedBy, decidedAt: l.decidedAt, note: l.note,
+});
+const sDoc = (d) => ({ id: d.id, name: d.name, type: d.type, date: d.date, scope: d.scope, assignedTo: d.assignedToId });
+const sAdj = (a) => ({ id: a.id, staffId: a.staffId, days: a.days, note: a.note, date: a.date });
+
+/* ---------- HND attendance registers ---------- */
+const sSemester = (s) => ({ id: s.id, name: s.name, start: s.start, end: s.end });
+const sProgramme = (p) => ({
+  id: p.id, name: p.name, colour: p.colour,
+  ...(p._count ? { moduleCount: p._count.modules } : {}),
+});
+const sModule = (m) => ({
+  id: m.id, code: m.code, name: m.name, tutor: m.tutor, programmeId: m.programmeId ?? null,
+  // Present only when the query asked Prisma to count relations.
+  ...(m._count ? { sessionCount: m._count.sessions, studentCount: m._count.enrolments } : {}),
+});
+const sStudent = (s) => ({
+  id: s.id, firstName: s.firstName, lastName: s.lastName, name: `${s.firstName} ${s.lastName}`,
+  studentRef: s.studentRef, email: s.email, initials: s.initials, colour: s.colour, active: s.active,
+  ...(s.enrolments ? { moduleIds: s.enrolments.map((e) => e.moduleId) } : {}),
+});
+const sSession = (x) => ({
+  id: x.id, moduleId: x.moduleId, date: x.date, start: x.startTime, end: x.endTime,
+  description: x.description, audience: x.audience,
+  ...(x._count ? { markedCount: x._count.marks } : {}),
+});
+const sMark = (m) => ({ id: m.id, sessionId: m.sessionId, studentId: m.studentId, status: m.status, remark: m.remark, takenBy: m.takenBy, takenAt: m.takenAt });
+const sInteraction = (i) => ({
+  id: i.id, studentId: i.studentId, date: i.date, time: i.time, queryType: i.queryType,
+  summary: i.summary, followUpActions: i.followUpActions, followUpRequired: i.followUpRequired,
+  tutor: i.tutor, loggedBy: i.loggedBy, createdAt: i.createdAt,
+  // When the query includes the student, surface the fields the log table shows.
+  ...(i.student ? { student: { id: i.student.id, name: `${i.student.firstName} ${i.student.lastName}`, studentRef: i.student.studentRef, initials: i.student.initials, colour: i.student.colour } } : {}),
+});
+
+const sAssessment = (a) => ({
+  id: a.id, moduleId: a.moduleId, title: a.title, type: a.type, maxMarks: a.maxMarks,
+  weight: a.weight, dueDate: a.dueDate, createdAt: a.createdAt,
+  ...(a._count ? { gradedCount: a._count.grades } : {}),
+  ...(a.module ? { moduleCode: a.module.code, moduleName: a.module.name } : {}),
+});
+const sGrade = (g) => ({
+  id: g.id, assessmentId: g.assessmentId, studentId: g.studentId, marks: g.marks,
+  feedback: g.feedback, gradedBy: g.gradedBy, gradedAt: g.gradedAt,
+});
+
+module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sProgramme, sModule, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade };
