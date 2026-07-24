@@ -33,7 +33,10 @@ async function request(path, { method = "GET", body } = {}) {
   const headers = { "Content-Type": "application/json" };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  // cache:"no-store" — never serve a cached response. Without this, a mobile
+  // WebView can return stale data after a mutation's refetch, so the UI only
+  // updates on a manual reload. This forces every request to hit the network.
+  const res = await fetch(BASE + path, { method, headers, cache: "no-store", body: body ? JSON.stringify(body) : undefined });
   if (res.status === 401) {
     setToken(null);
     // Signal the app to drop the user and show <Login>, rather than leaving a

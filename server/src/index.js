@@ -3,6 +3,9 @@ const express = require("express");
 const cors = require("cors");
 
 const app = express();
+// No ETags on API responses — combined with Cache-Control: no-store this removes
+// any conditional-request/304 path, so clients always get fresh JSON.
+app.set("etag", false);
 
 // --- Security headers on every response (lightweight, no dependency) ---
 app.use((_req, res, next) => {

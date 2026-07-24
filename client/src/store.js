@@ -87,6 +87,30 @@ export function useApiStore(notify, user) {
     setAssessmentsLoaded(true);
   }, [notify]);
 
+  // Keep the UI fresh without a manual reload: refetch whenever the app/tab
+  // regains focus (e.g. returning to the mobile app) and on a light interval
+  // while visible. Only the collections already loaded are refetched, so it's
+  // cheap. This backstops the after-each-mutation refetch and shows changes
+  // made on another device too.
+  useEffect(() => {
+    if (!user) return;
+    const refetch = () => {
+      refresh();
+      if (hndLoaded) refreshHnd();
+      if (interactionsLoaded) refreshInteractions();
+      if (assessmentsLoaded) refreshAssessments();
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") refetch(); };
+    window.addEventListener("focus", refetch);
+    document.addEventListener("visibilitychange", onVisible);
+    const id = setInterval(() => { if (document.visibilityState === "visible") refetch(); }, 15000);
+    return () => {
+      window.removeEventListener("focus", refetch);
+      document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(id);
+    };
+  }, [user, refresh, refreshHnd, refreshInteractions, refreshAssessments, hndLoaded, interactionsLoaded, assessmentsLoaded]);
+
   // wrap an action so errors surface as toasts and the relevant data refetches
   const run = (fn, okMsg, okType = "success") => async (...args) => {
     try { const r = await fn(...args); await refresh(); if (okMsg) notify?.(typeof okMsg === "function" ? okMsg(...args) : okMsg, okType); return r; }
