@@ -1,0 +1,71 @@
+# Codemagic CI config — builds the iOS app in the cloud (no Mac needed) and
+# uploads it to TestFlight / App Store Connect.
+#
+# ONE-TIME SETUP in the Codemagic UI (do this AFTER your Apple Developer account
+# is approved and you've created the app in App Store Connect):
+#   1. Sign in at codemagic.io with GitHub, add the repo "SyedRaza517/lbc_staff_hub".
+#   2. Team → Integrations → App Store Connect → connect an API key
+#      (App Store Connect → Users and Access → Integrations → generate an API key,
+#       role "App Manager"; download the .p8, note the Key ID + Issuer ID).
+#      Give the integration a NAME and put that same name below in
+#      `app_store_connect: <NAME>` under integrations.
+#   3. App Store Connect → create the app (bundle ID uk.ac.lbc.staffhub) — this
+#      gives you the numeric "Apple ID" for the app. Put it in APP_STORE_APPLE_ID.
+#   4. Push this file, then in Codemagic run the "ios-release" workflow.
+#
+# Nothing here needs a Mac — Codemagic provides the macOS build machine.
+
+workflows:
+  ios-release:
+    name: iOS App Store release
+    instance_type: mac_mini_m2      # Codemagic's macOS build machine
+    max_build_duration: 60
+    integrations:
+      app_store_connect: CodemagicAppStoreKey   # <-- rename to YOUR integration name from step 2
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: uk.ac.lbc.staffhub
+      vars:
+        XCODE_SCHEME: "App"
+        BUNDLE_ID: "uk.ac.lbc.staffhub"
+        # Numeric Apple ID of the app from App Store Connect (step 3). Until you
+        # have it, the "increment build number" step below will fail — set it first.
+        APP_STORE_APPLE_ID: 0000000000
+      node: 20
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install JS dependencies (monorepo root)
+        script: npm ci
+      - name: Build web assets (production → Render API)
+        script: |
+          cd client
+          npm run build
+      - name: Sync Capacitor iOS project
+        script: |
+          cd client
+          npx cap sync ios
+      - name: Set up code signing
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: Set build number from latest TestFlight
+        script: |
+          cd client/ios/App
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" || echo 0)
+          agvtool new-version -all $(($LATEST + 1))
+      - name: Build .ipa
+        script: |
+          cd client/ios/App
+          xcode-project build-ipa --workspace "App.xcworkspace" --scheme "$XCODE_SCHEME"
+    artifacts:
+      - client/ios/App/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true      # lands in TestFlight for internal testers
+        # submit_to_app_store: false    # flip to true later to push to App Store review
