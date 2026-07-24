@@ -1263,9 +1263,11 @@ function AdminTimesheets({ store }) {
       } />
 
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="Total hours" value={`${fmtHours(totalMin)}h`} sub={`${monthLabel(month)}`} Icon={Clock3} tone={NAVY} delay={0} animate />
-        <StatCard label="On campus" value={`${fmtHours(campusMin)}h`} sub="in person" Icon={Building2} tone="#1a3a8f" delay={60} animate />
-        <StatCard label="Online" value={`${fmtHours(onlineMin)}h`} sub="remote" Icon={Wifi} tone="#0d7a5f" delay={120} animate />
+        {/* No `animate` on these — the count-up animation does Number(value), which
+            is NaN for a string like "9.1h". animate stays only on numeric cards. */}
+        <StatCard label="Total hours" value={`${fmtHours(totalMin)}h`} sub={`${monthLabel(month)}`} Icon={Clock3} tone={NAVY} delay={0} />
+        <StatCard label="On campus" value={`${fmtHours(campusMin)}h`} sub="in person" Icon={Building2} tone="#1a3a8f" delay={60} />
+        <StatCard label="Online" value={`${fmtHours(onlineMin)}h`} sub="remote" Icon={Wifi} tone="#0d7a5f" delay={120} />
         <StatCard label="Staff sent" value={people.length} sub="timesheets" Icon={Users} tone="#b45309" delay={180} animate />
       </div>
 
