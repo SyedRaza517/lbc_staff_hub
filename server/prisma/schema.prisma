@@ -376,8 +376,14 @@ model TimesheetEntry {
   title       String   // what it was, e.g. "Unit 4 — Database Design (Group A)"
   moduleId    String?  // optional free link to an HND module (no FK: keeps it flexible)
   note        String   @default("")
-  status      String   @default("draft")  // draft | submitted
+  // Approval workflow: draft → submitted → (finance) approved | changes_requested.
+  // "changes_requested" bounces the month back to the staff member with reviewNote
+  // explaining what to fix; they edit and re-send, returning it to "submitted".
+  status      String   @default("draft")  // draft | submitted | approved | changes_requested
   submittedAt String?  // YYYY-MM-DD when the month was sent
+  reviewNote  String?  // finance team's comment when requesting changes (or on approval)
+  reviewedBy  String?  // name of the finance/admin reviewer
+  reviewedAt  String?  // YYYY-MM-DD of the review decision
   createdAt   DateTime @default(now())
 
   @@index([staffId, date])

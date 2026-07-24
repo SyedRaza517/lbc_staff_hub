@@ -161,4 +161,5 @@ export const api = {
   updateTimesheet: (id, data) => request(`/timesheets/${id}`, { method: "PUT", body: data }),
   removeTimesheet: (id) => request(`/timesheets/${id}`, { method: "DELETE" }),
   submitTimesheet: (month) => request("/timesheets/submit", { method: "POST", body: { month } }),
+  reviewTimesheet: (staffId, month, decision, note) => request("/timesheets/review", { method: "POST", body: { staffId, month, decision, note } }),
 };

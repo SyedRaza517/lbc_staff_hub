@@ -10,7 +10,7 @@ const router = require("express").Router();
 const prisma = require("../db");
 const { sTimesheet } = require("../serializers");
 const { requireAuth, requireAdmin } = require("../auth");
-const { notifyAdmins } = require("../notify");
+const { notifyAdmins, notifyStaff } = require("../notify");
 const { localDate } = require("../clock");
 
 const VALID_MODES = ["campus", "online"];
@@ -62,8 +62,10 @@ router.get("/", requireAuth, async (req, res) => {
   }
   if (isAdmin) {
     if (req.query.staffId) where.staffId = String(req.query.staffId);
-    // Admins listing everyone only care about submitted timesheets (not others' drafts).
-    if (!req.query.staffId && !req.query.all) where.status = "submitted";
+    // The finance review screen shows everything that has left "draft" — pending
+    // (submitted), approved, and bounced-back (changes_requested) — so both the
+    // approval queue and the history are visible. It never shows private drafts.
+    if (!req.query.staffId && !req.query.all) where.status = { in: ["submitted", "approved", "changes_requested"] };
   } else {
     where.staffId = req.user.id; // staff: always scoped to self
   }
@@ -92,7 +94,9 @@ router.put("/:id", requireAuth, async (req, res) => {
   if (!existing) return res.status(404).json({ error: "Entry not found" });
   const isAdmin = req.user.accountRole === "ADMIN";
   if (existing.staffId !== req.user.id && !isAdmin) return res.status(403).json({ error: "Forbidden" });
-  if (existing.status === "submitted" && !isAdmin) return res.status(409).json({ error: "This timesheet has already been sent and can't be edited" });
+  // Editable only while the owner still holds it: a fresh draft, or a month bounced
+  // back with "changes_requested". Once submitted or approved it is locked.
+  if (!isAdmin && !["draft", "changes_requested"].includes(existing.status)) return res.status(409).json({ error: "This timesheet has been sent and can't be edited until it's reviewed" });
   const parsed = parseBody(req.body);
   if (parsed.error) return res.status(400).json({ error: parsed.error });
   const rec = await prisma.timesheetEntry.update({ where: { id: existing.id }, data: parsed.data });
@@ -105,7 +109,7 @@ router.delete("/:id", requireAuth, async (req, res) => {
   if (!existing) return res.status(404).json({ error: "Entry not found" });
   const isAdmin = req.user.accountRole === "ADMIN";
   if (existing.staffId !== req.user.id && !isAdmin) return res.status(403).json({ error: "Forbidden" });
-  if (existing.status === "submitted" && !isAdmin) return res.status(409).json({ error: "This timesheet has already been sent and can't be changed" });
+  if (!isAdmin && !["draft", "changes_requested"].includes(existing.status)) return res.status(409).json({ error: "This timesheet has been sent and can't be changed until it's reviewed" });
   await prisma.timesheetEntry.delete({ where: { id: existing.id } });
   res.json({ ok: true });
 });
@@ -116,14 +120,48 @@ router.delete("/:id", requireAuth, async (req, res) => {
 router.post("/submit", requireAuth, async (req, res) => {
   const { month } = req.body || {};
   if (!isMonth(month)) return res.status(400).json({ error: "month must be YYYY-MM" });
-  const where = { staffId: req.user.id, date: { startsWith: month }, status: "draft" };
+  // Send everything the staff member still holds: fresh drafts AND any month that was
+  // bounced back for changes. Clearing the review fields resets it for a fresh look.
+  const where = { staffId: req.user.id, date: { startsWith: month }, status: { in: ["draft", "changes_requested"] } };
   const drafts = await prisma.timesheetEntry.findMany({ where });
   if (drafts.length === 0) return res.status(400).json({ error: "There are no timesheet entries to send for that month" });
-  await prisma.timesheetEntry.updateMany({ where, data: { status: "submitted", submittedAt: localDate() } });
+  await prisma.timesheetEntry.updateMany({ where, data: { status: "submitted", submittedAt: localDate(), reviewNote: null, reviewedBy: null, reviewedAt: null } });
   const totalMinutes = drafts.reduce((s, d) => s + d.minutes, 0);
   const hours = Math.round((totalMinutes / 60) * 10) / 10;
-  notifyAdmins({ type: "info", message: `${req.user.name} sent their timesheet for ${month} — ${drafts.length} sessions, ${hours}h`, link: "timesheets" });
+  notifyAdmins({ type: "info", message: `${req.user.name} sent their timesheet for ${month} — ${drafts.length} sessions, ${hours}h — awaiting approval`, link: "timesheets" });
   res.json({ ok: true, month, sent: drafts.length, totalMinutes, hours });
+});
+
+// POST /api/timesheets/review  { staffId, month, decision: "approved"|"changes_requested", note }
+// Finance/admin decision on a staff member's monthly timesheet. Approving locks the
+// month as approved; requesting changes bounces every entry back to the staff member
+// with a required comment so they can fix and re-send. Acts only on entries that are
+// currently "submitted" (awaiting review).
+router.post("/review", requireAuth, requireAdmin, async (req, res) => {
+  const { staffId, month, decision, note } = req.body || {};
+  if (!staffId || typeof staffId !== "string") return res.status(400).json({ error: "staffId is required" });
+  if (!isMonth(month)) return res.status(400).json({ error: "month must be YYYY-MM" });
+  if (!["approved", "changes_requested"].includes(decision)) return res.status(400).json({ error: "decision must be 'approved' or 'changes_requested'" });
+  if (note != null && typeof note !== "string") return res.status(400).json({ error: "note must be text" });
+  if (note && note.length > 2000) return res.status(400).json({ error: "note is too long (2000 characters maximum)" });
+  if (decision === "changes_requested" && !(note && note.trim())) return res.status(400).json({ error: "Add a comment explaining what needs changing" });
+
+  const staff = await prisma.staff.findUnique({ where: { id: staffId } });
+  if (!staff) return res.status(404).json({ error: "Unknown staff member" });
+
+  const where = { staffId, date: { startsWith: month }, status: "submitted" };
+  const pending = await prisma.timesheetEntry.count({ where });
+  if (pending === 0) return res.status(400).json({ error: "There is no submitted timesheet awaiting review for that month" });
+
+  const newStatus = decision === "approved" ? "approved" : "changes_requested";
+  await prisma.timesheetEntry.updateMany({ where, data: { status: newStatus, reviewNote: note ? note.trim() : null, reviewedBy: req.user.name, reviewedAt: localDate() } });
+
+  const monthName = new Date(month + "-01T00:00:00Z").toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+  notifyStaff(staffId, decision === "approved"
+    ? { type: "success", message: `Your ${monthName} timesheet was approved.`, link: "timesheet" }
+    : { type: "error", message: `Your ${monthName} timesheet needs changes: "${note.trim()}"`, link: "timesheet" });
+
+  res.json({ ok: true, staffId, month, decision, reviewed: pending });
 });
 
 module.exports = router;

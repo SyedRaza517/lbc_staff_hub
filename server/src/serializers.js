@@ -73,6 +73,7 @@ const sTimesheet = (t) => ({
   minutes: t.minutes, hours: Math.round((t.minutes / 60) * 100) / 100,
   mode: t.mode, title: t.title, moduleId: t.moduleId ?? null, note: t.note,
   status: t.status, submittedAt: t.submittedAt, createdAt: t.createdAt,
+  reviewNote: t.reviewNote ?? null, reviewedBy: t.reviewedBy ?? null, reviewedAt: t.reviewedAt ?? null,
   ...(t.staff ? { staffName: t.staff.name, staffDept: t.staff.dept, staffInitials: t.staff.initials, staffColour: t.staff.colour } : {}),
 });
 

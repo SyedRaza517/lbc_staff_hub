@@ -228,6 +228,7 @@ export function useApiStore(notify, user) {
     updateTimesheet: runTs((id, data) => api.updateTimesheet(id, data), "Entry updated"),
     removeTimesheet: runTs((id) => api.removeTimesheet(id), "Entry removed", "info"),
     submitTimesheet: runTs((month) => api.submitTimesheet(month), (month, r) => `Timesheet sent — ${r.sent} session${r.sent === 1 ? "" : "s"}, ${r.hours}h`),
+    reviewTimesheet: runTs((staffId, month, decision, note) => api.reviewTimesheet(staffId, month, decision, note), (staffId, month, decision) => decision === "approved" ? "Timesheet approved — staff notified" : "Changes requested — staff notified", "info"),
   };
 
   return {

@@ -967,8 +967,16 @@ function TimesheetScreen({ store, me }) {
   const totalMin = list.reduce((s, e) => s + e.minutes, 0);
   const campusMin = list.filter(e => e.mode === "campus").reduce((s, e) => s + e.minutes, 0);
   const onlineMin = list.filter(e => e.mode === "online").reduce((s, e) => s + e.minutes, 0);
-  const drafts = list.filter(e => e.status === "draft");
-  const isSent = list.length > 0 && drafts.length === 0;
+  // Entries the staff still holds and can send: fresh drafts + any bounced back.
+  const sendable = list.filter(e => e.status === "draft" || e.status === "changes_requested");
+  const hasApproved = list.some(e => e.status === "approved");
+  const hasSubmitted = list.some(e => e.status === "submitted");
+  const changesEntry = list.find(e => e.status === "changes_requested");
+  // The month's headline status, most-actionable first.
+  const monthStatus = changesEntry ? "changes"
+    : hasSubmitted ? "submitted"
+    : (hasApproved && sendable.length === 0) ? "approved"
+    : sendable.length > 0 ? "draft" : "none";
 
   const byDate = {};
   for (const e of list) (byDate[e.date] = byDate[e.date] || []).push(e);
@@ -996,8 +1004,20 @@ function TimesheetScreen({ store, me }) {
           <span className="flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold ring-1 ring-white/15"><Wifi size={12} /> Online {fmtHours(onlineMin)}h</span>
           <span className="ml-auto flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold ring-1 ring-white/15">{list.length} session{list.length === 1 ? "" : "s"}</span>
         </div>
-        {isSent && <span className="relative mt-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-400/90 px-2.5 py-1 text-[11px] font-bold text-emerald-950"><CheckCircle2 size={12} /> Sent for {monthLabel(month)}</span>}
+        {monthStatus === "submitted" && <span className="relative mt-3 inline-flex items-center gap-1.5 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-bold text-slate-700"><Clock size={12} /> Awaiting approval</span>}
+        {monthStatus === "approved" && <span className="relative mt-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-400/90 px-2.5 py-1 text-[11px] font-bold text-emerald-950"><CheckCircle2 size={12} /> Approved{list.find(e => e.status === "approved")?.reviewedBy ? ` by ${list.find(e => e.status === "approved").reviewedBy}` : ""}</span>}
+        {monthStatus === "changes" && <span className="relative mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-400/95 px-2.5 py-1 text-[11px] font-bold text-amber-950"><AlertCircle size={12} /> Changes requested</span>}
       </div>
+
+      {/* Finance feedback when the month was bounced back — shown prominently so the
+          staff member knows exactly what to fix before re-sending. */}
+      {monthStatus === "changes" && changesEntry?.reviewNote && (
+        <div className="mb-3 rounded-2xl bg-amber-50 p-3.5 ring-1 ring-amber-200">
+          <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-amber-700"><MessageSquare size={13} /> Note from the office{changesEntry.reviewedBy ? ` · ${changesEntry.reviewedBy}` : ""}</p>
+          <p className="mt-1 text-sm font-medium text-amber-900">{changesEntry.reviewNote}</p>
+          <p className="mt-1.5 text-[11px] text-amber-600">Fix the entries below, then send your timesheet again.</p>
+        </div>
+      )}
 
       <button onClick={() => setModal({})} className="press shine mb-3 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-white py-3 text-sm font-bold text-slate-600 transition hover:border-slate-400 hover:text-slate-800"><Plus size={16} /> Add a session</button>
 
@@ -1021,13 +1041,15 @@ function TimesheetScreen({ store, me }) {
                       <p className="truncate text-sm font-bold text-slate-700">{e.title}</p>
                       <p className="text-[11px] text-slate-400">{e.start}–{e.end} · {fmtHours(e.minutes)}h · {e.mode === "campus" ? "On campus" : "Online"}</p>
                     </div>
-                    {e.status === "draft" ? (
+                    {(e.status === "draft" || e.status === "changes_requested") ? (
                       <div className="flex shrink-0 gap-1">
                         <button onClick={() => setModal({ entry: e })} className="press flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button>
                         <button onClick={() => del(e.id)} className="press flex h-8 w-8 items-center justify-center rounded-lg text-rose-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 size={15} /></button>
                       </div>
+                    ) : e.status === "approved" ? (
+                      <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-600 ring-1 ring-emerald-200">Approved</span>
                     ) : (
-                      <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-600 ring-1 ring-emerald-200">Sent</span>
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500 ring-1 ring-slate-200">Sent</span>
                     )}
                   </div>
                 ))}
@@ -1037,10 +1059,10 @@ function TimesheetScreen({ store, me }) {
         })
       )}
 
-      {/* Send */}
-      {drafts.length > 0 && (
+      {/* Send / re-send */}
+      {sendable.length > 0 && (
         <button onClick={() => setConfirmSend(true)} className="press shine mt-2 flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-sm font-bold text-white shadow-lg" style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}>
-          <Send size={17} /> Send timesheet — {drafts.length} session{drafts.length === 1 ? "" : "s"}, {fmtHours(drafts.reduce((s, e) => s + e.minutes, 0))}h
+          <Send size={17} /> {monthStatus === "changes" ? "Re-send" : "Send"} timesheet — {sendable.length} session{sendable.length === 1 ? "" : "s"}, {fmtHours(sendable.reduce((s, e) => s + e.minutes, 0))}h
         </button>
       )}
 
@@ -1050,8 +1072,8 @@ function TimesheetScreen({ store, me }) {
 
       <Modal open={confirmSend} onClose={() => setConfirmSend(false)} title="Send this timesheet?">
         <div className="space-y-3">
-          <p className="text-sm text-slate-600">You're about to send your <b>{monthLabel(month)}</b> timesheet — <b>{drafts.length}</b> session{drafts.length === 1 ? "" : "s"}, <b>{fmtHours(drafts.reduce((s, e) => s + e.minutes, 0))} hours</b> — to the college office.</p>
-          <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 ring-1 ring-amber-200">Once sent, these entries are locked and can't be edited.</p>
+          <p className="text-sm text-slate-600">You're about to send your <b>{monthLabel(month)}</b> timesheet — <b>{sendable.length}</b> session{sendable.length === 1 ? "" : "s"}, <b>{fmtHours(sendable.reduce((s, e) => s + e.minutes, 0))} hours</b> — to the finance team for approval.</p>
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 ring-1 ring-amber-200">Once sent, these entries are locked until the finance team approves them or asks for changes.</p>
           <div className="flex gap-2">
             <button onClick={() => setConfirmSend(false)} className="flex-1 rounded-xl border-2 border-slate-200 py-2.5 text-sm font-bold text-slate-600">Not yet</button>
             <PrimaryBtn onClick={send} disabled={busy} className="flex-1">{busy ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Send now</>}</PrimaryBtn>
@@ -1230,18 +1252,31 @@ export function AdminDashboard({ store }) {
   );
 }
 
-/* ----- Admin: submitted timesheets ----- */
+/* ----- Admin / Finance: review & approve timesheets ----- */
+const TS_STATUS = {
+  pending:  { label: "Awaiting approval", cls: "bg-amber-50 text-amber-700 ring-amber-200",  I: Clock3 },
+  changes:  { label: "Changes requested", cls: "bg-rose-50 text-rose-600 ring-rose-200",     I: AlertCircle },
+  approved: { label: "Approved",          cls: "bg-emerald-50 text-emerald-600 ring-emerald-200", I: CheckCircle2 },
+};
+const groupStatus = (entries) => entries.some(e => e.status === "submitted") ? "pending"
+  : entries.some(e => e.status === "changes_requested") ? "changes" : "approved";
+
 function AdminTimesheets({ store }) {
   const [month, setMonth] = useState(() => monthOf(todayISO()));
   const [entries, setEntries] = useState(null);
   const [open, setOpen] = useState({});
+  const [reloadKey, setReloadKey] = useState(0);
+  const [reviewModal, setReviewModal] = useState(null); // { staffId, name } when requesting changes
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const reload = () => setReloadKey(k => k + 1);
 
   // Loading state only on a deliberate month switch — not on the background poll.
   useEffect(() => { setEntries(null); }, [month]);
-  // No staffId → admin gets everyone's SUBMITTED entries for the month. Refresh
-  // every 20s so newly-sent timesheets appear, swapping IN PLACE (no flicker to 0).
-  // `store` is intentionally not a dependency (fresh object each render → would
-  // refetch and blank the list constantly).
+  // No staffId → admin gets every non-draft entry for the month (submitted/approved/
+  // changes). Refresh every 20s so newly-sent timesheets appear, swapping IN PLACE
+  // (no flicker to 0). `store` is intentionally not a dependency (fresh object each
+  // render → would refetch and blank the list constantly).
   useEffect(() => {
     let cancelled = false;
     const fetchNow = () => store.listTimesheets({ month })
@@ -1250,7 +1285,15 @@ function AdminTimesheets({ store }) {
     fetchNow();
     const id = setInterval(() => { if (typeof document === "undefined" || document.visibilityState === "visible") fetchNow(); }, 20000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [month]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [month, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const approve = async (staffId) => { setBusy(true); try { await store.reviewTimesheet(staffId, month, "approved"); reload(); } catch (_) {} finally { setBusy(false); } };
+  const requestChanges = async () => {
+    if (!note.trim()) return;
+    setBusy(true);
+    try { await store.reviewTimesheet(reviewModal.staffId, month, "changes_requested", note.trim()); setReviewModal(null); setNote(""); reload(); }
+    catch (_) {} finally { setBusy(false); }
+  };
 
   const shiftMonth = (delta) => { const d = new Date(month + "-01T00:00:00"); d.setMonth(d.getMonth() + delta); setMonth(d.toISOString().slice(0, 7)); };
   const list = entries || [];
@@ -1260,6 +1303,7 @@ function AdminTimesheets({ store }) {
   const totalMin = list.reduce((s, e) => s + e.minutes, 0);
   const campusMin = list.filter(e => e.mode === "campus").reduce((s, e) => s + e.minutes, 0);
   const onlineMin = list.filter(e => e.mode === "online").reduce((s, e) => s + e.minutes, 0);
+  const pendingCount = people.filter(p => groupStatus(p.entries) === "pending").length;
 
   const exportCsv = () => {
     downloadCSV(`timesheets-${month}.csv`, [
@@ -1287,7 +1331,7 @@ function AdminTimesheets({ store }) {
         <StatCard label="Total hours" value={`${fmtHours(totalMin)}h`} sub={`${monthLabel(month)}`} Icon={Clock3} tone={NAVY} delay={0} />
         <StatCard label="On campus" value={`${fmtHours(campusMin)}h`} sub="in person" Icon={Building2} tone="#1a3a8f" delay={60} />
         <StatCard label="Online" value={`${fmtHours(onlineMin)}h`} sub="remote" Icon={Wifi} tone="#0d7a5f" delay={120} />
-        <StatCard label="Staff sent" value={people.length} sub="timesheets" Icon={Users} tone="#b45309" delay={180} animate />
+        <StatCard label="Awaiting review" value={pendingCount} sub={`of ${people.length} sent`} Icon={Inbox} tone="#b45309" delay={180} animate />
       </div>
 
       {entries === null ? (
@@ -1300,23 +1344,43 @@ function AdminTimesheets({ store }) {
             const pMin = p.entries.reduce((s, e) => s + e.minutes, 0);
             const pCampus = p.entries.filter(e => e.mode === "campus").reduce((s, e) => s + e.minutes, 0);
             const isOpen = open[p.staffId];
+            const gs = groupStatus(p.entries);           // pending | changes | approved
+            const badge = TS_STATUS[gs];
+            const reviewed = p.entries.find(e => e.reviewedBy);
             return (
-              <div key={p.staffId} className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-100">
+              <div key={p.staffId} className={`overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ${gs === "pending" ? "ring-amber-200" : "ring-slate-100"}`}>
                 <button onClick={() => setOpen(o => ({ ...o, [p.staffId]: !o[p.staffId] }))} className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition hover:bg-slate-50">
                   <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-bold text-white" style={{ background: p.colour || NAVY }}>{p.initials}</span>
-                  <div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-slate-700">{p.name}</p><p className="truncate text-[11px] text-slate-400">{p.dept} · {p.entries.length} session{p.entries.length === 1 ? "" : "s"}</p></div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-slate-700">{p.name}</p>
+                    <p className="truncate text-[11px] text-slate-400">{p.dept} · {p.entries.length} session{p.entries.length === 1 ? "" : "s"}</p>
+                  </div>
+                  <span className={`hidden shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ring-1 sm:inline-flex ${badge.cls}`}><badge.I size={11} /> {badge.label}</span>
                   <div className="shrink-0 text-right"><p className="text-base font-extrabold" style={{ color: NAVY }}>{fmtHours(pMin)}h</p><p className="text-[10px] text-slate-400">{fmtHours(pCampus)}h campus</p></div>
                   <ChevronDown size={18} className={`shrink-0 text-slate-300 transition-transform ${isOpen ? "rotate-180" : ""}`} />
                 </button>
                 {isOpen && (
                   <div className="border-t border-slate-100 bg-slate-50/50 px-2 py-2">
+                    <span className={`mx-1.5 mb-1 inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ring-1 sm:hidden ${badge.cls}`}><badge.I size={11} /> {badge.label}</span>
                     {p.entries.slice().sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start)).map(e => (
                       <div key={e.id} className="flex items-center gap-3 rounded-xl px-2.5 py-2">
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white" style={{ background: e.mode === "campus" ? NAVY : "#0d7a5f" }}>{e.mode === "campus" ? <Building2 size={14} /> : <Wifi size={14} />}</span>
-                        <div className="min-w-0 flex-1"><p className="truncate text-[13px] font-semibold text-slate-700">{e.title}</p><p className="text-[10px] text-slate-400">{prettyDay(e.date)} · {e.start}–{e.end}</p></div>
+                        <div className="min-w-0 flex-1"><p className="truncate text-[13px] font-semibold text-slate-700">{e.title}</p><p className="text-[10px] text-slate-400">{prettyDay(e.date)} · {e.start}–{e.end} · {e.mode === "campus" ? "Campus" : "Online"}</p></div>
                         <span className="shrink-0 text-xs font-bold text-slate-500">{fmtHours(e.minutes)}h</span>
                       </div>
                     ))}
+                    {/* Prior decision, if any */}
+                    {gs !== "pending" && reviewed?.reviewNote && (
+                      <p className="mx-1.5 mt-1 rounded-lg bg-white px-2.5 py-1.5 text-[11px] text-slate-500 ring-1 ring-slate-200"><b>{gs === "changes" ? "Change note" : "Note"}:</b> {reviewed.reviewNote}{reviewed.reviewedBy ? ` — ${reviewed.reviewedBy}` : ""}</p>
+                    )}
+                    {/* Finance actions — only while awaiting approval */}
+                    {gs === "pending" && (
+                      <div className="mt-1.5 flex gap-2 px-1.5 pb-1">
+                        <button onClick={() => approve(p.staffId)} disabled={busy} className="press flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold text-white shadow-sm transition disabled:opacity-60" style={{ background: "#059669" }}><CheckCircle2 size={15} /> Approve</button>
+                        <button onClick={() => { setReviewModal({ staffId: p.staffId, name: p.name }); setNote(""); }} disabled={busy} className="press flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-amber-300 bg-white py-2.5 text-xs font-bold text-amber-700 transition hover:bg-amber-50 disabled:opacity-60"><MessageSquare size={15} /> Request changes</button>
+                      </div>
+                    )}
+                    {gs === "approved" && <p className="px-1.5 pb-1 pt-0.5 text-center text-[11px] font-semibold text-emerald-600">✓ Approved{reviewed?.reviewedAt ? ` on ${reviewed.reviewedAt}` : ""}</p>}
                   </div>
                 )}
               </div>
@@ -1324,6 +1388,18 @@ function AdminTimesheets({ store }) {
           })}
         </div>
       )}
+
+      {/* Request-changes comment modal */}
+      <Modal open={!!reviewModal} onClose={() => setReviewModal(null)} title={`Request changes — ${reviewModal?.name || ""}`}>
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">Tell {reviewModal?.name?.split(" ")[0] || "the staff member"} what needs correcting on their <b>{monthLabel(month)}</b> timesheet. They'll be notified and can fix it and re-send.</p>
+          <Field label="Comment"><textarea value={note} onChange={e => setNote(e.target.value)} rows={4} placeholder="e.g. The Tuesday session should be online, not campus." className={inputCls + " resize-none"} autoFocus /></Field>
+          <div className="flex gap-2">
+            <button onClick={() => setReviewModal(null)} className="flex-1 rounded-xl border-2 border-slate-200 py-2.5 text-sm font-bold text-slate-600">Cancel</button>
+            <button onClick={requestChanges} disabled={busy || !note.trim()} className="press flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold text-white shadow-sm transition disabled:opacity-60" style={{ background: "#b45309" }}>{busy ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><MessageSquare size={16} /> Send back</>}</button>
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }
