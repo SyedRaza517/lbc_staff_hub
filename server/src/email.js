@@ -20,7 +20,31 @@
 const nodemailer = require("nodemailer");
 
 const FROM = process.env.MAIL_FROM || "London Brookes College Staff Hub <no-reply@lbc.ac.uk>";
-const isConfigured = () => Boolean(process.env.SMTP_URL || process.env.SMTP_HOST);
+// Resend (https://resend.com) sends over HTTPS, so it works on hosts that block
+// outbound SMTP ports (e.g. Render's free tier). Preferred when RESEND_API_KEY is set.
+const useResend = () => Boolean(process.env.RESEND_API_KEY);
+const isConfigured = () => Boolean(process.env.RESEND_API_KEY || process.env.SMTP_URL || process.env.SMTP_HOST);
+
+// Send via Resend's HTTP API with a hard timeout so it can never hang a request.
+async function sendViaResend(to, subject, text, html) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: FROM, to, subject, text, html: html || defaultHtml(subject, text) }),
+      signal: ctrl.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.message || `Resend responded ${res.status}`);
+    console.log(`[email] sent to ${to} via Resend — ${subject} (id: ${data.id})`);
+    return { sent: true, stubbed: false, messageId: data.id };
+  } catch (e) {
+    console.error(`[email] Resend FAILED to ${to}: ${e.message}`);
+    return { sent: false, stubbed: false, error: e.message };
+  } finally { clearTimeout(timer); }
+}
 
 let transporter = null;
 function getTransport() {
@@ -37,6 +61,11 @@ function getTransport() {
       port,
       secure,
       auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+      // Fail fast instead of hanging ~2 min when the SMTP port is blocked/unreachable
+      // (common on PaaS free tiers). A blocked send must not stall the request.
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
     });
   }
   return transporter;
@@ -80,6 +109,9 @@ async function sendEmail(to, subject, body, { html } = {}) {
     return { sent: false, stubbed: true };
   }
 
+  // Prefer the HTTP API when configured (works where SMTP is blocked).
+  if (useResend()) return sendViaResend(to, subject, body, html);
+
   try {
     const info = await getTransport().sendMail({
       from: FROM,
@@ -112,7 +144,8 @@ async function verifyEmail() {
 
 // One-line description of the active mode, for the startup banner.
 function describeEmail() {
-  if (!isConfigured()) return "console stub (set SMTP_URL or SMTP_HOST in server/.env to send real email)";
+  if (useResend()) return `Resend HTTP API as "${FROM}"`;
+  if (!isConfigured()) return "console stub (set RESEND_API_KEY, or SMTP_URL/SMTP_HOST, in server/.env to send real email)";
   const target = process.env.SMTP_URL ? process.env.SMTP_URL.replace(/\/\/[^@]*@/, "//***@") : `${process.env.SMTP_HOST}:${Number(process.env.SMTP_PORT) || 587}`;
   return `SMTP via ${target} as "${FROM}"`;
 }

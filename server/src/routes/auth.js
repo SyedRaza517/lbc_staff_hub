@@ -491,7 +491,9 @@ router.post("/forgot-password", async (req, res) => {
   </div>
 </div>`;
 
-    await sendEmail(staff.email, "Reset your Staff Hub password", text, { html });
+    // Fire-and-forget: the reset token is already saved, and the reply is the same
+    // generic message regardless. Never make the user wait on (or be affected by) mail.
+    sendEmail(staff.email, "Reset your Staff Hub password", text, { html }).catch(() => {});
   }
 
   res.json({ ok: true, message: RESET_SENT_MESSAGE });
