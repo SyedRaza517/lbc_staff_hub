@@ -255,11 +255,12 @@ export function TotpSetup({ challengeToken, onDone, onCancel }) {
         <Download size={12} /> Don’t have one? Get Google Authenticator
       </button>
 
-      {/* QR is the fallback for enrolling from a computer, scanned with a phone. */}
+      {/* QR shown expanded so it can be scanned from another device (or demoed).
+          `open` keeps it visible by default; the user can still collapse it. */}
       {qr ? (
-        <details className="rounded-xl bg-slate-50 ring-1 ring-slate-200">
+        <details open className="rounded-xl bg-slate-50 ring-1 ring-slate-200">
           <summary className="cursor-pointer list-none px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">
-            On another device? Scan a QR code instead
+            Or scan this QR code with another device
           </summary>
           <div className="flex justify-center pb-3">
             <img src={qr} alt="QR code for your authenticator app" width={168} height={168} className="rounded-xl ring-1 ring-slate-200" />
