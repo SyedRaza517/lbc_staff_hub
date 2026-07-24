@@ -178,6 +178,21 @@ export function TotpSetup({ challengeToken, onDone, onCancel }) {
     } catch (_) { /* clipboard blocked — the secret is on screen anyway */ }
   };
 
+  // Hand the otpauth:// link to the authenticator WITHOUT navigating this page.
+  // Navigating to a custom scheme unloads the app and loses the enrolment
+  // challenge, which is why tapping the button used to bounce back to sign-in.
+  const openInAuthenticator = (e) => {
+    e.preventDefault();
+    const url = setup.otpauthUrl;
+    const native = typeof window !== "undefined" && window.Capacitor?.isNativePlatform?.() === true;
+    try {
+      // '_system' → the OS opens it (native app routes otpauth:// to the
+      // authenticator). On the web, a new tab hands it off while THIS tab — and
+      // the challenge state — stays put.
+      window.open(url, native ? "_system" : "_blank");
+    } catch (_) { /* if the OS has no handler nothing opens; QR/manual key remain */ }
+  };
+
   if (loadError) return (
     <div className="flex flex-col gap-3">
       <ErrorNote>{loadError}</ErrorNote>
@@ -203,10 +218,17 @@ export function TotpSetup({ challengeToken, onDone, onCancel }) {
       {/* Primary path on the phone the app runs on: the otpauth:// link hands the
           account straight to the installed authenticator with every detail filled
           in (issuer, account, secret), so there's no need to scan a QR that's on
-          the very same screen. On a WebView / mobile browser the OS routes this to
-          Google Authenticator, Authy, etc. */}
+          the very same screen.
+
+          IMPORTANT: we must NOT let the anchor navigate this page to otpauth://.
+          Enrolment runs on an in-memory challenge, so any navigation/reload wipes
+          it and dumps the user back on the sign-in (password) screen. Instead we
+          preventDefault and open the link in a SEPARATE context: '_system' on the
+          native app (the OS routes it to the installed authenticator) and a new
+          tab on the web — either way this page, and the challenge, stay alive. */}
       <a
         href={setup.otpauthUrl}
+        onClick={openInAuthenticator}
         className="press shine flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white shadow-lg transition"
         style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}
       >
@@ -214,6 +236,7 @@ export function TotpSetup({ challengeToken, onDone, onCancel }) {
       </a>
       <p className="-mt-2 text-center text-[10px] leading-relaxed text-slate-400">
         Opens Google Authenticator / Authy with your account details already filled in.
+        Then come back here and enter the 6-digit code.
       </p>
 
       {/* QR is the fallback for enrolling from a computer, scanned with a phone. */}
