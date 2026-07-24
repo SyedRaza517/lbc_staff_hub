@@ -103,14 +103,14 @@ router.put("/:id/decision", requireAuth, requireAdmin, async (req, res) => {
     if (leave.status !== "pending") return { error: { code: 409, message: "This request has already been decided" } };
 
     // On approval, enforce the staff member's effective allowance server-side.
-    // Sick leave does not consume allowance, so it is exempt (matches the client's usedDays rule).
-    if (status === "approved" && leave.type !== "sick") {
+    // Every leave type consumes allowance — sick included (matches the client's usedDays rule).
+    if (status === "approved") {
       const [staff, adj, usedAgg] = await Promise.all([
         prisma.staff.findUnique({ where: { id: leave.staffId } }),
         prisma.adjustment.aggregate({ where: { staffId: leave.staffId }, _sum: { days: true } }),
-        // Already-approved non-sick leave for this staffer, excluding this request itself.
+        // All already-approved leave for this staffer, excluding this request itself.
         prisma.leave.aggregate({
-          where: { staffId: leave.staffId, status: "approved", type: { not: "sick" }, id: { not: leave.id } },
+          where: { staffId: leave.staffId, status: "approved", id: { not: leave.id } },
           _sum: { days: true },
         }),
       ]);

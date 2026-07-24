@@ -716,8 +716,8 @@ function RequestLeaveScreen({ store, me, setScreen }) {
         </div>
         <div className="mt-4"><Field label="Reason (optional)"><textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Add a short note for your manager…" className={inputCls + " resize-none"} /></Field></div>
         <div className="mt-4 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5 text-sm"><span className="text-slate-500">Duration</span><span className="font-bold" style={{ color: NAVY }}>{days} day{days > 1 ? "s" : ""}</span></div>
-        {type !== "sick" && days > left && <div className="mt-2 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600"><AlertCircle size={15} /> Exceeds your {left} remaining days</div>}
-        <PrimaryBtn onClick={submit} disabled={busy || (type !== "sick" && days > left)} className="mt-5 w-full !py-3.5">
+        {days > left && <div className="mt-2 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600"><AlertCircle size={15} /> Exceeds your {left} remaining days</div>}
+        <PrimaryBtn onClick={submit} disabled={busy || days > left} className="mt-5 w-full !py-3.5">
           {busy ? <><Loader2 size={18} className="animate-spin" /> Submitting…</> : <><Plus size={18} /> Submit Request</>}
         </PrimaryBtn>
       </Card>
