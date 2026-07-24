@@ -7,7 +7,7 @@ import Landing from "./Landing";
 import MobileAuth from "./MobileAuth";
 import ResetPasswordPage from "./ResetPassword";
 import AcceptInvite from "./AcceptInvite";
-import { useIsHandset } from "./PhoneShell";
+import { useIsHandset, isNativeApp } from "./PhoneShell";
 import BiometricGate, { useAppLock } from "./BiometricGate";
 import { StaffApp, AdminDashboard } from "./StaffHub";
 import { Smartphone, Monitor, LogOut, CheckCircle2, XCircle, Sparkles, Loader2, GraduationCap, Clock, KeyRound, Lock, ShieldCheck, X, WifiOff } from "lucide-react";
@@ -250,14 +250,20 @@ export default function App() {
   );
 
   if (!user) {
-    if (entry === "app") return (
+    // The packaged mobile app (Android/iOS) opens straight on the sign-in screen —
+    // no Staff-App/Admin chooser. Admins sign in here too (2FA included) and are
+    // routed to their dashboard by role after login, then can switch to the staff
+    // view. The web build keeps the Landing chooser so a browser visitor can pick.
+    const native = isNativeApp();
+    if (entry === "admin") return (<><style>{GLOBAL_STYLE}</style><Login onBack={() => setEntry(null)} /></>);
+    if (entry === "app" || native) return (
       // 100dvh (not vh) so collapsing mobile browser chrome can't clip the page.
       <div className="w-full" style={{ minHeight: "100dvh", height: "100dvh", fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", background: "radial-gradient(1200px 600px at 50% -10%, #e7ecf6 0%, #f1f5f9 45%, #eef1f6 100%)" }}>
         <style>{GLOBAL_STYLE}</style>
-        <MobileAuth onExit={() => setEntry(null)} />
+        {/* No back button in the native app — there's no Landing to go back to. */}
+        <MobileAuth onExit={native ? undefined : () => setEntry(null)} />
       </div>
     );
-    if (entry === "admin") return (<><style>{GLOBAL_STYLE}</style><Login onBack={() => setEntry(null)} /></>);
     return (<><style>{GLOBAL_STYLE}</style><Landing onStaffApp={() => setEntry("app")} onAdmin={() => setEntry("admin")} /></>);
   }
 
