@@ -3,8 +3,11 @@ const prisma = require("../db");
 const { sLeave } = require("../serializers");
 const { requireAuth, requireAdmin } = require("../auth");
 const { notifyStaff, notifyAdmins } = require("../notify");
+const { localDate } = require("../clock");
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Local (London) date, not the server's UTC date — so a request made just after
+// midnight BST is filed under the correct day, not the previous one.
+const today = () => localDate();
 const VALID_TYPES = ["annual", "sick", "personal", "training"];
 
 // --- Per-staff serialisation for leave decisions ---

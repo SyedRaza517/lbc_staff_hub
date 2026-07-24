@@ -12,12 +12,13 @@ const { requireAuth, requireAdmin, hashPassword } = require("../auth");
 const { notifyStaff, notifyAdmins } = require("../notify");
 const { isInt32, MAX_ALLOWANCE_DAYS } = require("../validate");
 const { notifyExistingAccount } = require("../invite");
+const { localDate } = require("../clock");
 
 const PALETTE = ["#1a3a8f", "#9e1b32", "#0d7a5f", "#b45309", "#6d28d9", "#0e7490", "#be123c"];
 const initialsOf = (name) => name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 const colourFor = (email) => { let h = 0; for (const ch of String(email)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; };
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDate();
 const str = (v) => (typeof v === "string" ? v.trim() : "");
 
 // POST /api/signup — public. Creates a pending request and tells the admins.

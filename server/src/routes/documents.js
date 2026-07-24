@@ -3,8 +3,9 @@ const prisma = require("../db");
 const { sDoc } = require("../serializers");
 const { requireAuth, requireAdmin } = require("../auth");
 const { isString, isNonEmptyString, MAX_TEXT } = require("../validate");
+const { localDate } = require("../clock");
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDate();
 
 // GET /api/documents — admin: all; staff: shared + personal templates + own private docs
 router.get("/", requireAuth, async (req, res) => {

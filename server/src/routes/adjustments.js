@@ -3,8 +3,9 @@ const prisma = require("../db");
 const { sAdj } = require("../serializers");
 const { requireAuth, requireAdmin } = require("../auth");
 const { isInt32, MAX_ADJUSTMENT_DAYS } = require("../validate");
+const { localDate } = require("../clock");
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDate();
 
 // GET /api/adjustments — admin: all; staff: own
 router.get("/", requireAuth, async (req, res) => {

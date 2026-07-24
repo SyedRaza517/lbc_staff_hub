@@ -3,12 +3,15 @@ const prisma = require("../db");
 const { sCheckin } = require("../serializers");
 const { requireAuth, requireAdmin } = require("../auth");
 const { isString, isRealDate, MAX_TEXT } = require("../validate");
+const { localDate, localTime } = require("../clock");
 
 // HH:MM, 24-hour. Times are stored as plain strings and rendered verbatim.
 const isTime = (v) => isString(v) && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 
-const today = () => new Date().toISOString().slice(0, 10);
-const nowTime = () => new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+// Date and clock time in the organisation's local zone (London), NOT the server's.
+// A UTC host would otherwise record every check-in an hour early in summer (BST).
+const today = () => localDate();
+const nowTime = () => localTime();
 
 // GET /api/checkins?date=YYYY-MM-DD  — admin: everyone; staff: own only
 router.get("/", requireAuth, async (req, res) => {
