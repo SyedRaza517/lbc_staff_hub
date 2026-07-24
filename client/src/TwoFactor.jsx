@@ -5,7 +5,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { api } from "./api";
-import { ShieldCheck, Loader2, XCircle, Copy, Check, KeyRound, Smartphone } from "lucide-react";
+import { ShieldCheck, Loader2, XCircle, Copy, Check, KeyRound, Smartphone, Download } from "lucide-react";
 
 const NAVY = "#1a3a8f", MAROON = "#9e1b32";
 
@@ -178,19 +178,26 @@ export function TotpSetup({ challengeToken, onDone, onCancel }) {
     } catch (_) { /* clipboard blocked — the secret is on screen anyway */ }
   };
 
-  // Hand the otpauth:// link to the authenticator WITHOUT navigating this page.
-  // Navigating to a custom scheme unloads the app and loses the enrolment
-  // challenge, which is why tapping the button used to bounce back to sign-in.
-  const openInAuthenticator = (e) => {
-    e.preventDefault();
-    const url = setup.otpauthUrl;
+  // Open a URL WITHOUT navigating this page — navigating away (custom scheme or
+  // store link) unloads the app and loses the in-memory enrolment challenge, which
+  // is why tapping used to bounce the user back to sign-in. '_system' lets the
+  // native OS handle it; a new tab does the same on the web.
+  const openExternally = (url) => {
     const native = typeof window !== "undefined" && window.Capacitor?.isNativePlatform?.() === true;
-    try {
-      // '_system' → the OS opens it (native app routes otpauth:// to the
-      // authenticator). On the web, a new tab hands it off while THIS tab — and
-      // the challenge state — stays put.
-      window.open(url, native ? "_system" : "_blank");
-    } catch (_) { /* if the OS has no handler nothing opens; QR/manual key remain */ }
+    try { window.open(url, native ? "_system" : "_blank"); } catch (_) { /* no handler — QR/manual key remain */ }
+  };
+
+  // Hand the otpauth:// link to the installed authenticator.
+  const openInAuthenticator = (e) => { e.preventDefault(); openExternally(setup.otpauthUrl); };
+
+  // For staff who don't have an authenticator yet: open Google Authenticator on the
+  // right store for their device (App Store on iOS, Play Store otherwise).
+  const openAuthenticatorStore = (e) => {
+    e.preventDefault();
+    const platform = (typeof window !== "undefined" && window.Capacitor?.getPlatform?.()) || "web";
+    const IOS = "https://apps.apple.com/app/google-authenticator/id388497605";
+    const ANDROID = "https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2";
+    openExternally(platform === "ios" ? IOS : ANDROID);
   };
 
   if (loadError) return (
@@ -238,6 +245,15 @@ export function TotpSetup({ challengeToken, onDone, onCancel }) {
         Opens Google Authenticator / Authy with your account details already filled in.
         Then come back here and enter the 6-digit code.
       </p>
+
+      {/* Staff with no authenticator installed yet: one tap to the right store. */}
+      <button
+        type="button"
+        onClick={openAuthenticatorStore}
+        className="press -mt-1 flex items-center justify-center gap-1.5 text-center text-[11px] font-semibold text-slate-500 underline decoration-slate-300 underline-offset-2 transition hover:text-slate-700"
+      >
+        <Download size={12} /> Don’t have one? Get Google Authenticator
+      </button>
 
       {/* QR is the fallback for enrolling from a computer, scanned with a phone. */}
       {qr ? (
