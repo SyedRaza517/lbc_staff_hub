@@ -1,8 +1,12 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const compression = require("compression");
 
 const app = express();
+// Gzip JSON responses. The large admin lists (1000+ students, attendance) shrink
+// ~80-90% on the wire, which is the biggest single win on slow mobile connections.
+app.use(compression());
 // No ETags on API responses — combined with Cache-Control: no-store this removes
 // any conditional-request/304 path, so clients always get fresh JSON.
 app.set("etag", false);

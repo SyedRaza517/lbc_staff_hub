@@ -2,7 +2,7 @@
 // (staff, leave, checkins, docs, adjustments) plus async action methods.
 // After each mutation we refetch the affected collection so both the
 // staff app and the admin dashboard always reflect the live database.
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { api } from "./api";
 
 const daysBetween = (a, b) => { const d1 = new Date(a), d2 = new Date(b); if (isNaN(d1) || isNaN(d2)) { console.error("Invalid dates:", a, b); return 0; } return Math.max(1, Math.round((d2 - d1) / 86400000) + 1); };
@@ -89,25 +89,35 @@ export function useApiStore(notify, user) {
     setAssessmentsLoaded(true);
   }, [notify]);
 
-  // Keep the UI fresh without a manual reload: refetch whenever the app/tab
-  // regains focus (e.g. returning to the mobile app) and on a light interval
-  // while visible. Only the collections already loaded are refetched, so it's
-  // cheap. This backstops the after-each-mutation refetch and shows changes
-  // made on another device too.
+  // Keep the UI fresh without a manual reload — but tiered by cost so we don't
+  // re-pull large payloads needlessly:
+  //   • Light collections (staff/leave/checkins/docs/adjustments) are small and
+  //     change often, so they're polled on a short interval while the tab is visible.
+  //   • Heavy admin collections (registers with 1000+ students + attendance,
+  //     assessments, PAT) are refetched only when the app/tab regains focus — that's
+  //     when another device's changes matter — instead of every interval tick.
+  // A short throttle collapses the focus + visibilitychange pair that both fire when
+  // returning to the app, so a return triggers one refetch, not two.
+  const lastFullRefetch = useRef(0);
   useEffect(() => {
     if (!user) return;
-    const refetch = () => {
+    const refetchAll = () => {
+      const now = Date.now();
+      if (now - lastFullRefetch.current < 3000) return; // collapse duplicate focus/visibility events
+      lastFullRefetch.current = now;
       refresh();
       if (hndLoaded) refreshHnd();
       if (interactionsLoaded) refreshInteractions();
       if (assessmentsLoaded) refreshAssessments();
     };
-    const onVisible = () => { if (document.visibilityState === "visible") refetch(); };
-    window.addEventListener("focus", refetch);
+    const onVisible = () => { if (document.visibilityState === "visible") refetchAll(); };
+    window.addEventListener("focus", refetchAll);
     document.addEventListener("visibilitychange", onVisible);
-    const id = setInterval(() => { if (document.visibilityState === "visible") refetch(); }, 15000);
+    // Interval refreshes ONLY the light collections — the heavy registers/assessments
+    // lists are left to the focus/visibility refetch above.
+    const id = setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 20000);
     return () => {
-      window.removeEventListener("focus", refetch);
+      window.removeEventListener("focus", refetchAll);
       document.removeEventListener("visibilitychange", onVisible);
       clearInterval(id);
     };
