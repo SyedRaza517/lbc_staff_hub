@@ -83,4 +83,23 @@ app.listen(PORT, () => {
   // notification that never arrives.
   console.log(`Email: ${require("./email").describeEmail()}`);
   console.log(`Push:  ${require("./push").describePush()}`);
+  startKeepAlive();
 });
+
+// --- Keep-alive: stop the free-tier host idling the server to sleep ---
+// Render's free tier spins a service down after ~15 min with no inbound traffic;
+// the next request then pays a 30-50s cold-start wake-up, which users feel as
+// "the app is slow". Pinging our own public health endpoint on an interval keeps
+// that inbound traffic flowing so the instance stays warm and responses stay fast.
+// Only runs when a public URL is known (Render sets RENDER_EXTERNAL_URL) — it does
+// nothing in local dev. Override the URL with KEEPALIVE_URL if needed; set
+// KEEPALIVE_URL=off to disable entirely.
+function startKeepAlive() {
+  const url = process.env.KEEPALIVE_URL || (process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL.replace(/\/$/, "")}/api/health` : null);
+  if (!url || url === "off") return;
+  const MINUTES = Number(process.env.KEEPALIVE_MINUTES) || 12; // < Render's 15-min idle window
+  console.log(`Keep-alive: pinging ${url} every ${MINUTES} min to prevent cold starts`);
+  setInterval(() => {
+    fetch(url).catch(() => {}); // best-effort; a failed ping just means we try again next cycle
+  }, MINUTES * 60 * 1000).unref(); // unref so the timer never keeps the process alive on its own
+}
