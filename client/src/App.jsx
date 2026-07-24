@@ -343,6 +343,11 @@ function Shell({ user, logout, initialView }) {
     >
       <style>{GLOBAL_STYLE}</style>
 
+      {/* Top chrome (view toggle · change password · sign out). Hidden on the mobile
+          staff app — those actions now live in the app's "More" screen instead, so
+          the phone keeps a clean, native header. Shown on the web and on the admin
+          dashboard (where the view toggle is needed). */}
+      {!(handset && view === "app") && (
       <div className={`animated-gradient slide-down z-50 flex shrink-0 items-center gap-2 px-3 py-2 text-xs text-white shadow-lg ${handset ? "" : "sticky top-0"}`} style={{ background: "linear-gradient(90deg, #0f172a 0%, #14306f 50%, #0f172a 100%)", backgroundSize: "220% 220%", ...(handset ? { paddingTop: "max(env(safe-area-inset-top), 8px)" } : {}) }}>
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/15"><GraduationCap size={15} className="text-white" /></div>
@@ -369,10 +374,11 @@ function Shell({ user, logout, initialView }) {
           <button onClick={logout} className="press flex items-center gap-1 rounded-full px-2.5 py-1.5 font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"><LogOut size={13} /> Sign out</button>
         </div>
       </div>
+      )}
 
       <div key={view} className={handset ? "min-h-0 flex-1" : "fade-up"}>
         {view === "app"
-          ? <StaffApp store={store} currentStaffId={isAdmin ? currentStaffId : user.id} setCurrentStaffId={setCurrentStaffId} />
+          ? <StaffApp store={store} currentStaffId={isAdmin ? currentStaffId : user.id} setCurrentStaffId={setCurrentStaffId} logout={logout} onChangePassword={() => setShowChangePw(true)} onSwitchToAdmin={isAdmin ? () => setView("admin") : undefined} />
           : <AdminDashboard store={store} />}
       </div>
 

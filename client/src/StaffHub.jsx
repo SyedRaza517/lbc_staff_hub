@@ -10,7 +10,7 @@ import {
   ClipboardList, Save, History, Building2, FileUp, Sparkles,
   Sun, Sunrise, Sunset, TrendingUp, Timer, Info, Phone,
   CalendarCheck, UserCheck, Layers, Activity, Award, ShieldCheck,
-  BookOpen, Percent, PlayCircle, RefreshCw, MoreHorizontal, MessageSquare, ChevronDown, Loader2
+  BookOpen, Percent, PlayCircle, RefreshCw, MoreHorizontal, MessageSquare, ChevronDown, Loader2, KeyRound
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis,
@@ -245,7 +245,7 @@ function ExportBtn({ onClick, label = "Export", className = "" }) {
 }
 
 /* ============================================================ STAFF MOBILE APP ============================================================ */
-export function StaffApp({ store, currentStaffId, setCurrentStaffId }) {
+export function StaffApp({ store, currentStaffId, setCurrentStaffId, logout, onChangePassword, onSwitchToAdmin }) {
   const { staff } = store;
   const [screen, setScreen] = useState("home");
   const [showNotes, setShowNotes] = useState(false);
@@ -277,7 +277,7 @@ export function StaffApp({ store, currentStaffId, setCurrentStaffId }) {
       {screen === "documents" && <DocumentsScreen store={store} me={me} />}
       {screen === "approval" && <ApprovalScreen store={store} me={me} />}
       {screen === "summary" && <SummaryScreen store={store} me={me} />}
-      {screen === "more" && <MoreScreen store={store} me={me} />}
+      {screen === "more" && <MoreScreen store={store} me={me} logout={logout} onChangePassword={onChangePassword} onSwitchToAdmin={onSwitchToAdmin} />}
 
       {showNotes && <NotePanel store={store} onClose={() => setShowNotes(false)} />}
     </PhoneShell>
@@ -867,7 +867,7 @@ function BiometricSetting() {
 }
 
 /* ----- More ----- */
-function MoreScreen({ store, me }) {
+function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
   const [toggles, setToggles] = useState({ notif: true, reminders: true, biometric: false });
   const [showDelete, setShowDelete] = useState(false);
   const items = [{ I: Users, label: "My Profile" }, { I: MapPin, label: "Campus Map" }, { I: Coffee, label: "Staff Room Booking" }, { I: Mail, label: "Contact HR" }];
@@ -919,6 +919,23 @@ function MoreScreen({ store, me }) {
           inside the app, not only by emailing an administrator. */}
       <p className="mb-2 mt-5 px-1 text-xs font-bold uppercase tracking-wide text-slate-400">Account</p>
       <Card className="!p-0">
+        {/* Change password — moved here from the top bar so the mobile app has a
+            clean header. Triggers the shared change-password modal in the shell. */}
+        {onChangePassword && (
+          <button onClick={onChangePassword} className="group flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3.5 text-left transition-colors hover:bg-slate-50 active:scale-[0.99]">
+            <KeyRound size={18} className="transition-transform group-hover:scale-110" style={{ color: NAVY }} />
+            <span className="flex-1 text-sm font-semibold text-slate-700">Change password</span>
+            <ChevronRight size={16} className="text-slate-300 transition-transform group-hover:translate-x-1" />
+          </button>
+        )}
+        {/* Admins reach their dashboard from here since the top view-toggle is gone. */}
+        {onSwitchToAdmin && (
+          <button onClick={onSwitchToAdmin} className="group flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3.5 text-left transition-colors hover:bg-slate-50 active:scale-[0.99]">
+            <Monitor size={18} className="transition-transform group-hover:scale-110" style={{ color: NAVY }} />
+            <span className="flex-1 text-sm font-semibold text-slate-700">Switch to Admin Dashboard</span>
+            <ChevronRight size={16} className="text-slate-300 transition-transform group-hover:translate-x-1" />
+          </button>
+        )}
         <button
           onClick={() => setShowDelete(true)}
           className="group flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-rose-50/60 active:scale-[0.99]"
@@ -931,6 +948,13 @@ function MoreScreen({ store, me }) {
           <ChevronRight size={16} className="text-slate-300 transition-transform group-hover:translate-x-1" />
         </button>
       </Card>
+
+      {/* Sign out — moved here from the top bar; full-width and clearly separated. */}
+      {logout && (
+        <button onClick={logout} className="press mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-slate-200 bg-white py-3 text-sm font-bold text-slate-600 transition hover:border-slate-300 hover:text-slate-800">
+          <LogOut size={16} /> Sign out
+        </button>
+      )}
 
       <p className="mt-4 text-center text-[11px] text-slate-400">© {new Date().getFullYear()} London Brookes College · Staff Hub</p>
 
