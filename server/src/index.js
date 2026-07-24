@@ -59,6 +59,7 @@ app.use("/api/devices", wrapAsync(require("./routes/devices")));
 app.use("/api/hnd", wrapAsync(require("./routes/hnd")));
 app.use("/api/interactions", wrapAsync(require("./routes/interactions")));
 app.use("/api/assessments", wrapAsync(require("./routes/assessments")));
+app.use("/api/timesheets", wrapAsync(require("./routes/timesheets")));
 
 // 404 + error handlers
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));

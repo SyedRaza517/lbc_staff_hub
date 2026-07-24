@@ -67,4 +67,13 @@ const sGrade = (g) => ({
   feedback: g.feedback, gradedBy: g.gradedBy, gradedAt: g.gradedAt,
 });
 
-module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sProgramme, sModule, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade };
+/* ---------- Timesheets ---------- */
+const sTimesheet = (t) => ({
+  id: t.id, staffId: t.staffId, date: t.date, start: t.startTime, end: t.endTime,
+  minutes: t.minutes, hours: Math.round((t.minutes / 60) * 100) / 100,
+  mode: t.mode, title: t.title, moduleId: t.moduleId ?? null, note: t.note,
+  status: t.status, submittedAt: t.submittedAt, createdAt: t.createdAt,
+  ...(t.staff ? { staffName: t.staff.name, staffDept: t.staff.dept, staffInitials: t.staff.initials, staffColour: t.staff.colour } : {}),
+});
+
+module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sProgramme, sModule, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet };

@@ -10,7 +10,7 @@ import {
   ClipboardList, Save, History, Building2, FileUp, Sparkles,
   Sun, Sunrise, Sunset, TrendingUp, Timer, Info, Phone,
   CalendarCheck, UserCheck, Layers, Activity, Award, ShieldCheck,
-  BookOpen, Percent, PlayCircle, RefreshCw, MoreHorizontal, MessageSquare, ChevronDown, Loader2, KeyRound
+  BookOpen, Percent, PlayCircle, RefreshCw, MoreHorizontal, MessageSquare, ChevronDown, Loader2, KeyRound, Send
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis,
@@ -253,7 +253,7 @@ export function StaffApp({ store, currentStaffId, setCurrentStaffId, logout, onC
   // Tapping a push notification opens the screen it refers to — the `link` the
   // server attached (e.g. "balance" for a leave decision, "approvals" for admins).
   useEffect(() => {
-    const KNOWN = ["home", "checkin", "balance", "calendar", "request", "documents", "approval", "summary", "more"];
+    const KNOWN = ["home", "checkin", "balance", "calendar", "request", "documents", "approval", "summary", "timesheet", "more"];
     const onOpen = (e) => {
       const link = e.detail === "approvals" ? "approval" : e.detail;
       setScreen(KNOWN.includes(link) ? link : "home");
@@ -277,6 +277,7 @@ export function StaffApp({ store, currentStaffId, setCurrentStaffId, logout, onC
       {screen === "documents" && <DocumentsScreen store={store} me={me} />}
       {screen === "approval" && <ApprovalScreen store={store} me={me} />}
       {screen === "summary" && <SummaryScreen store={store} me={me} />}
+      {screen === "timesheet" && <TimesheetScreen store={store} me={me} />}
       {screen === "more" && <MoreScreen store={store} me={me} logout={logout} onChangePassword={onChangePassword} onSwitchToAdmin={onSwitchToAdmin} />}
 
       {showNotes && <NotePanel store={store} onClose={() => setShowNotes(false)} />}
@@ -301,7 +302,7 @@ function StatusBar() {
 }
 
 function AppHeader({ me, staff, setCurrentStaffId, screen, setScreen, store, showNotes, setShowNotes }) {
-  const title = { home: "Staff Hub", checkin: "Daily Check-In", balance: "Holiday Balance", calendar: "Holiday Calendar", request: "Request Leave", documents: "Documents", approval: "Manager Approval", summary: "Daily Summary", more: "More" }[screen];
+  const title = { home: "Staff Hub", checkin: "Daily Check-In", balance: "Holiday Balance", calendar: "Holiday Calendar", request: "Request Leave", documents: "Documents", approval: "Manager Approval", summary: "Daily Summary", timesheet: "My Timesheet", more: "More" }[screen];
   const unread = store.notes.length;
   const greet = greetingFor();
   const Greet = greet.Icon;
@@ -387,6 +388,7 @@ const TILES = [
   { key: "documents", label: "Documents", Icon: FileText, sub: "Policies & forms" },
   { key: "approval", label: "Manager Approval", Icon: ThumbsUp, sub: "Review requests" },
   { key: "summary", label: "Staff Daily Summary", Icon: UserPlus, sub: "Log your day" },
+  { key: "timesheet", label: "Send Timesheet", Icon: ClipboardList, sub: "Log hours & submit" },
   { key: "more", label: "More", Icon: ArrowRight, sub: "Profile & settings" },
 ];
 const STAFF_TIPS = [
@@ -866,6 +868,189 @@ function BiometricSetting() {
   );
 }
 
+/* ----- Timesheet ----- */
+// Whole/half hour formatting for minutes.
+const fmtHours = (mins) => { const h = mins / 60; return (Math.round(h * 10) / 10).toString().replace(/\.0$/, ""); };
+const monthOf = (iso) => iso.slice(0, 7);
+const monthLabel = (m) => new Date(m + "-01T00:00:00").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+const lastDayOfMonth = (m) => { const [y, mo] = m.split("-").map(Number); return new Date(y, mo, 0).getDate(); };
+const prettyDay = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+
+function TimesheetForm({ store, me, month, entry, onDone }) {
+  const cur = monthOf(todayISO());
+  const [date, setDate] = useState(entry?.date || (month === cur ? todayISO() : `${month}-01`));
+  const [start, setStart] = useState(entry?.start || "09:00");
+  const [end, setEnd] = useState(entry?.end || "10:00");
+  const [mode, setMode] = useState(entry?.mode || "campus");
+  const [title, setTitle] = useState(entry?.title || "");
+  const [note, setNote] = useState(entry?.note || "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const mins = (() => { const [sh, sm] = start.split(":").map(Number); const [eh, em] = end.split(":").map(Number); return (eh * 60 + em) - (sh * 60 + sm); })();
+
+  const save = async () => {
+    setError("");
+    if (!title.trim()) { setError("Add what the session was (e.g. the class name)."); return; }
+    if (mins <= 0) { setError("End time must be after the start time."); return; }
+    setBusy(true);
+    try {
+      const data = { date, start, end, mode, title: title.trim(), note: note.trim() };
+      if (entry) await store.updateTimesheet(entry.id, data);
+      else await store.addTimesheet(data);
+      onDone();
+    } catch (e) { setError(e.message || "Could not save."); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-3">
+      <Field label="Date">
+        <input type="date" value={date} min={`${month}-01`} max={`${month}-${String(lastDayOfMonth(month)).padStart(2, "0")}`} onChange={e => setDate(e.target.value)} className={inputCls} />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="From"><input type="time" value={start} onChange={e => setStart(e.target.value)} className={inputCls} /></Field>
+        <Field label="To"><input type="time" value={end} onChange={e => setEnd(e.target.value)} className={inputCls} /></Field>
+      </div>
+      <div>
+        <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-400">Delivery</label>
+        <div className="grid grid-cols-2 gap-2">
+          {[{ k: "campus", label: "On campus", I: Building2 }, { k: "online", label: "Online", I: Wifi }].map(o => {
+            const on = mode === o.k; const O = o.I;
+            return (
+              <button key={o.k} type="button" onClick={() => setMode(o.k)} className={`flex items-center justify-center gap-2 rounded-xl border-2 py-2.5 text-sm font-bold transition ${on ? "border-transparent text-white shadow-sm" : "border-slate-200 bg-white text-slate-500"}`} style={on ? { background: o.k === "campus" ? NAVY : "#0d7a5f" } : {}}>
+                <O size={16} /> {o.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <Field label="Class / activity"><input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Unit 4 — Database Design (Group A)" className={inputCls} /></Field>
+      <Field label="Note (optional)"><textarea value={note} onChange={e => setNote(e.target.value)} rows={2} placeholder="Anything worth recording…" className={inputCls + " resize-none"} /></Field>
+      <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5 text-sm"><span className="text-slate-500">Duration</span><span className="font-bold" style={{ color: mins > 0 ? NAVY : MAROON }}>{mins > 0 ? `${fmtHours(mins)} h` : "—"}</span></div>
+      {error && <div className="flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600"><AlertCircle size={15} /> {error}</div>}
+      <PrimaryBtn onClick={save} disabled={busy} className="w-full">{busy ? <><Loader2 size={16} className="animate-spin" /> Saving…</> : <><Save size={16} /> {entry ? "Update session" : "Add session"}</>}</PrimaryBtn>
+    </div>
+  );
+}
+
+function TimesheetScreen({ store, me }) {
+  const [month, setMonth] = useState(() => monthOf(todayISO()));
+  const [entries, setEntries] = useState(null); // null = loading
+  const [reloadKey, setReloadKey] = useState(0);
+  const [modal, setModal] = useState(null);      // {} = add, { entry } = edit, null = closed
+  const [confirmSend, setConfirmSend] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setEntries(null);
+    store.listTimesheets({ month }).then(d => { if (!cancelled) setEntries(d); }).catch(() => { if (!cancelled) setEntries([]); });
+    return () => { cancelled = true; };
+  }, [month, reloadKey, store]);
+  const reload = () => setReloadKey(k => k + 1);
+
+  const shiftMonth = (delta) => { const d = new Date(month + "-01T00:00:00"); d.setMonth(d.getMonth() + delta); setMonth(d.toISOString().slice(0, 7)); };
+
+  const list = entries || [];
+  const totalMin = list.reduce((s, e) => s + e.minutes, 0);
+  const campusMin = list.filter(e => e.mode === "campus").reduce((s, e) => s + e.minutes, 0);
+  const onlineMin = list.filter(e => e.mode === "online").reduce((s, e) => s + e.minutes, 0);
+  const drafts = list.filter(e => e.status === "draft");
+  const isSent = list.length > 0 && drafts.length === 0;
+
+  const byDate = {};
+  for (const e of list) (byDate[e.date] = byDate[e.date] || []).push(e);
+  const days = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
+
+  const del = async (id) => { try { await store.removeTimesheet(id); reload(); } catch (_) {} };
+  const send = async () => { setBusy(true); try { await store.submitTimesheet(month); setConfirmSend(false); reload(); } catch (_) {} finally { setBusy(false); } };
+
+  return (
+    <Screen>
+      {/* Month selector */}
+      <div className="mb-3 flex items-center justify-between rounded-2xl bg-white px-2 py-2 shadow-sm ring-1 ring-slate-100">
+        <button onClick={() => shiftMonth(-1)} className="press flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-100"><ChevronLeft size={18} /></button>
+        <p className="text-sm font-extrabold text-slate-700">{monthLabel(month)}</p>
+        <button onClick={() => shiftMonth(1)} className="press flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-100"><ChevronRight size={18} /></button>
+      </div>
+
+      {/* Summary */}
+      <div className="animated-gradient relative mb-3 overflow-hidden rounded-2xl p-4 text-white shadow-md" style={{ background: `linear-gradient(135deg, ${NAVY} 0%, ${NAVY_DARK} 60%, ${MAROON} 150%)`, backgroundSize: "200% 200%" }}>
+        <ClipboardList size={64} className="float-slow absolute -right-3 -top-3 text-white/10" />
+        <p className="relative text-[11px] font-semibold uppercase tracking-wide text-white/60">Hours this month</p>
+        <p className="relative text-3xl font-extrabold">{fmtHours(totalMin)}<span className="text-lg font-bold text-white/70"> h</span></p>
+        <div className="relative mt-3 flex gap-2">
+          <span className="flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold ring-1 ring-white/15"><Building2 size={12} /> Campus {fmtHours(campusMin)}h</span>
+          <span className="flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold ring-1 ring-white/15"><Wifi size={12} /> Online {fmtHours(onlineMin)}h</span>
+          <span className="ml-auto flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold ring-1 ring-white/15">{list.length} session{list.length === 1 ? "" : "s"}</span>
+        </div>
+        {isSent && <span className="relative mt-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-400/90 px-2.5 py-1 text-[11px] font-bold text-emerald-950"><CheckCircle2 size={12} /> Sent for {monthLabel(month)}</span>}
+      </div>
+
+      <button onClick={() => setModal({})} className="press shine mb-3 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-white py-3 text-sm font-bold text-slate-600 transition hover:border-slate-400 hover:text-slate-800"><Plus size={16} /> Add a session</button>
+
+      {/* Entries grouped by day */}
+      {entries === null ? (
+        <div className="flex flex-col items-center gap-2 py-12 text-slate-400"><Loader2 size={22} className="animate-spin" /><p className="text-xs font-semibold">Loading your timesheet…</p></div>
+      ) : days.length === 0 ? (
+        <Card className="text-center"><ClipboardList size={30} className="mx-auto mb-2 text-slate-300" /><p className="text-sm font-semibold text-slate-500">No sessions logged for {monthLabel(month)}.</p><p className="mt-0.5 text-xs text-slate-400">Tap “Add a session” to record the classes you taught.</p></Card>
+      ) : (
+        days.map(day => {
+          const dayEntries = byDate[day].sort((a, b) => a.start.localeCompare(b.start));
+          const dayMin = dayEntries.reduce((s, e) => s + e.minutes, 0);
+          return (
+            <div key={day} className="mb-3">
+              <div className="mb-1.5 flex items-center justify-between px-1"><p className="text-xs font-bold text-slate-500">{prettyDay(day)}</p><p className="text-[11px] font-bold text-slate-400">{fmtHours(dayMin)}h</p></div>
+              <Card className="!p-0">
+                {dayEntries.map((e, i) => (
+                  <div key={e.id} className={`flex items-center gap-3 px-3.5 py-3 ${i < dayEntries.length - 1 ? "border-b border-slate-100" : ""}`}>
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white" style={{ background: e.mode === "campus" ? NAVY : "#0d7a5f" }}>{e.mode === "campus" ? <Building2 size={17} /> : <Wifi size={17} />}</div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-slate-700">{e.title}</p>
+                      <p className="text-[11px] text-slate-400">{e.start}–{e.end} · {fmtHours(e.minutes)}h · {e.mode === "campus" ? "On campus" : "Online"}</p>
+                    </div>
+                    {e.status === "draft" ? (
+                      <div className="flex shrink-0 gap-1">
+                        <button onClick={() => setModal({ entry: e })} className="press flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button>
+                        <button onClick={() => del(e.id)} className="press flex h-8 w-8 items-center justify-center rounded-lg text-rose-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 size={15} /></button>
+                      </div>
+                    ) : (
+                      <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-600 ring-1 ring-emerald-200">Sent</span>
+                    )}
+                  </div>
+                ))}
+              </Card>
+            </div>
+          );
+        })
+      )}
+
+      {/* Send */}
+      {drafts.length > 0 && (
+        <button onClick={() => setConfirmSend(true)} className="press shine mt-2 flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-sm font-bold text-white shadow-lg" style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}>
+          <Send size={17} /> Send timesheet — {drafts.length} session{drafts.length === 1 ? "" : "s"}, {fmtHours(drafts.reduce((s, e) => s + e.minutes, 0))}h
+        </button>
+      )}
+
+      <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.entry ? "Edit session" : "Add session"}>
+        {modal && <TimesheetForm store={store} me={me} month={month} entry={modal.entry} onDone={() => { setModal(null); reload(); }} />}
+      </Modal>
+
+      <Modal open={confirmSend} onClose={() => setConfirmSend(false)} title="Send this timesheet?">
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">You're about to send your <b>{monthLabel(month)}</b> timesheet — <b>{drafts.length}</b> session{drafts.length === 1 ? "" : "s"}, <b>{fmtHours(drafts.reduce((s, e) => s + e.minutes, 0))} hours</b> — to the college office.</p>
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 ring-1 ring-amber-200">Once sent, these entries are locked and can't be edited.</p>
+          <div className="flex gap-2">
+            <button onClick={() => setConfirmSend(false)} className="flex-1 rounded-xl border-2 border-slate-200 py-2.5 text-sm font-bold text-slate-600">Not yet</button>
+            <PrimaryBtn onClick={send} disabled={busy} className="flex-1">{busy ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Send now</>}</PrimaryBtn>
+          </div>
+        </div>
+      </Modal>
+    </Screen>
+  );
+}
+
 /* ----- More ----- */
 function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
   const [toggles, setToggles] = useState({ notif: true, reminders: true, biometric: false });
@@ -985,6 +1170,7 @@ export function AdminDashboard({ store }) {
     { key: "assessments", label: "Assessments", I: Award },
     { key: "pat", label: "PAT", I: MessageSquare },
     { key: "staff", label: "Staff", I: Users },
+    { key: "timesheets", label: "Timesheets", I: Timer },
     { key: "settings", label: "Settings", I: Settings },
   ];
   const pendingCount = store.leave.filter(l => l.status === "pending").length;
@@ -1026,9 +1212,98 @@ export function AdminDashboard({ store }) {
         {tab === "assessments" && <AdminAssessments store={store} />}
         {tab === "pat" && <AdminPAT store={store} />}
         {tab === "staff" && <AdminStaff store={store} />}
+        {tab === "timesheets" && <AdminTimesheets store={store} />}
         {tab === "settings" && <AdminSettings store={store} />}
       </main>
     </div>
+  );
+}
+
+/* ----- Admin: submitted timesheets ----- */
+function AdminTimesheets({ store }) {
+  const [month, setMonth] = useState(() => monthOf(todayISO()));
+  const [entries, setEntries] = useState(null);
+  const [open, setOpen] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+    setEntries(null);
+    // No staffId → admin gets everyone's SUBMITTED entries for the month.
+    store.listTimesheets({ month }).then(d => { if (!cancelled) setEntries(d); }).catch(() => { if (!cancelled) setEntries([]); });
+    return () => { cancelled = true; };
+  }, [month, store]);
+
+  const shiftMonth = (delta) => { const d = new Date(month + "-01T00:00:00"); d.setMonth(d.getMonth() + delta); setMonth(d.toISOString().slice(0, 7)); };
+  const list = entries || [];
+  const byStaff = {};
+  for (const e of list) (byStaff[e.staffId] = byStaff[e.staffId] || { staffId: e.staffId, name: e.staffName, dept: e.staffDept, initials: e.staffInitials, colour: e.staffColour, entries: [] }).entries.push(e);
+  const people = Object.values(byStaff).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const totalMin = list.reduce((s, e) => s + e.minutes, 0);
+  const campusMin = list.filter(e => e.mode === "campus").reduce((s, e) => s + e.minutes, 0);
+  const onlineMin = list.filter(e => e.mode === "online").reduce((s, e) => s + e.minutes, 0);
+
+  const exportCsv = () => {
+    downloadCSV(`timesheets-${month}.csv`, [
+      { key: "staff", label: "Staff" }, { key: "dept", label: "Dept" }, { key: "date", label: "Date" }, { key: "start", label: "Start" }, { key: "end", label: "End" }, { key: "hours", label: "Hours" }, { key: "mode", label: "Mode" }, { key: "title", label: "Class/Activity" }, { key: "submittedAt", label: "Sent" },
+    ], list.map(e => ({ staff: e.staffName, dept: e.staffDept, date: e.date, start: e.start, end: e.end, hours: e.hours, mode: e.mode, title: e.title, submittedAt: e.submittedAt })));
+    store.notify("Exported timesheets CSV");
+  };
+
+  return (
+    <>
+      <AdminHeader title="Timesheets" subtitle="Timesheets staff have sent, by month" Icon={Timer} action={
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 rounded-xl bg-white px-1 py-1 shadow-sm ring-1 ring-slate-200">
+            <button onClick={() => shiftMonth(-1)} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100"><ChevronLeft size={16} /></button>
+            <span className="min-w-[120px] text-center text-xs font-bold text-slate-600">{monthLabel(month)}</span>
+            <button onClick={() => shiftMonth(1)} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100"><ChevronRight size={16} /></button>
+          </div>
+          <button onClick={exportCsv} disabled={!list.length} className="flex items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-xs font-bold text-slate-600 shadow-sm ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:opacity-50"><Download size={14} /> Export</button>
+        </div>
+      } />
+
+      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard label="Total hours" value={`${fmtHours(totalMin)}h`} sub={`${monthLabel(month)}`} Icon={Clock3} tone={NAVY} delay={0} animate />
+        <StatCard label="On campus" value={`${fmtHours(campusMin)}h`} sub="in person" Icon={Building2} tone="#1a3a8f" delay={60} animate />
+        <StatCard label="Online" value={`${fmtHours(onlineMin)}h`} sub="remote" Icon={Wifi} tone="#0d7a5f" delay={120} animate />
+        <StatCard label="Staff sent" value={people.length} sub="timesheets" Icon={Users} tone="#b45309" delay={180} animate />
+      </div>
+
+      {entries === null ? (
+        <div className="flex flex-col items-center gap-2 py-16 text-slate-400"><Loader2 size={24} className="animate-spin" /><p className="text-sm font-semibold">Loading timesheets…</p></div>
+      ) : people.length === 0 ? (
+        <div className="rounded-2xl bg-white py-16 text-center shadow-sm ring-1 ring-slate-100"><Timer size={34} className="mx-auto mb-2 text-slate-300" /><p className="text-sm font-semibold text-slate-500">No timesheets sent for {monthLabel(month)} yet.</p></div>
+      ) : (
+        <div className="space-y-3">
+          {people.map(p => {
+            const pMin = p.entries.reduce((s, e) => s + e.minutes, 0);
+            const pCampus = p.entries.filter(e => e.mode === "campus").reduce((s, e) => s + e.minutes, 0);
+            const isOpen = open[p.staffId];
+            return (
+              <div key={p.staffId} className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-100">
+                <button onClick={() => setOpen(o => ({ ...o, [p.staffId]: !o[p.staffId] }))} className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition hover:bg-slate-50">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-bold text-white" style={{ background: p.colour || NAVY }}>{p.initials}</span>
+                  <div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-slate-700">{p.name}</p><p className="truncate text-[11px] text-slate-400">{p.dept} · {p.entries.length} session{p.entries.length === 1 ? "" : "s"}</p></div>
+                  <div className="shrink-0 text-right"><p className="text-base font-extrabold" style={{ color: NAVY }}>{fmtHours(pMin)}h</p><p className="text-[10px] text-slate-400">{fmtHours(pCampus)}h campus</p></div>
+                  <ChevronDown size={18} className={`shrink-0 text-slate-300 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                </button>
+                {isOpen && (
+                  <div className="border-t border-slate-100 bg-slate-50/50 px-2 py-2">
+                    {p.entries.slice().sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start)).map(e => (
+                      <div key={e.id} className="flex items-center gap-3 rounded-xl px-2.5 py-2">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white" style={{ background: e.mode === "campus" ? NAVY : "#0d7a5f" }}>{e.mode === "campus" ? <Building2 size={14} /> : <Wifi size={14} />}</span>
+                        <div className="min-w-0 flex-1"><p className="truncate text-[13px] font-semibold text-slate-700">{e.title}</p><p className="text-[10px] text-slate-400">{prettyDay(e.date)} · {e.start}–{e.end}</p></div>
+                        <span className="shrink-0 text-xs font-bold text-slate-500">{fmtHours(e.minutes)}h</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 

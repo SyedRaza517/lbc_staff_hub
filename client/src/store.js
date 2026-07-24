@@ -149,6 +149,14 @@ export function useApiStore(notify, user) {
     catch (e) { await refreshAssessments().catch(() => {}); notify?.(e.message || "Action failed", "error"); throw e; }
   };
 
+  // Timesheets are month-scoped and the TimesheetScreen reloads its own list, so
+  // this wrapper only raises success/error toasts — no global refetch. The success
+  // message receives the mutation's result as its LAST argument (used by submit).
+  const runTs = (fn, okMsg, okType = "success") => async (...args) => {
+    try { const r = await fn(...args); if (okMsg) notify?.(typeof okMsg === "function" ? okMsg(...args, r) : okMsg, okType); return r; }
+    catch (e) { notify?.(e.message || "Action failed", "error"); throw e; }
+  };
+
   const actions = {
     refresh,
     // check-ins
@@ -214,6 +222,12 @@ export function useApiStore(notify, user) {
     getGrades: (id) => api.getGrades(id),
     listGrades: (params) => api.listGrades(params),
     studentAssessments: (id) => api.studentAssessments(id),
+    // timesheets (month-scoped; screens fetch their own month and reload after writes)
+    listTimesheets: (params) => api.listTimesheets(params),
+    addTimesheet: runTs((data) => api.addTimesheet(data), "Timesheet entry added"),
+    updateTimesheet: runTs((id, data) => api.updateTimesheet(id, data), "Entry updated"),
+    removeTimesheet: runTs((id) => api.removeTimesheet(id), "Entry removed", "info"),
+    submitTimesheet: runTs((month) => api.submitTimesheet(month), (month, r) => `Timesheet sent — ${r.sent} session${r.sent === 1 ? "" : "s"}, ${r.hours}h`),
   };
 
   return {

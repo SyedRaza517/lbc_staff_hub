@@ -62,6 +62,7 @@ model Staff {
   notifications  Notification[]  @relation("StaffNotifications")
   passwordResets PasswordReset[]
   devices        DeviceToken[]
+  timesheetEntries TimesheetEntry[]
 }
 
 // A phone (or browser) registered to receive push notifications.
@@ -356,4 +357,29 @@ model AttendanceMark {
 
   @@unique([sessionId, studentId])
   @@index([studentId])
+}
+
+// One line on a staff member's timesheet: a class or work session on a given day,
+// with its clock times, whether it was delivered on campus or online, and how many
+// minutes it ran. Entries start as "draft"; "Send timesheet" flips a whole month's
+// entries to "submitted" and notifies admins. minutes is stored (not just derived)
+// so monthly/daily totals aggregate in the database without re-parsing every row.
+model TimesheetEntry {
+  id          String   @id @default(cuid())
+  staff       Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  staffId     String
+  date        String   // YYYY-MM-DD (local London date)
+  startTime   String   // HH:MM 24h — when the class/session started
+  endTime     String   // HH:MM 24h — when it ended
+  minutes     Int      // duration in minutes (endTime - startTime), stored for aggregation
+  mode        String   @default("campus") // campus | online
+  title       String   // what it was, e.g. "Unit 4 — Database Design (Group A)"
+  moduleId    String?  // optional free link to an HND module (no FK: keeps it flexible)
+  note        String   @default("")
+  status      String   @default("draft")  // draft | submitted
+  submittedAt String?  // YYYY-MM-DD when the month was sent
+  createdAt   DateTime @default(now())
+
+  @@index([staffId, date])
+  @@index([staffId, status])
 }
