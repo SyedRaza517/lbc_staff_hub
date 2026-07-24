@@ -89,6 +89,7 @@ app.listen(PORT, () => {
   console.log(`Email: ${require("./email").describeEmail()}`);
   console.log(`Push:  ${require("./push").describePush()}`);
   startKeepAlive();
+  require("./scheduler").startScheduler();
 });
 
 // --- Keep-alive: stop the free-tier host idling the server to sleep ---

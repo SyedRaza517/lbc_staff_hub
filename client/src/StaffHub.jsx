@@ -942,12 +942,23 @@ function TimesheetScreen({ store, me }) {
   const [confirmSend, setConfirmSend] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // Blank to the loading state ONLY when the month changes (a deliberate switch),
+  // never on a background refresh.
+  useEffect(() => { setEntries(null); }, [month]);
+  // Fetch on month change / after a write / on a gentle 20s background poll — but
+  // always swap the rows IN PLACE (keep the old list until the new one arrives), so
+  // nothing flickers to zero. `store` is deliberately NOT a dependency: it's a fresh
+  // object every render, and depending on it refetched (and blanked) the list on
+  // every re-render — that was the "loads every second, drops to 0" bug.
   useEffect(() => {
     let cancelled = false;
-    setEntries(null);
-    store.listTimesheets({ month }).then(d => { if (!cancelled) setEntries(d); }).catch(() => { if (!cancelled) setEntries([]); });
-    return () => { cancelled = true; };
-  }, [month, reloadKey, store]);
+    const fetchNow = () => store.listTimesheets({ month })
+      .then(d => { if (!cancelled) setEntries(d); })
+      .catch(() => { if (!cancelled) setEntries(prev => prev || []); });
+    fetchNow();
+    const id = setInterval(() => { if (typeof document === "undefined" || document.visibilityState === "visible") fetchNow(); }, 20000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [month, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const reload = () => setReloadKey(k => k + 1);
 
   const shiftMonth = (delta) => { const d = new Date(month + "-01T00:00:00"); d.setMonth(d.getMonth() + delta); setMonth(d.toISOString().slice(0, 7)); };
@@ -1225,13 +1236,21 @@ function AdminTimesheets({ store }) {
   const [entries, setEntries] = useState(null);
   const [open, setOpen] = useState({});
 
+  // Loading state only on a deliberate month switch — not on the background poll.
+  useEffect(() => { setEntries(null); }, [month]);
+  // No staffId → admin gets everyone's SUBMITTED entries for the month. Refresh
+  // every 20s so newly-sent timesheets appear, swapping IN PLACE (no flicker to 0).
+  // `store` is intentionally not a dependency (fresh object each render → would
+  // refetch and blank the list constantly).
   useEffect(() => {
     let cancelled = false;
-    setEntries(null);
-    // No staffId → admin gets everyone's SUBMITTED entries for the month.
-    store.listTimesheets({ month }).then(d => { if (!cancelled) setEntries(d); }).catch(() => { if (!cancelled) setEntries([]); });
-    return () => { cancelled = true; };
-  }, [month, store]);
+    const fetchNow = () => store.listTimesheets({ month })
+      .then(d => { if (!cancelled) setEntries(d); })
+      .catch(() => { if (!cancelled) setEntries(prev => prev || []); });
+    fetchNow();
+    const id = setInterval(() => { if (typeof document === "undefined" || document.visibilityState === "visible") fetchNow(); }, 20000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [month]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const shiftMonth = (delta) => { const d = new Date(month + "-01T00:00:00"); d.setMonth(d.getMonth() + delta); setMonth(d.toISOString().slice(0, 7)); };
   const list = entries || [];
