@@ -196,22 +196,44 @@ export function TotpSetup({ challengeToken, onDone, onCancel }) {
     <form onSubmit={submit} className="flex flex-col gap-4">
       <ol className="space-y-1 text-xs text-slate-500">
         <li><span className="font-bold text-slate-700">1.</span> Install Google Authenticator, Microsoft Authenticator or Authy.</li>
-        <li><span className="font-bold text-slate-700">2.</span> Scan this QR code — or enter the key by hand.</li>
+        <li><span className="font-bold text-slate-700">2.</span> Tap “Add to your authenticator” below — it fills in your details automatically.</li>
         <li><span className="font-bold text-slate-700">3.</span> Type the 6-digit code it shows.</li>
       </ol>
 
+      {/* Primary path on the phone the app runs on: the otpauth:// link hands the
+          account straight to the installed authenticator with every detail filled
+          in (issuer, account, secret), so there's no need to scan a QR that's on
+          the very same screen. On a WebView / mobile browser the OS routes this to
+          Google Authenticator, Authy, etc. */}
+      <a
+        href={setup.otpauthUrl}
+        className="press shine flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white shadow-lg transition"
+        style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}
+      >
+        <Smartphone size={16} /> Add to your authenticator app
+      </a>
+      <p className="-mt-2 text-center text-[10px] leading-relaxed text-slate-400">
+        Opens Google Authenticator / Authy with your account details already filled in.
+      </p>
+
+      {/* QR is the fallback for enrolling from a computer, scanned with a phone. */}
       {qr ? (
-        <div className="flex justify-center">
-          <img src={qr} alt="QR code for your authenticator app" width={168} height={168} className="rounded-xl ring-1 ring-slate-200" />
-        </div>
+        <details className="rounded-xl bg-slate-50 ring-1 ring-slate-200">
+          <summary className="cursor-pointer list-none px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">
+            On another device? Scan a QR code instead
+          </summary>
+          <div className="flex justify-center pb-3">
+            <img src={qr} alt="QR code for your authenticator app" width={168} height={168} className="rounded-xl ring-1 ring-slate-200" />
+          </div>
+        </details>
       ) : (
         <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200">
-          The QR code couldn't be drawn — add the key below manually instead.
+          Can’t open your authenticator? Add the key below by hand.
         </p>
       )}
 
       <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
-        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Setup key (if you can't scan)</p>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Or enter this key by hand</p>
         <div className="mt-1 flex items-center gap-2">
           <code className="flex-1 break-all font-mono text-[11px] font-bold text-slate-700">{setup.formattedSecret}</code>
           <button type="button" onClick={copySecret} title="Copy key" className="press flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-slate-500 ring-1 ring-slate-200 transition hover:text-slate-800">
