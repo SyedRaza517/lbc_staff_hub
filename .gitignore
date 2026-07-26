@@ -21,3 +21,5 @@ migration-data.json
 # OS / editor
 .DS_Store
 Thumbs.db
+.idea/
+**/.idea/
