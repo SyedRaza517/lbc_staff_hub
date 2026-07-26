@@ -282,23 +282,29 @@ export default function App() {
   // they're an admin — otherwise picking "Staff App" would drop them on the dashboard.
   return (
     <>
-      <Shell user={user} logout={logout} initialView={entry === "app" ? "app" : entry === "admin" ? "admin" : undefined} />
+      <Shell user={user} logout={logout} entry={entry} />
       {/* One-time offer (phone app only) to protect sign-in with Face ID / fingerprint. */}
       <BiometricSetupPrompt />
     </>
   );
 }
 
-function Shell({ user, logout, initialView }) {
+function Shell({ user, logout, entry }) {
   const { applySession } = useAuth();
   const handset = useIsHandset();
   const isAdmin = user.accountRole === "ADMIN";
-  // On a phone, admins (including limited admins who registered via the app) land in
-  // the staff app and open their permitted dashboard from More — so they keep their
-  // staff experience (check-in, leave) and aren't dropped straight into the console.
-  // On desktop, admins still land on the dashboard. A deliberate "Admin" front-door
-  // choice (initialView="admin") always wins.
-  const [view, setView] = useState(initialView || ((isAdmin && !handset) ? "admin" : "app"));
+  // Where to land, decided by the person's ACCESS, not just the door they picked:
+  //   • chose "Staff App"            → staff app
+  //   • chose "Admin" AND is an admin → dashboard (filtered to their pages) — this is
+  //     honoured even on a narrow screen, since they explicitly asked for it
+  //   • not an admin                  → staff app (never a dead-end "Access denied")
+  //   • no explicit choice (native)   → desktop admins get the dashboard; on a phone
+  //     everyone starts in the staff app and opens the dashboard from More
+  const initialView = entry === "app" ? "app"
+    : (entry === "admin" && isAdmin) ? "admin"
+    : (isAdmin && !handset) ? "admin"
+    : "app";
+  const [view, setView] = useState(initialView);
   const [currentStaffId, setCurrentStaffId] = useState(user.id);
   const [toasts, setToasts] = useState([]);
   const [notes, setNotes] = useState([]);
