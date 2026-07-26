@@ -10,7 +10,7 @@ const prisma = require("../db");
 const { sSignup, sStaff } = require("../serializers");
 const { requireAuth, requireAdmin, hashPassword } = require("../auth");
 const { notifyStaff, notifyAdmins } = require("../notify");
-const { isInt32, MAX_ALLOWANCE_DAYS, isSite } = require("../validate");
+const { isInt32, MAX_ALLOWANCE_DAYS, isHomeSite } = require("../validate");
 const { notifyExistingAccount } = require("../invite");
 const { localDate } = require("../clock");
 
@@ -35,7 +35,7 @@ router.post("/", async (req, res) => {
   if (!EMAIL_REGEX.test(email)) return res.status(400).json({ error: "Enter a valid email address" });
   if (!jobTitle) return res.status(400).json({ error: "Position is required" });
   if (!dept) return res.status(400).json({ error: "Department is required" });
-  if (!isSite(site)) return res.status(400).json({ error: "Site must be one of HND, FE or Online" });
+  if (!isHomeSite(site)) return res.status(400).json({ error: "Site must be HND or FE" });
   if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
   // The client checks this too, but the API must not trust the client.
   if (confirmPassword && password !== confirmPassword) return res.status(400).json({ error: "Passwords do not match" });

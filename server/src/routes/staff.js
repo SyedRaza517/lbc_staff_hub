@@ -3,7 +3,7 @@ const prisma = require("../db");
 const { sStaff } = require("../serializers");
 const { requireAuth, requireAdmin, hashPassword } = require("../auth");
 const { notifyStaff } = require("../notify");
-const { isInt32, MAX_ALLOWANCE_DAYS, isString, isNonEmptyString, isSite } = require("../validate");
+const { isInt32, MAX_ALLOWANCE_DAYS, isString, isNonEmptyString, isHomeSite } = require("../validate");
 const { sendInvite, unguessablePassword } = require("../invite");
 
 // allowance is a 32-bit Int column. An out-of-range value would be stored by SQLite
@@ -42,7 +42,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   if (!isString(email)) return res.status(400).json({ error: "Email must be text" });
   if (role != null && !isString(role)) return res.status(400).json({ error: "Role must be text" });
   if (dept != null && !isString(dept)) return res.status(400).json({ error: "Department must be text" });
-  if (!isSite(site)) return res.status(400).json({ error: "Site must be one of HND, FE or Online" });
+  if (!isHomeSite(site)) return res.status(400).json({ error: "Site must be HND or FE" });
   if (!EMAIL_REGEX.test(String(email))) return res.status(400).json({ error: "Invalid email format" });
   // Reject a bad allowance instead of silently substituting 28 — an admin who typed
   // 27.5 or 280 was told the staff member was added and never learned the value was
@@ -89,7 +89,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   if (role != null && !isString(role)) return res.status(400).json({ error: "Role must be text" });
   if (dept != null && !isString(dept)) return res.status(400).json({ error: "Department must be text" });
   if (email != null && !isString(email)) return res.status(400).json({ error: "Email must be text" });
-  if (!isSite(site)) return res.status(400).json({ error: "Site must be one of HND, FE or Online" });
+  if (!isHomeSite(site)) return res.status(400).json({ error: "Site must be HND or FE" });
   if (role) data.jobTitle = role;
   if (dept) data.dept = dept;
   // site is a closed set incl. null — allow explicitly clearing it back to "unset".

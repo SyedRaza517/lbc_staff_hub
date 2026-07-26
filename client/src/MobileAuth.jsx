@@ -19,8 +19,10 @@ import {
 const NAVY = "#1a3a8f", NAVY_DARK = "#14306f", MAROON = "#9e1b32";
 
 const DEPARTMENTS = ["Teaching", "Administration", "Finance", "Student Services", "IT", "Facilities", "Management"];
-// The staff member's home site. Kept in sync with the server's validate.js SITES.
-const SITES = ["HND", "FE", "Online"];
+// The staff member's home site, picked at sign-up. Physical campuses only — a home
+// base is never "Online" (that's a check-in option, not a home site). Matches the
+// server's validate.js HOME_SITES.
+const SITES = ["HND", "FE"];
 
 const nowTime = () => new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 

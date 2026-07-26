@@ -44,14 +44,18 @@ function isRealDate(v) {
 const MAX_TEXT = 2000;
 
 // --- Sites ---
-// Where a person works / clocks in. A closed set: it labels a check-in and is the
-// staff member's home site. Validated so the column can only ever hold one of these.
+// Two closed sets, deliberately different:
+//   SITES      — where a CHECK-IN happened. Online is allowed (remote working).
+//   HOME_SITES — a staff member's home site, chosen at sign-up. Physical campuses
+//                only (HND / FE) — a person's base is not "Online".
+// Both fields are optional, so null/undefined always passes.
 const SITES = ["HND", "FE", "Online"];
-// Accepts a site string or null/undefined (the field is always optional).
+const HOME_SITES = ["HND", "FE"];
 const isSite = (v) => v == null || (isString(v) && SITES.includes(v));
+const isHomeSite = (v) => v == null || (isString(v) && HOME_SITES.includes(v));
 
 module.exports = {
   INT32_MAX, INT32_MIN, isInt32, MAX_ALLOWANCE_DAYS, MAX_ADJUSTMENT_DAYS,
   isString, isNonEmptyString, isRealDate, DATE_RE, MAX_TEXT,
-  SITES, isSite,
+  SITES, HOME_SITES, isSite, isHomeSite,
 };

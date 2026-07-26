@@ -505,9 +505,12 @@ function LeaveLegend({ types = LEAVE_TYPES, className = "" }) {
 }
 
 /* ----- Check-In ----- */
-// The sites a staff member can clock in from. Kept in sync with the server's
-// validate.js SITES list — both must agree or a valid pick is rejected.
+// Where a check-in can happen — includes Online (remote working). Kept in sync
+// with the server's validate.js SITES.
 const SITES = ["HND", "FE", "Online"];
+// A staff member's HOME site — physical campuses only, chosen at sign-up. Used by
+// the Staff-tab filter and the Add/Edit Staff form. Matches validate.js HOME_SITES.
+const HOME_SITES = ["HND", "FE"];
 
 function CheckInScreen({ store, me }) {
   const today = todayISO();
@@ -4741,7 +4744,7 @@ function AdminStaff({ store }) {
           <MapPin size={15} className="text-slate-400" />
           <select value={siteFilter} onChange={e => setSiteFilter(e.target.value)} className="bg-transparent text-sm font-medium text-slate-600 outline-none">
             <option value="">All sites</option>
-            {SITES.map(s => <option key={s} value={s}>{s}</option>)}
+            {HOME_SITES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
         <span className="ml-auto text-xs font-semibold text-slate-400">{filtered.length} of {total}</span>
@@ -4819,7 +4822,7 @@ function AdminStaff({ store }) {
           </div>
           <Field label="Email address"><input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@lbc.ac.uk" className={inputCls} /></Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Site"><select value={form.site} onChange={e => setForm(f => ({ ...f, site: e.target.value }))} className={inputCls}><option value="">Not set</option>{SITES.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>
+            <Field label="Site"><select value={form.site} onChange={e => setForm(f => ({ ...f, site: e.target.value }))} className={inputCls}><option value="">Not set</option>{HOME_SITES.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>
             <Field label="Holiday allowance (days)"><input type="number" min={0} value={form.allowance} onChange={e => setForm(f => ({ ...f, allowance: e.target.value }))} className={inputCls} /></Field>
           </div>
           {!edit && <p className="text-[11px] text-slate-400">The new account is created inactive — they get an email invitation to set their own password before they can sign in.</p>}
