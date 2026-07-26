@@ -1611,12 +1611,16 @@ function AdminHeader({ title, subtitle, action, Icon }) {
   );
 }
 function StatCard({ label, value, sub, Icon, tone = NAVY, delay = 0, animate }) {
-  const av = useCountUp(animate ? value : 0);
+  // Only count-up real numbers. Some cards pass a formatted string ("28d", "85%"),
+  // and animating that multiplied a string by a number → NaN, which rendered
+  // literally as "NaN". Strings (and non-finite numbers) now render as-is.
+  const canAnimate = animate && typeof value === "number" && Number.isFinite(value);
+  const av = useCountUp(canAnimate ? value : 0);
   return (
     <div className="hover-lift group relative overflow-hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:shadow-lg hover:ring-slate-300/80 fade-up" style={{ animationDelay: `${delay}ms` }}>
       <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full opacity-50 transition-transform duration-500 group-hover:scale-150" style={{ background: tone + "0d" }} />
       <div className="relative flex items-start justify-between">
-        <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p><p className="mt-1 text-3xl font-extrabold tabular-nums" style={{ color: tone }}>{animate ? av : value}</p>{sub && <p className="mt-0.5 text-xs text-slate-400">{sub}</p>}</div>
+        <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p><p className="mt-1 text-3xl font-extrabold tabular-nums" style={{ color: tone }}>{canAnimate ? av : value}</p>{sub && <p className="mt-0.5 text-xs text-slate-400">{sub}</p>}</div>
         <span className="flex h-11 w-11 items-center justify-center rounded-xl shadow-sm transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6" style={{ background: tone + "14" }}><Icon size={22} style={{ color: tone }} /></span>
       </div>
     </div>
