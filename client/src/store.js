@@ -44,8 +44,13 @@ export function useApiStore(notify, user) {
         api.listStaff(), api.listLeave(), api.listCheckins(), api.listDocuments(), api.listAdjustments(),
       ]);
       setStaff(st); setLeave(lv); setCheckins(ci); setDocs(dc); setAdjustments(aj);
-      // Sign-up requests are admin-only; asking as a staff user would just 403.
-      if (isAdmin) setSignups(await api.listSignups());
+      // Sign-up requests are admin-only AND now page-gated: a staff user, or an admin
+      // without the "signups" page, would 403. Swallow that so it neither breaks the
+      // rest of the load nor toasts an error on every 20s refresh — just leave it empty.
+      if (isAdmin) {
+        try { setSignups(await api.listSignups()); }
+        catch (_) { setSignups([]); }
+      }
     } catch (e) { notify?.(e.message || "Failed to load data", "error"); }
     setLoaded(true);
   }, [notify, isAdmin]);
@@ -184,6 +189,8 @@ export function useApiStore(notify, user) {
     updateStaff: run((id, data) => api.updateStaff(id, data), "Staff updated"),
     removeStaff: run((id) => api.removeStaff(id), "Staff removed", "error"),
     resetStaffTotp: run((id) => api.resetStaffTotp(id), "Two-step verification reset", "info"),
+    // Super-admin only: assign which admin pages a person may access.
+    updateAccess: run((id, pages) => api.updateStaffAccess(id, pages), "Access updated"),
     // HND registers
     refreshHnd,
     setSemesterId,

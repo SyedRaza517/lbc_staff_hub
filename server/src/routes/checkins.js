@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sCheckin } = require("../serializers");
-const { requireAuth, requireAdmin } = require("../auth");
+const { requireAuth, requirePage } = require("../auth");
 const { isString, isRealDate, MAX_TEXT, isSite } = require("../validate");
 const { localDate, localTime } = require("../clock");
 
@@ -64,7 +64,7 @@ router.post("/:id/check-out", requireAuth, async (req, res) => {
 });
 
 // PUT /api/checkins  (admin) — upsert a record for any staff/date
-router.put("/", requireAuth, requireAdmin, async (req, res) => {
+router.put("/", requireAuth, requirePage("checkin"), async (req, res) => {
   const { staffId, date, in: tIn, out, site } = req.body || {};
   if (!staffId || !date || !tIn) return res.status(400).json({ error: "staffId, date and in required" });
   // Type checks, not just truthiness: a number or object here reached Prisma and

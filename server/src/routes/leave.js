@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sLeave } = require("../serializers");
-const { requireAuth, requireAdmin } = require("../auth");
+const { requireAuth, requireAnyPage } = require("../auth");
 const { notifyStaff, notifyAdmins } = require("../notify");
 const { localDate } = require("../clock");
 
@@ -78,7 +78,7 @@ router.post("/", requireAuth, async (req, res) => {
 });
 
 // PUT /api/leave/:id/decision  (admin) — approve / reject with optional note
-router.put("/:id/decision", requireAuth, requireAdmin, async (req, res) => {
+router.put("/:id/decision", requireAuth, requireAnyPage(["requests", "approvals"]), async (req, res) => {
   const { status, note } = req.body || {};
   if (!["approved", "rejected"].includes(status)) return res.status(400).json({ error: "status must be approved or rejected" });
   // `note` goes straight into a String column. A non-string made Prisma throw, and

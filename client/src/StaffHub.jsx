@@ -1247,10 +1247,28 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
 }
 
 /* ============================================================ ADMIN DASHBOARD ============================================================ */
+// The assignable admin pages, in nav order. "access" is intentionally excluded —
+// it is Super-Admin-only and never granted. Keep in sync with server validate.js.
+const ADMIN_PAGES = ["overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staff", "timesheets", "settings"];
+const PAGE_LABELS = { overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staff: "Staff", timesheets: "Timesheets", settings: "Settings" };
+
+// Can this user see/use a given admin page? The Super Admin gets everything,
+// including the Super-Admin-only Access tab. A page-scoped admin gets only their
+// granted pages (null adminPages = unrestricted, so existing admins keep full
+// access). Anyone who isn't an admin gets nothing.
+const canAccessPage = (user, key) => {
+  if (!user) return false;
+  if (key === "access") return !!user.isSuperAdmin;   // never assignable to others
+  if (user.isSuperAdmin) return true;
+  if (user.accountRole !== "ADMIN") return false;
+  const pages = user.adminPages;
+  return pages == null || (Array.isArray(pages) && pages.includes(key));
+};
+
 export function AdminDashboard({ store }) {
-  const [tab, setTab] = useState("overview");
+  const me = store.currentUser;
   if (!store.isAdmin) return <div className="p-4 text-slate-400">Access denied</div>;
-  const nav = [
+  const allNav = [
     { key: "overview", label: "Overview", I: LayoutDashboard },
     { key: "kpi", label: "KPIs", I: Activity },
     { key: "checkin", label: "Check-In", I: Clock3 },
@@ -1268,7 +1286,14 @@ export function AdminDashboard({ store }) {
     { key: "staff", label: "Staff", I: Users },
     { key: "timesheets", label: "Timesheets", I: Timer },
     { key: "settings", label: "Settings", I: Settings },
+    { key: "access", label: "Access", I: ShieldCheck },
   ];
+  // Only the pages this admin may see. Super Admin sees all + the Access tab.
+  const nav = allNav.filter(n => canAccessPage(me, n.key));
+  const [tab, setTab] = useState(() => nav[0]?.key || "overview");
+  // If the current tab isn't in the allowed set (e.g. access was changed mid-session),
+  // fall back to the first one they can see, so no forbidden page ever renders.
+  const activeKey = nav.some(n => n.key === tab) ? tab : (nav[0]?.key || null);
   const pendingCount = store.leave.filter(l => l.status === "pending").length;
   const pendingSignups = (store.signups || []).filter(s => s.status === "pending").length;
   return (
@@ -1280,38 +1305,133 @@ export function AdminDashboard({ store }) {
         </div>
         <nav className="flex-1 space-y-1">
           {nav.map((n, i) => (
-            <button key={n.key} onClick={() => setTab(n.key)} className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all duration-200 active:scale-[0.98] slide-in ${tab === n.key ? "text-white shadow-md" : "text-slate-500 hover:translate-x-1 hover:bg-slate-100"}`} style={tab === n.key ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})`, boxShadow: "0 6px 18px -6px rgba(26,58,143,.6)", animationDelay: `${i * 35}ms` } : { animationDelay: `${i * 35}ms` }}>
+            <button key={n.key} onClick={() => setTab(n.key)} className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all duration-200 active:scale-[0.98] slide-in ${activeKey === n.key ? "text-white shadow-md" : "text-slate-500 hover:translate-x-1 hover:bg-slate-100"}`} style={activeKey === n.key ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})`, boxShadow: "0 6px 18px -6px rgba(26,58,143,.6)", animationDelay: `${i * 35}ms` } : { animationDelay: `${i * 35}ms` }}>
               <n.I size={18} className="transition-transform duration-200 group-hover:scale-110" /><span className="flex-1 text-left">{n.label}</span>
               {(n.key === "requests" || n.key === "approvals") && pendingCount > 0 && <span className="pop rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-900 shadow-sm">{pendingCount}</span>}
               {n.key === "signups" && pendingSignups > 0 && <span className="pop rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-900 shadow-sm">{pendingSignups}</span>}
             </button>
           ))}
         </nav>
-        <div className="rounded-xl bg-slate-50 p-3 text-center"><p className="text-[11px] text-slate-400">Logged in as</p><p className="text-sm font-bold text-slate-700">HR Administrator</p></div>
+        <div className="rounded-xl bg-slate-50 p-3 text-center"><p className="text-[11px] text-slate-400">Logged in as</p><p className="text-sm font-bold text-slate-700">{me?.name || "Administrator"}</p>{me?.isSuperAdmin && <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: MAROON }}>Super Admin</p>}</div>
       </aside>
       <main className="flex-1 overflow-x-hidden bg-slate-100 p-5 md:p-7">
         <div className="mb-4 flex gap-1.5 overflow-x-auto md:hidden">
-          {nav.map(n => <button key={n.key} onClick={() => setTab(n.key)} className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm transition-all active:scale-95 ${tab === n.key ? "text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`} style={tab === n.key ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}><n.I size={14} /> {n.label}</button>)}
+          {nav.map(n => <button key={n.key} onClick={() => setTab(n.key)} className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm transition-all active:scale-95 ${activeKey === n.key ? "text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`} style={activeKey === n.key ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}><n.I size={14} /> {n.label}</button>)}
         </div>
-        {tab === "overview" && <AdminOverview store={store} setTab={setTab} />}
-        {tab === "kpi" && <AdminKPI store={store} />}
-        {tab === "checkin" && <AdminCheckin store={store} />}
-        {tab === "balances" && <AdminBalances store={store} />}
-        {tab === "calendar" && <AdminCalendar store={store} />}
-        {tab === "requests" && <AdminRequests store={store} />}
-        {tab === "documents" && <AdminDocuments store={store} />}
-        {tab === "approvals" && <AdminApprovals store={store} />}
-        {tab === "signups" && <AdminSignups store={store} />}
-        {tab === "summaries" && <AdminSummaries store={store} />}
-        {tab === "registers" && <AdminHndRegisters store={store} />}
-        {tab === "students" && <AdminStudents store={store} />}
-        {tab === "assessments" && <AdminAssessments store={store} />}
-        {tab === "pat" && <AdminPAT store={store} />}
-        {tab === "staff" && <AdminStaff store={store} />}
-        {tab === "timesheets" && <AdminTimesheets store={store} />}
-        {tab === "settings" && <AdminSettings store={store} />}
+        {activeKey === "overview" && <AdminOverview store={store} setTab={setTab} />}
+        {activeKey === "kpi" && <AdminKPI store={store} />}
+        {activeKey === "checkin" && <AdminCheckin store={store} />}
+        {activeKey === "balances" && <AdminBalances store={store} />}
+        {activeKey === "calendar" && <AdminCalendar store={store} />}
+        {activeKey === "requests" && <AdminRequests store={store} />}
+        {activeKey === "documents" && <AdminDocuments store={store} />}
+        {activeKey === "approvals" && <AdminApprovals store={store} />}
+        {activeKey === "signups" && <AdminSignups store={store} />}
+        {activeKey === "summaries" && <AdminSummaries store={store} />}
+        {activeKey === "registers" && <AdminHndRegisters store={store} />}
+        {activeKey === "students" && <AdminStudents store={store} />}
+        {activeKey === "assessments" && <AdminAssessments store={store} />}
+        {activeKey === "pat" && <AdminPAT store={store} />}
+        {activeKey === "staff" && <AdminStaff store={store} />}
+        {activeKey === "timesheets" && <AdminTimesheets store={store} />}
+        {activeKey === "settings" && <AdminSettings store={store} />}
+        {activeKey === "access" && <AdminAccess store={store} />}
       </main>
     </div>
+  );
+}
+
+/* ----- Dashboard: Access control (Super Admin only) ----- */
+function AdminAccess({ store }) {
+  const [selId, setSelId] = useState(null);
+  const [pages, setPages] = useState([]);   // working selection for the picked person
+  const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState("");
+
+  // The pages a person currently has: super admin & unrestricted admin = all;
+  // a scoped admin = their list; anyone else = none.
+  const grantOf = (p) => p.isSuperAdmin ? ADMIN_PAGES.slice()
+    : p.accountRole === "ADMIN" ? (p.adminPages == null ? ADMIN_PAGES.slice() : p.adminPages)
+    : (Array.isArray(p.adminPages) ? p.adminPages : []);
+  const roleLabel = (p) => p.isSuperAdmin ? "Super Admin"
+    : p.accountRole === "ADMIN" ? (p.adminPages == null ? "Full admin" : `${p.adminPages.length} page${p.adminPages.length === 1 ? "" : "s"}`)
+    : "No access";
+
+  const people = [...store.staff].sort((a, b) => {
+    const rank = (p) => p.isSuperAdmin ? 0 : p.accountRole === "ADMIN" ? 1 : 2;
+    return rank(a) - rank(b) || a.name.localeCompare(b.name);
+  });
+  const ql = q.trim().toLowerCase();
+  const list = people.filter(p => !ql || p.name.toLowerCase().includes(ql) || (p.email || "").toLowerCase().includes(ql));
+
+  const sel = people.find(p => p.id === selId) || null;
+  const pick = (p) => { setSelId(p.id); setPages(grantOf(p)); };
+  const toggle = (k) => setPages(ps => ps.includes(k) ? ps.filter(x => x !== k) : [...ps, k]);
+  const allOn = ADMIN_PAGES.every(k => pages.includes(k));
+  const toggleAll = () => setPages(allOn ? [] : ADMIN_PAGES.slice());
+
+  const save = async () => {
+    if (!sel) return;
+    setBusy(true);
+    try { await store.updateAccess(sel.id, pages); } catch (_) {} finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <AdminHeader title="Access" subtitle="Choose a person, then tick the admin pages they can open" Icon={ShieldCheck} />
+      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+        {/* People */}
+        <div className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200/70">
+          <div className="mb-2 flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200"><Search size={15} className="text-slate-400" /><input value={q} onChange={e => setQ(e.target.value)} placeholder="Search people…" className="w-full bg-transparent text-sm outline-none" /></div>
+          <div className="max-h-[60vh] space-y-1 overflow-y-auto">
+            {list.map(p => (
+              <button key={p.id} onClick={() => pick(p)} className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition ${selId === p.id ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-slate-50"}`}>
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: p.colour }}>{p.initials}</span>
+                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-700">{p.name}</span><span className="block truncate text-[11px] text-slate-400">{p.email}</span></span>
+                <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold" style={p.isSuperAdmin ? { background: MAROON, color: "white" } : p.accountRole === "ADMIN" ? { background: "#e0e7ff", color: "#4338ca" } : { background: "#f1f5f9", color: "#64748b" }}>{roleLabel(p)}</span>
+              </button>
+            ))}
+            {list.length === 0 && <p className="px-2 py-6 text-center text-xs text-slate-400">No people match.</p>}
+          </div>
+        </div>
+
+        {/* Editor */}
+        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70">
+          {!sel && <EmptyState Icon={ShieldCheck} title="Pick a person" msg="Choose someone on the left to set which admin pages they can access." />}
+          {sel && sel.isSuperAdmin && (
+            <div className="flex items-center gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 ring-1 ring-amber-200">
+              <ShieldCheck size={18} className="shrink-0" /> {sel.name} is the Super Admin and always has full access.
+            </div>
+          )}
+          {sel && !sel.isSuperAdmin && (
+            <>
+              <div className="mb-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: sel.colour }}>{sel.initials}</span>
+                  <div><p className="font-bold text-slate-800">{sel.name}</p><p className="text-[11px] text-slate-400">{pages.length === 0 ? "No admin access" : allOn ? "Full admin access" : `${pages.length} of ${ADMIN_PAGES.length} pages`}</p></div>
+                </div>
+                <button onClick={toggleAll} className="text-xs font-bold text-blue-600 hover:underline">{allOn ? "Clear all" : "Select all"}</button>
+              </div>
+              <div className="grid gap-1.5 sm:grid-cols-2">
+                {ADMIN_PAGES.map(k => {
+                  const on = pages.includes(k);
+                  return (
+                    <button key={k} onClick={() => toggle(k)} className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-semibold ring-1 transition ${on ? "bg-blue-50 text-slate-800 ring-blue-200" : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50"}`}>
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md ring-1" style={on ? { background: NAVY, borderColor: "transparent" } : { boxShadow: "inset 0 0 0 1px #cbd5e1" }}>{on && <Check size={13} className="text-white" />}</span>
+                      {PAGE_LABELS[k]}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-4 flex items-start gap-1.5 rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-100">
+                <AlertCircle size={13} className="mt-px shrink-0" /> Granting at least one page makes this person an admin for those pages. Clearing all removes their admin access entirely. Changes take effect the next time they open the app.
+              </p>
+              <PrimaryBtn onClick={save} disabled={busy} className="mt-4 w-full"><Save size={16} /> {busy ? "Saving…" : "Save access"}</PrimaryBtn>
+            </>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 

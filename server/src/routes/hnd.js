@@ -4,14 +4,14 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sSemester, sProgramme, sModule, sStudent, sSession, sMark } = require("../serializers");
-const { requireAuth, requireAdmin } = require("../auth");
+const { requireAuth, requireAdmin, requireAnyPage } = require("../auth");
 const { isStatus, summarise } = require("../attendance");
 
 // DEF-01: HND registers are an admin-only feature (they live entirely in the admin
 // dashboard; no staff/mobile flow reads them). Guard EVERY route — reads included —
 // so a non-admin token cannot read the student directory, attendance matrix or
 // registers. Individual routes keep their own requireAdmin too (defence in depth).
-router.use(requireAuth, requireAdmin);
+router.use(requireAuth, requireAnyPage(["registers", "students"]));
 
 const PALETTE = ["#1a3a8f", "#9e1b32", "#0d7a5f", "#b45309", "#6d28d9", "#0e7490", "#be123c"];
 const colourFor = (seed) => PALETTE[Math.abs(String(seed).split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % PALETTE.length];

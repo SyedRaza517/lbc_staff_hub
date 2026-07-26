@@ -1,9 +1,9 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sStaff } = require("../serializers");
-const { requireAuth, requireAdmin, hashPassword } = require("../auth");
+const { requireAuth, requireAdmin, requireSuperAdmin, requireAnyPage, hashPassword } = require("../auth");
 const { notifyStaff } = require("../notify");
-const { isInt32, MAX_ALLOWANCE_DAYS, isString, isNonEmptyString, isHomeSite } = require("../validate");
+const { isInt32, MAX_ALLOWANCE_DAYS, isString, isNonEmptyString, isHomeSite, ADMIN_PAGES } = require("../validate");
 const { sendInvite, unguessablePassword } = require("../invite");
 
 // allowance is a 32-bit Int column. An out-of-range value would be stored by SQLite
@@ -22,17 +22,22 @@ const colourFor = (email) => { let h = 0; for (const ch of String(email)) h = (h
 // GET /api/staff  — any authenticated user (needed for calendars / who's-off)
 router.get("/", requireAuth, async (req, res) => {
   const staff = await prisma.staff.findMany({ orderBy: { name: "asc" } });
-  // Admins (and each user's own record) get the full shape. Other staff get a
-  // reduced public shape so colleagues' email / allowance / account role are
-  // not exposed to every authenticated user (calendars only need name/dept/colour).
-  if (req.user.accountRole === "ADMIN") return res.json(staff.map(sStaff));
-  res.json(staff.map((s) => s.id === req.user.id
+  // Full shape (email / allowance / account role / access) goes only to those who
+  // manage staff: the Super Admin, or an admin with the staff/settings page. Every
+  // other admin gets the same reduced public shape as regular staff — so a restricted
+  // admin can't harvest colleagues' PII through the API, only the names/colours other
+  // tabs (calendars, check-in, timesheets) need. Everyone still sees their OWN record.
+  const u = req.user;
+  const pages = u.adminPages; // null = full access
+  const canManageStaff = u.accountRole === "ADMIN" && (u.isSuperAdmin || pages == null || pages.includes("staff") || pages.includes("settings"));
+  if (canManageStaff) return res.json(staff.map(sStaff));
+  res.json(staff.map((s) => s.id === u.id
     ? sStaff(s)
     : { id: s.id, name: s.name, role: s.jobTitle, dept: s.dept, initials: s.initials, colour: s.colour }));
 });
 
 // POST /api/staff  (admin)
-router.post("/", requireAuth, requireAdmin, async (req, res) => {
+router.post("/", requireAuth, requireAnyPage(["staff", "settings"]), async (req, res) => {
   const { name, role, dept, email, allowance, password, site } = req.body || {};
   if (!name || !email) return res.status(400).json({ error: "Name and email required" });
   // Type-check before anything touches initialsOf() or Prisma: a number here threw
@@ -79,7 +84,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // PUT /api/staff/:id  (admin)
-router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
+router.put("/:id", requireAuth, requireAnyPage(["staff", "settings"]), async (req, res) => {
   const { name, role, dept, email, allowance, site } = req.body || {};
   const data = {};
   if (name != null) {
@@ -111,10 +116,39 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// PUT /api/staff/:id/access  (SUPER ADMIN) — set which admin-dashboard pages this
+// person may access. Body { pages: string[] | null }.
+//
+// This is also how someone becomes (or stops being) an admin: granting at least one
+// page makes them an ADMIN scoped to those pages; granting none demotes them back to
+// a plain STAFF member with no dashboard access. Granting every page stores NULL
+// (unrestricted full admin). Keeping account-role in lock-step with the grant means
+// the rest of the app's "is this an admin?" logic needs no changes.
+router.put("/:id/access", requireAuth, requireSuperAdmin, async (req, res) => {
+  const { pages } = req.body || {};
+  if (pages !== null && !Array.isArray(pages)) return res.status(400).json({ error: "pages must be an array or null" });
+  if (Array.isArray(pages) && !pages.every((p) => isString(p))) return res.status(400).json({ error: "pages must be page-key strings" });
+  const target = await prisma.staff.findUnique({ where: { id: req.params.id } });
+  if (!target) return res.status(404).json({ error: "Staff not found" });
+  // The Super Admin always has everything and must never be demoted here.
+  if (target.isSuperAdmin) return res.status(400).json({ error: "The Super Admin always has full access" });
+  // Keep only recognised page keys, de-duplicated — junk can't grant or block anything.
+  const clean = pages == null ? [] : [...new Set(pages.filter((p) => ADMIN_PAGES.includes(p)))];
+  let data;
+  if (clean.length === 0) {
+    data = { accountRole: "STAFF", adminPages: null };           // no pages → not an admin
+  } else {
+    const full = ADMIN_PAGES.every((p) => clean.includes(p));    // all pages → unrestricted
+    data = { accountRole: "ADMIN", adminPages: full ? null : JSON.stringify(clean) };
+  }
+  const staff = await prisma.staff.update({ where: { id: req.params.id }, data });
+  res.json(sStaff(staff));
+});
+
 // POST /api/staff/:id/invite  (admin) — re-send the activation email.
 // The link expires after 7 days and emails go astray, so an admin needs a way to
 // issue a fresh one without deleting and re-creating the person.
-router.post("/:id/invite", requireAuth, requireAdmin, async (req, res) => {
+router.post("/:id/invite", requireAuth, requireAnyPage(["staff", "settings"]), async (req, res) => {
   const staff = await prisma.staff.findUnique({ where: { id: req.params.id } });
   if (!staff) return res.status(404).json({ error: "Staff not found" });
   if (!staff.pendingActivation) return res.status(400).json({ error: "This account is already active" });
@@ -130,7 +164,7 @@ router.post("/:id/invite", requireAuth, requireAdmin, async (req, res) => {
 // (mustSetupTotp, i.e. accounts created from an app sign-up) the next sign-in is
 // forced straight back into enrolment. Their password is untouched, so a reset
 // alone never grants anyone access.
-router.delete("/:id/totp", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/:id/totp", requireAuth, requireAnyPage(["staff", "settings"]), async (req, res) => {
   const staff = await prisma.staff.findUnique({ where: { id: req.params.id } });
   if (!staff) return res.status(404).json({ error: "Staff not found" });
   if (!staff.totpEnabled && !staff.totpSecret) return res.status(400).json({ error: "Two-step verification is not set up for this account" });
@@ -154,7 +188,7 @@ router.delete("/:id/totp", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/staff/:id  (admin)
-router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/:id", requireAuth, requireAnyPage(["staff", "settings"]), async (req, res) => {
   if (req.params.id === req.user.id) return res.status(400).json({ error: "You cannot delete your own account" });
   try {
     await prisma.staff.delete({ where: { id: req.params.id } });

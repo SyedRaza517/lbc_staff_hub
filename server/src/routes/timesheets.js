@@ -9,7 +9,7 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sTimesheet } = require("../serializers");
-const { requireAuth, requireAdmin } = require("../auth");
+const { requireAuth, requirePage } = require("../auth");
 const { notifyAdmins, notifyStaff } = require("../notify");
 const { localDate } = require("../clock");
 
@@ -137,7 +137,7 @@ router.post("/submit", requireAuth, async (req, res) => {
 // month as approved; requesting changes bounces every entry back to the staff member
 // with a required comment so they can fix and re-send. Acts only on entries that are
 // currently "submitted" (awaiting review).
-router.post("/review", requireAuth, requireAdmin, async (req, res) => {
+router.post("/review", requireAuth, requirePage("timesheets"), async (req, res) => {
   const { staffId, month, decision, note } = req.body || {};
   if (!staffId || typeof staffId !== "string") return res.status(400).json({ error: "staffId is required" });
   if (!isMonth(month)) return res.status(400).json({ error: "month must be YYYY-MM" });

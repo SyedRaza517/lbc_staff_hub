@@ -95,6 +95,9 @@ export const api = {
   updateStaff: (id, data) => request(`/staff/${id}`, { method: "PUT", body: data }),
   removeStaff: (id) => request(`/staff/${id}`, { method: "DELETE" }),
   resetStaffTotp: (id) => request(`/staff/${id}/totp`, { method: "DELETE" }),
+  // Super-admin only: set which admin pages a staff member may access.
+  // pages: array of page keys, or null to clear the restriction (full access).
+  updateStaffAccess: (id, pages) => request(`/staff/${id}/access`, { method: "PUT", body: { pages } }),
   // check-ins
   listCheckins: (date) => request(`/checkins${date ? `?date=${date}` : ""}`),
   checkIn: (site) => request("/checkins/check-in", { method: "POST", body: site ? { site } : {} }),

@@ -8,7 +8,7 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sSignup, sStaff } = require("../serializers");
-const { requireAuth, requireAdmin, hashPassword } = require("../auth");
+const { requireAuth, requirePage, hashPassword } = require("../auth");
 const { notifyStaff, notifyAdmins } = require("../notify");
 const { isInt32, MAX_ALLOWANCE_DAYS, isHomeSite } = require("../validate");
 const { notifyExistingAccount } = require("../invite");
@@ -68,7 +68,7 @@ router.post("/", async (req, res) => {
 });
 
 // GET /api/signup — admin. Optional ?status=pending|approved|rejected
-router.get("/", requireAuth, requireAdmin, async (req, res) => {
+router.get("/", requireAuth, requirePage("signups"), async (req, res) => {
   const status = str(req.query?.status);
   const where = ["pending", "approved", "rejected"].includes(status) ? { status } : {};
   const rows = await prisma.signupRequest.findMany({ where, orderBy: { createdAt: "desc" } });
@@ -77,7 +77,7 @@ router.get("/", requireAuth, requireAdmin, async (req, res) => {
 
 // PUT /api/signup/:id/decision — admin approves or declines.
 // Approving creates the Staff account; declining leaves the request for the record.
-router.put("/:id/decision", requireAuth, requireAdmin, async (req, res) => {
+router.put("/:id/decision", requireAuth, requirePage("signups"), async (req, res) => {
   const { status, note, allowance } = req.body || {};
   if (!["approved", "rejected"].includes(status)) return res.status(400).json({ error: "status must be approved or rejected" });
 

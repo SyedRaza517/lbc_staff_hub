@@ -54,8 +54,18 @@ const HOME_SITES = ["HND", "FE"];
 const isSite = (v) => v == null || (isString(v) && SITES.includes(v));
 const isHomeSite = (v) => v == null || (isString(v) && HOME_SITES.includes(v));
 
+// --- Admin dashboard pages (RBAC) ---
+// The canonical set of assignable admin pages, matching the dashboard nav keys.
+// "access" is deliberately NOT here — it is Super-Admin-only and never assigned.
+// Must stay in sync with the client's ADMIN_PAGES.
+const ADMIN_PAGES = [
+  "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents",
+  "approvals", "signups", "summaries", "registers", "students", "assessments",
+  "pat", "staff", "timesheets", "settings",
+];
+
 module.exports = {
   INT32_MAX, INT32_MIN, isInt32, MAX_ALLOWANCE_DAYS, MAX_ADJUSTMENT_DAYS,
   isString, isNonEmptyString, isRealDate, DATE_RE, MAX_TEXT,
-  SITES, HOME_SITES, isSite, isHomeSite,
+  SITES, HOME_SITES, isSite, isHomeSite, ADMIN_PAGES,
 };

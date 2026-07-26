@@ -56,4 +56,28 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { hashPassword, verifyPassword, signToken, requireAuth, requireAdmin, SECRET };
+// Only the Super Admin — used to guard the access-management endpoints.
+function requireSuperAdmin(req, res, next) {
+  if (!req.user?.isSuperAdmin) return res.status(403).json({ error: "Super Admin access required" });
+  next();
+}
+
+// Guard an admin-only endpoint by admin-dashboard page(s). The Super Admin always
+// passes. A regular admin passes if their adminPages is null (never configured →
+// full access, so existing admins aren't locked out) or includes at least one of
+// the given page keys. Non-admins are rejected. Supersedes requireAdmin on the
+// routes it's applied to (it already enforces the ADMIN role).
+function requireAnyPage(pages) {
+  const wanted = Array.isArray(pages) ? pages : [pages];
+  return (req, res, next) => {
+    const u = req.user;
+    if (u?.isSuperAdmin) return next();
+    if (u?.accountRole !== "ADMIN") return res.status(403).json({ error: "Admin access required" });
+    const allowed = u.adminPages; // null = unconfigured = full access
+    if (allowed == null || wanted.some((p) => allowed.includes(p))) return next();
+    return res.status(403).json({ error: "You don't have access to this section" });
+  };
+}
+const requirePage = (page) => requireAnyPage([page]);
+
+module.exports = { hashPassword, verifyPassword, signToken, requireAuth, requireAdmin, requireSuperAdmin, requirePage, requireAnyPage, SECRET };

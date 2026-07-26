@@ -11,7 +11,20 @@ const sStaff = (s) => ({
   // True while an admin-created account is waiting for the person to set their
   // own password from the invitation email. Such an account cannot be signed into.
   pendingActivation: s.pendingActivation ?? false,
+  // --- Admin access control ---
+  isSuperAdmin: s.isSuperAdmin ?? false,
+  // Parsed to an array of allowed page keys, or null = "never configured" (full
+  // access). Bad/corrupt JSON is treated as null rather than throwing.
+  adminPages: parseAdminPages(s.adminPages),
 });
+
+// NULL → null (unconfigured, full access). Valid JSON array → the array. Anything
+// else (including '[]') → as parsed; only unparseable text falls back to null.
+function parseAdminPages(raw) {
+  if (raw == null) return null;
+  try { const a = JSON.parse(raw); return Array.isArray(a) ? a : null; }
+  catch (_) { return null; }
+}
 
 const sSignup = (r) => ({
   id: r.id, name: r.name, email: r.email, role: r.jobTitle, dept: r.dept, site: r.site ?? null,

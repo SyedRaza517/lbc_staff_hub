@@ -3,12 +3,12 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sAssessment, sGrade, sStudent, sModule } = require("../serializers");
-const { requireAuth, requireAdmin } = require("../auth");
+const { requireAuth, requireAdmin, requirePage } = require("../auth");
 const { isRealDate } = require("../validate");
 
 // DEF-01: the gradebook is admin-only (student marks are sensitive; no staff/mobile
 // flow reads them). Guard every route, reads included, against non-admin tokens.
-router.use(requireAuth, requireAdmin);
+router.use(requireAuth, requirePage("assessments"));
 
 const TYPES = ["Assignment", "Exam", "Presentation", "Project", "Portfolio"];
 const str = (v) => (typeof v === "string" ? v.trim() : "");

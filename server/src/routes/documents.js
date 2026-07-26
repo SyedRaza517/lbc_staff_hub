@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sDoc } = require("../serializers");
-const { requireAuth, requireAdmin } = require("../auth");
+const { requireAuth, requirePage } = require("../auth");
 const { isString, isNonEmptyString, MAX_TEXT } = require("../validate");
 const { localDate } = require("../clock");
 
@@ -22,7 +22,7 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 // POST /api/documents  (admin)
-router.post("/", requireAuth, requireAdmin, async (req, res) => {
+router.post("/", requireAuth, requirePage("documents"), async (req, res) => {
   const { name, type, scope, assignedTo } = req.body || {};
   if (!name) return res.status(400).json({ error: "Name required" });
   // Type-check before Prisma sees it — a non-string threw and surfaced as a 500.
@@ -47,7 +47,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // DELETE /api/documents/:id  (admin)
-router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/:id", requireAuth, requirePage("documents"), async (req, res) => {
   try { await prisma.document.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (e) { res.status(404).json({ error: "Document not found" }); }
 });

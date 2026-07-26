@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sAdj } = require("../serializers");
-const { requireAuth, requireAdmin } = require("../auth");
+const { requireAuth, requirePage } = require("../auth");
 const { isInt32, MAX_ADJUSTMENT_DAYS } = require("../validate");
 const { localDate } = require("../clock");
 
@@ -15,7 +15,7 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 // POST /api/adjustments  (admin) — add a +/- holiday adjustment
-router.post("/", requireAuth, requireAdmin, async (req, res) => {
+router.post("/", requireAuth, requirePage("balances"), async (req, res) => {
   const { staffId, days, note } = req.body || {};
   if (!staffId || days == null) return res.status(400).json({ error: "staffId and days required" });
   // Reject NaN / fractional / zero day counts — a NaN here would poison every

@@ -25,6 +25,17 @@ model Staff {
   // because accounts that predate this field (and admin-created ones) may not have
   // set one; the Staff-tab site filter treats those as "unset".
   site         String?
+
+  // --- Admin access control (RBAC) ---
+  // The Super Admin assigns which admin-dashboard pages each admin may see/use, and
+  // is the only account allowed to open the Access tab. Exactly one account should
+  // carry this (bootstrapped onto the oldest admin).
+  isSuperAdmin Boolean @default(false)
+  // Which admin pages this admin may access, as a JSON array of tab keys, e.g.
+  // '["staff","requests"]'. NULL means "never configured" → full access (so existing
+  // admins are not locked out). '[]' means configured with NO pages. Ignored for a
+  // Super Admin, who always has everything.
+  adminPages   String?
   allowance    Int      @default(28)
   initials     String
   colour       String

@@ -4,12 +4,12 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sInteraction } = require("../serializers");
-const { requireAuth, requireAdmin } = require("../auth");
+const { requireAuth, requireAdmin, requirePage } = require("../auth");
 const { isRealDate } = require("../validate");
 
 // DEF-01: PAT interactions contain sensitive wellbeing/absence notes and are an
 // admin-only feature. Guard every route, reads included, against non-admin tokens.
-router.use(requireAuth, requireAdmin);
+router.use(requireAuth, requirePage("pat"));
 
 const QUERY_TYPES = [
   "1 to 1 Meeting", "No Show", "Academic Query", "Assessment Queries",
