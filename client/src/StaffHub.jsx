@@ -3354,7 +3354,7 @@ function CoursePattern({ seed, colour }) {
 
 // The "⋯" overflow menu on each course card — Edit / Delete, matching the
 // three-dot control in the reference design. Closes on outside click.
-function CourseMenu({ onEdit, onDelete }) {
+function CourseMenu({ onEdit, onDelete, onCohorts, editLabel = "Edit course", deleteLabel = "Delete course" }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
@@ -3365,12 +3365,17 @@ function CourseMenu({ onEdit, onDelete }) {
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div role="menu" className="pop absolute right-0 top-10 z-40 w-40 overflow-hidden rounded-xl bg-white py-1 shadow-lg ring-1 ring-slate-200">
+          <div role="menu" className="pop absolute right-0 top-10 z-40 w-44 overflow-hidden rounded-xl bg-white py-1 shadow-lg ring-1 ring-slate-200">
+            {onCohorts && (
+              <button role="menuitem" onClick={() => { setOpen(false); onCohorts(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-slate-600 transition hover:bg-slate-50">
+                <Layers size={14} /> Manage cohorts
+              </button>
+            )}
             <button role="menuitem" onClick={() => { setOpen(false); onEdit(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-slate-600 transition hover:bg-slate-50">
-              <Edit3 size={14} /> Edit course
+              <Edit3 size={14} /> {editLabel}
             </button>
             <button role="menuitem" onClick={() => { setOpen(false); onDelete(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-rose-600 transition hover:bg-rose-50">
-              <Trash2 size={14} /> Delete course
+              <Trash2 size={14} /> {deleteLabel}
             </button>
           </div>
         </>
@@ -3388,6 +3393,7 @@ function HndProgrammes({ store, onOpen }) {
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
   const [form, setForm] = useState({ name: "", colour: PROGRAMME_COLOURS[0] });
+  const [cohortProg, setCohortProg] = useState(null); // the programme whose cohorts are being managed
 
   const openAdd = () => { setEdit(null); setForm({ name: "", colour: PROGRAMME_COLOURS[0] }); setModal(true); };
   const openEdit = (p) => { setEdit(p); setForm({ name: p.name, colour: p.colour || PROGRAMME_COLOURS[0] }); setModal(true); };
@@ -3422,15 +3428,20 @@ function HndProgrammes({ store, onOpen }) {
             <div key={p.id} className="fade-up flex flex-col overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md hover:ring-slate-300/80" style={{ animationDelay: `${i * 45}ms` }}>
               <div className="relative h-24">
                 <CoursePattern seed={seed} colour={colour} />
-                <div className="absolute right-3 top-3"><CourseMenu onEdit={() => openEdit(p)} onDelete={() => remove(p)} /></div>
+                <div className="absolute right-3 top-3"><CourseMenu onEdit={() => openEdit(p)} onDelete={() => remove(p)} onCohorts={() => setCohortProg(p)} editLabel="Edit programme" deleteLabel="Delete programme" /></div>
                 <span className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-md bg-white/95 px-2.5 py-1 text-xs font-extrabold text-slate-800 shadow-sm"><Layers size={12} /> Programme</span>
               </div>
               <div className="flex flex-1 flex-col p-4">
                 <h3 className="text-base font-extrabold leading-snug" style={{ color: NAVY_DARK }}>{p.name}</h3>
-                <p className="mt-1 text-xs font-semibold text-slate-400">{p.moduleCount || 0} course{(p.moduleCount || 0) === 1 ? "" : "s"}</p>
-                <button onClick={() => onOpen(p.id)} className="press mt-4 flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-slate-200 py-2.5 text-sm font-bold transition hover:border-indigo-300 hover:bg-indigo-50" style={{ color: NAVY }}>
-                  View courses <ArrowRight size={15} />
-                </button>
+                <p className="mt-1 text-xs font-semibold text-slate-400">{p.moduleCount || 0} course{(p.moduleCount || 0) === 1 ? "" : "s"} · {p.cohortCount || 0} cohort{(p.cohortCount || 0) === 1 ? "" : "s"}</p>
+                <div className="mt-4 flex gap-2">
+                  <button onClick={() => onOpen(p.id)} className="press flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-slate-200 py-2.5 text-sm font-bold transition hover:border-indigo-300 hover:bg-indigo-50" style={{ color: NAVY }}>
+                    View courses <ArrowRight size={15} />
+                  </button>
+                  <button onClick={() => setCohortProg(p)} title="Manage cohorts" className="press flex shrink-0 items-center justify-center gap-1.5 rounded-xl border-2 border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-500 transition hover:border-indigo-300 hover:bg-indigo-50">
+                    <Layers size={15} />
+                  </button>
+                </div>
               </div>
             </div>
           );
@@ -3456,7 +3467,58 @@ function HndProgrammes({ store, onOpen }) {
           <PrimaryBtn onClick={save} disabled={!form.name.trim()} className="w-full"><Save size={16} /> {edit ? "Save changes" : "Add programme"}</PrimaryBtn>
         </div>
       </Modal>
+
+      {cohortProg && <CohortManager store={store} programme={cohortProg} onClose={() => setCohortProg(null)} />}
     </>
+  );
+}
+
+/* ----- Cohorts: intakes (e.g. "SEP 2025") under one programme ----- */
+function CohortManager({ store, programme, onClose }) {
+  const [name, setName] = useState("");
+  const [start, setStart] = useState("");
+  const [busy, setBusy] = useState(false);
+  const list = (store.cohorts || []).filter(c => c.programmeId === programme.id);
+
+  const add = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    try { await store.addCohort({ programmeId: programme.id, name: name.trim(), startDate: start || null }); setName(""); setStart(""); }
+    catch (_) { /* store toasts the error (e.g. duplicate name) */ }
+    finally { setBusy(false); }
+  };
+  const remove = async (c) => {
+    if (!window.confirm(`Delete cohort "${c.name}"?`)) return;
+    await store.removeCohort(c.id);
+  };
+
+  return (
+    <Modal open onClose={onClose} title={`Cohorts — ${programme.name}`}>
+      <div className="space-y-3">
+        <p className="text-[11px] text-slate-500">An intake of students on this programme — e.g. <b>SEP 2025</b>, <b>Jan 2024</b>. The same programme can run several cohorts over time.</p>
+
+        <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-100">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Cohort name, e.g. SEP 2025" className={inputCls} onKeyDown={e => { if (e.key === "Enter") add(); }} />
+            <input type="date" value={start} onChange={e => setStart(e.target.value)} title="Start date (optional)" className={inputCls} />
+          </div>
+          <PrimaryBtn onClick={add} disabled={busy || !name.trim()} className="mt-2 w-full"><Plus size={16} /> {busy ? "Adding…" : "Add cohort"}</PrimaryBtn>
+        </div>
+
+        <div className="space-y-2">
+          {list.length === 0 && <EmptyState Icon={Layers} title="No cohorts yet" msg="Add your first intake above." />}
+          {list.map(c => (
+            <div key={c.id} className="flex items-center justify-between rounded-xl bg-white px-3 py-2.5 ring-1 ring-slate-200">
+              <div>
+                <p className="text-sm font-bold text-slate-700">{c.name}</p>
+                {c.startDate && <p className="text-[11px] text-slate-400">Starts {fmtDate(c.startDate)}</p>}
+              </div>
+              <button onClick={() => remove(c)} title="Delete cohort" className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={16} /></button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Modal>
   );
 }
 

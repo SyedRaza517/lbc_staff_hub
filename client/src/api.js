@@ -124,6 +124,11 @@ export const api = {
   addProgramme: (data) => request("/hnd/programmes", { method: "POST", body: data }),
   updateProgramme: (id, data) => request(`/hnd/programmes/${id}`, { method: "PUT", body: data }),
   removeProgramme: (id) => request(`/hnd/programmes/${id}`, { method: "DELETE" }),
+  // Cohorts (intakes under a programme, e.g. "SEP 2025")
+  listCohorts: (programmeId) => request(`/hnd/cohorts${programmeId ? `?programmeId=${encodeURIComponent(programmeId)}` : ""}`),
+  addCohort: (data) => request("/hnd/cohorts", { method: "POST", body: data }),
+  updateCohort: (id, data) => request(`/hnd/cohorts/${id}`, { method: "PUT", body: data }),
+  removeCohort: (id) => request(`/hnd/cohorts/${id}`, { method: "DELETE" }),
   listModules: () => request("/hnd/modules"),
   addModule: (data) => request("/hnd/modules", { method: "POST", body: data }),
   updateModule: (id, data) => request(`/hnd/modules/${id}`, { method: "PUT", body: data }),

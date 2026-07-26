@@ -3,7 +3,7 @@
 // rest of the admin console.
 const router = require("express").Router();
 const prisma = require("../db");
-const { sSemester, sProgramme, sModule, sStudent, sSession, sMark } = require("../serializers");
+const { sSemester, sProgramme, sCohort, sModule, sStudent, sSession, sMark } = require("../serializers");
 const { requireAuth, requireAdmin, requireAnyPage } = require("../auth");
 const { isStatus, summarise } = require("../attendance");
 
@@ -98,7 +98,7 @@ async function resolveProgramme(raw) {
 router.get("/programmes", requireAuth, async (_req, res) => {
   const rows = await prisma.programme.findMany({
     orderBy: { name: "asc" },
-    include: { _count: { select: { modules: true } } },
+    include: { _count: { select: { modules: true, cohorts: true } } },
   });
   res.json(rows.map(sProgramme));
 });
@@ -109,7 +109,7 @@ router.post("/programmes", requireAuth, requireAdmin, async (req, res) => {
   const clash = await prisma.programme.findFirst({ where: { name: { equals: name } } });
   if (clash) return res.status(409).json({ error: `A programme called "${name}" already exists` });
   const colour = str(req.body?.colour) || colourFor(name);
-  const p = await prisma.programme.create({ data: { name, colour }, include: { _count: { select: { modules: true } } } });
+  const p = await prisma.programme.create({ data: { name, colour }, include: { _count: { select: { modules: true, cohorts: true } } } });
   res.status(201).json(sProgramme(p));
 });
 
@@ -125,7 +125,7 @@ router.put("/programmes/:id", requireAuth, requireAdmin, async (req, res) => {
     data.name = name;
   }
   if (req.body?.colour !== undefined) data.colour = str(req.body.colour) || existing.colour;
-  const p = await prisma.programme.update({ where: { id: existing.id }, data, include: { _count: { select: { modules: true } } } });
+  const p = await prisma.programme.update({ where: { id: existing.id }, data, include: { _count: { select: { modules: true, cohorts: true } } } });
   res.json(sProgramme(p));
 });
 
@@ -133,6 +133,59 @@ router.put("/programmes/:id", requireAuth, requireAdmin, async (req, res) => {
 router.delete("/programmes/:id", requireAuth, requireAdmin, async (req, res) => {
   try { await prisma.programme.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Programme not found" }); }
+});
+
+/* ============================== cohorts ============================== */
+// An intake of students on a programme, e.g. "SEP 2025". One programme runs many
+// cohorts over time; each name is unique within its programme.
+
+router.get("/cohorts", requireAuth, async (req, res) => {
+  const programmeId = str(req.query?.programmeId);
+  const where = programmeId ? { programmeId } : {};
+  const rows = await prisma.cohort.findMany({ where, orderBy: [{ programmeId: "asc" }, { createdAt: "asc" }] });
+  res.json(rows.map(sCohort));
+});
+
+router.post("/cohorts", requireAuth, requireAdmin, async (req, res) => {
+  const name = str(req.body?.name);
+  const programmeId = str(req.body?.programmeId);
+  const startDate = str(req.body?.startDate) || null;
+  if (!name) return res.status(400).json({ error: "Cohort name required" });
+  if (!programmeId) return res.status(400).json({ error: "Programme is required" });
+  if (startDate && !isDate(startDate)) return res.status(400).json({ error: "Start date must be a valid date (YYYY-MM-DD)" });
+  const prog = await prisma.programme.findUnique({ where: { id: programmeId } });
+  if (!prog) return res.status(400).json({ error: "Unknown programme" });
+  const clash = await prisma.cohort.findFirst({ where: { programmeId, name } });
+  if (clash) return res.status(409).json({ error: `"${name}" already exists on this programme` });
+  try {
+    const c = await prisma.cohort.create({ data: { name, programmeId, startDate } });
+    res.status(201).json(sCohort(c));
+  } catch (_e) { res.status(400).json({ error: "Could not create the cohort" }); }
+});
+
+router.put("/cohorts/:id", requireAuth, requireAdmin, async (req, res) => {
+  const existing = await prisma.cohort.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: "Cohort not found" });
+  const data = {};
+  if (req.body?.name !== undefined) {
+    const name = str(req.body.name);
+    if (!name) return res.status(400).json({ error: "Cohort name required" });
+    const clash = await prisma.cohort.findFirst({ where: { programmeId: existing.programmeId, name, id: { not: existing.id } } });
+    if (clash) return res.status(409).json({ error: `"${name}" already exists on this programme` });
+    data.name = name;
+  }
+  if (req.body?.startDate !== undefined) {
+    const sd = str(req.body.startDate) || null;
+    if (sd && !isDate(sd)) return res.status(400).json({ error: "Start date must be a valid date (YYYY-MM-DD)" });
+    data.startDate = sd;
+  }
+  const c = await prisma.cohort.update({ where: { id: existing.id }, data });
+  res.json(sCohort(c));
+});
+
+router.delete("/cohorts/:id", requireAuth, requireAdmin, async (req, res) => {
+  try { await prisma.cohort.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
+  catch (_e) { res.status(404).json({ error: "Cohort not found" }); }
 });
 
 /* ============================== modules ============================== */

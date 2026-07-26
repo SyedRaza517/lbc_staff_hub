@@ -44,8 +44,10 @@ const sAdj = (a) => ({ id: a.id, staffId: a.staffId, days: a.days, note: a.note,
 const sSemester = (s) => ({ id: s.id, name: s.name, start: s.start, end: s.end });
 const sProgramme = (p) => ({
   id: p.id, name: p.name, colour: p.colour,
-  ...(p._count ? { moduleCount: p._count.modules } : {}),
+  // Present only when the query asked Prisma to count relations.
+  ...(p._count ? { moduleCount: p._count.modules, cohortCount: p._count.cohorts } : {}),
 });
+const sCohort = (c) => ({ id: c.id, name: c.name, programmeId: c.programmeId, startDate: c.startDate ?? null, createdAt: c.createdAt });
 const sModule = (m) => ({
   id: m.id, code: m.code, name: m.name, tutor: m.tutor, programmeId: m.programmeId ?? null,
   // Present only when the query asked Prisma to count relations.
@@ -91,4 +93,4 @@ const sTimesheet = (t) => ({
   ...(t.staff ? { staffName: t.staff.name, staffDept: t.staff.dept, staffInitials: t.staff.initials, staffColour: t.staff.colour } : {}),
 });
 
-module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sProgramme, sModule, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet };
+module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sProgramme, sCohort, sModule, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet };

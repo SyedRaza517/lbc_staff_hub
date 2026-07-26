@@ -234,6 +234,23 @@ model Programme {
   createdAt DateTime @default(now())
 
   modules HndModule[]
+  cohorts Cohort[]
+}
+
+// An intake of students on a programme, e.g. "SEP 2025" or "June 2023". The same
+// programme runs many cohorts over time; each is a separate group (later, its own
+// units and students). Belongs to exactly one programme and goes with it if the
+// programme is deleted.
+model Cohort {
+  id          String    @id @default(cuid())
+  name        String    // intake label, e.g. "SEP 2025"
+  programme   Programme @relation(fields: [programmeId], references: [id], onDelete: Cascade)
+  programmeId String
+  startDate   String?   // optional YYYY-MM-DD — when the intake begins
+  createdAt   DateTime  @default(now())
+
+  @@unique([programmeId, name]) // no duplicate intake names within one programme
+  @@index([programmeId])
 }
 
 // A taught HND module, e.g. code "OBM" / name "Organisational Behaviour Management".

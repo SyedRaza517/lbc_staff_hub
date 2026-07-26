@@ -22,6 +22,7 @@ export function useApiStore(notify, user) {
   const [sessions, setSessions] = useState([]);
   const [semesters, setSemesters] = useState([]);
   const [programmes, setProgrammes] = useState([]);
+  const [cohorts, setCohorts] = useState([]);
   const [unassignedSessions, setUnassignedSessions] = useState(0);
   const [attendance, setAttendance] = useState(null);
   const [hndLoaded, setHndLoaded] = useState(false);
@@ -69,6 +70,9 @@ export function useApiStore(notify, user) {
       setSemesters(sem.semesters); setUnassignedSessions(sem.unassignedSessions);
       setProgrammes(pr);
       setAttendance(at);
+      // Cohorts load tolerantly: if the endpoint lags behind on a deploy (Vercel
+      // client ahead of the Render server), it must not break the rest of the page.
+      try { setCohorts(await api.listCohorts()); } catch (_) { setCohorts([]); }
     } catch (e) { notify?.(e.message || "Failed to load registers", "error"); }
     setHndLoaded(true);
   }, [notify, semesterId]);
@@ -210,6 +214,10 @@ export function useApiStore(notify, user) {
     addProgramme: runHnd((data) => api.addProgramme(data), (d) => `${d.name} added`),
     updateProgramme: runHnd((id, data) => api.updateProgramme(id, data), "Programme updated"),
     removeProgramme: runHnd((id) => api.removeProgramme(id), "Programme removed", "error"),
+    // Cohorts (intakes under a programme)
+    addCohort: runHnd((data) => api.addCohort(data), (d) => `Cohort ${d.name} added`),
+    updateCohort: runHnd((id, data) => api.updateCohort(id, data), "Cohort updated"),
+    removeCohort: runHnd((id) => api.removeCohort(id), "Cohort removed", "error"),
     addModule: runHnd((data) => api.addModule(data), (d) => `Module ${String(d.code).toUpperCase()} added`),
     updateModule: runHnd((id, data) => api.updateModule(id, data), "Module updated"),
     removeModule: runHnd((id) => api.removeModule(id), "Module removed", "error"),
@@ -250,7 +258,7 @@ export function useApiStore(notify, user) {
 
   return {
     staff, leave, checkins, docs, adjustments, signups, loaded,
-    modules, students, sessions, semesters, programmes, unassignedSessions, semesterId, attendance, hndLoaded,
+    modules, students, sessions, semesters, programmes, cohorts, unassignedSessions, semesterId, attendance, hndLoaded,
     interactions, interactionsLoaded,
     assessments, assessmentOverview, assessmentsLoaded,
     usedDays, adjDays, effectiveAllowance,
