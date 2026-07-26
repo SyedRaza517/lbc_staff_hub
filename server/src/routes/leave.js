@@ -8,7 +8,11 @@ const { localDate } = require("../clock");
 // Local (London) date, not the server's UTC date — so a request made just after
 // midnight BST is filed under the correct day, not the previous one.
 const today = () => localDate();
-const VALID_TYPES = ["annual", "sick", "personal", "training"];
+const VALID_TYPES = ["annual", "sick", "personal", "training", "unpaid"];
+// Types that DON'T draw down the paid holiday allowance. Unpaid leave is time off
+// the books, so approving it neither checks nor consumes the allowance. Must stay
+// in sync with the client's NON_ALLOWANCE_TYPES.
+const UNPAID_TYPES = ["unpaid"];
 
 // --- Per-staff serialisation for leave decisions ---
 // Approvals check the allowance and then write, which is a classic read-then-write
@@ -103,14 +107,17 @@ router.put("/:id/decision", requireAuth, requireAnyPage(["requests", "approvals"
     if (leave.status !== "pending") return { error: { code: 409, message: "This request has already been decided" } };
 
     // On approval, enforce the staff member's effective allowance server-side.
-    // Every leave type consumes allowance — sick included (matches the client's usedDays rule).
-    if (status === "approved") {
+    // Most leave types consume allowance — sick included (matches the client's
+    // usedDays rule). Unpaid leave is the exception: it neither checks nor consumes
+    // the allowance, so it can always be approved regardless of the balance.
+    if (status === "approved" && !UNPAID_TYPES.includes(leave.type)) {
       const [staff, adj, usedAgg] = await Promise.all([
         prisma.staff.findUnique({ where: { id: leave.staffId } }),
         prisma.adjustment.aggregate({ where: { staffId: leave.staffId }, _sum: { days: true } }),
-        // All already-approved leave for this staffer, excluding this request itself.
+        // All already-approved allowance-consuming leave, excluding this request and
+        // any unpaid leave (which never counts against the paid allowance).
         prisma.leave.aggregate({
-          where: { staffId: leave.staffId, status: "approved", id: { not: leave.id } },
+          where: { staffId: leave.staffId, status: "approved", id: { not: leave.id }, type: { notIn: UNPAID_TYPES } },
           _sum: { days: true },
         }),
       ]);

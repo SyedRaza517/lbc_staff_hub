@@ -10,7 +10,7 @@ import {
   ClipboardList, Save, History, Building2, FileUp, Sparkles,
   Sun, Sunrise, Sunset, TrendingUp, Timer, Info, Phone,
   CalendarCheck, UserCheck, Layers, Activity, Award, ShieldCheck,
-  BookOpen, Percent, PlayCircle, RefreshCw, MoreHorizontal, MessageSquare, ChevronDown, Loader2, KeyRound, Send
+  BookOpen, Percent, PlayCircle, RefreshCw, MoreHorizontal, MessageSquare, ChevronDown, Loader2, KeyRound, Send, Wallet
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis,
@@ -117,7 +117,12 @@ const LEAVE_TYPES = [
   { key: "sick",     label: "Sick Leave",    icon: Stethoscope,   colour: "#9e1b32" },
   { key: "personal", label: "Personal Day",  icon: Heart,         colour: "#b45309" },
   { key: "training", label: "Training / CPD",icon: GraduationCap, colour: "#0d7a5f" },
+  { key: "unpaid",   label: "Unpaid Leave",  icon: Wallet,        colour: "#6d28d9" },
 ];
+// Unpaid leave does NOT draw down the paid holiday allowance — that's the point of
+// it. Keep this set in sync with the server's UNPAID_TYPES so both sides agree on
+// which types are free of the allowance.
+const NON_ALLOWANCE_TYPES = ["unpaid"];
 /* ---------- HND attendance registers ---------- */
 // The four marks a student can be given on a register, matching the college's
 // existing Moodle register (P / L / E / A).

@@ -76,7 +76,9 @@ export function useApiStore(notify, user) {
   // derived
   // Every approved leave type counts against the allowance (sick included) — the
   // total is reduced by any approved leave, regardless of type.
-  const usedDays = useCallback((id) => leave.filter((l) => l.staffId === id && l.status === "approved").reduce((s, l) => s + (l.days ?? daysBetween(l.start, l.end)), 0), [leave]);
+  // Unpaid leave does not draw down the paid allowance, so it's excluded here (kept
+  // in sync with the server's UNPAID_TYPES and the client's NON_ALLOWANCE_TYPES).
+  const usedDays = useCallback((id) => leave.filter((l) => l.staffId === id && l.status === "approved" && l.type !== "unpaid").reduce((s, l) => s + (l.days ?? daysBetween(l.start, l.end)), 0), [leave]);
   const adjDays = useCallback((id) => adjustments.filter((a) => a.staffId === id).reduce((s, a) => s + a.days, 0), [adjustments]);
   const effectiveAllowance = useCallback((id) => { const s = staff.find((x) => x.id === id); return (s?.allowance || 0) + adjDays(id); }, [staff, adjDays]);
 
