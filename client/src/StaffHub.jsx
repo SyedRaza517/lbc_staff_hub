@@ -4813,7 +4813,8 @@ function AdminStaff({ store }) {
       { key: "account", label: "Account role" }, { key: "allowance", label: "Allowance (days)" },
       { key: "twoStep", label: "2-step verification" },
     ], filtered.map(s => ({
-      name: s.name, email: s.email, role: s.role, dept: s.dept, site: s.site || "", account: s.accountRole,
+      name: s.name, email: s.email, role: s.role, dept: s.dept, site: s.site || "",
+      account: s.isSuperAdmin ? "Super Admin" : s.accountRole === "ADMIN" ? (s.adminPages == null ? "Admin (full access)" : `Admin (${s.adminPages.length} pages)`) : "Staff",
       hours: fmtDuration(monthlyHoursFor(store.checkins, s.id, month).totalMin),
       allowance: s.allowance, twoStep: s.totpEnabled ? "On" : s.totpRequired ? "Setup due" : "Off",
     })));
@@ -4914,9 +4915,11 @@ function AdminStaff({ store }) {
                     })()}
                   </td>
                   <td className="px-5 py-3">
-                    {s.accountRole === "ADMIN"
-                      ? <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-bold text-indigo-700">Admin</span>
-                      : <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-500">Staff</span>}
+                    {s.isSuperAdmin
+                      ? <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold text-white" style={{ background: MAROON }}><ShieldCheck size={11} /> Super Admin</span>
+                      : s.accountRole === "ADMIN"
+                        ? <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-bold text-indigo-700">Admin · {s.adminPages == null ? "full access" : `${s.adminPages.length} page${s.adminPages.length === 1 ? "" : "s"}`}</span>
+                        : <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-500">Staff</span>}
                   </td>
                   <td className="px-5 py-3 font-medium tabular-nums text-slate-600">{s.allowance}d</td>
                   <td className="px-4 py-3">
