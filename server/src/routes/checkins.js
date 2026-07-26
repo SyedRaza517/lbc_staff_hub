@@ -2,7 +2,7 @@ const router = require("express").Router();
 const prisma = require("../db");
 const { sCheckin } = require("../serializers");
 const { requireAuth, requireAdmin } = require("../auth");
-const { isString, isRealDate, MAX_TEXT } = require("../validate");
+const { isString, isRealDate, MAX_TEXT, isSite } = require("../validate");
 const { localDate, localTime } = require("../clock");
 
 // HH:MM, 24-hour. Times are stored as plain strings and rendered verbatim.
@@ -22,15 +22,19 @@ router.get("/", requireAuth, async (req, res) => {
   res.json(rows.map(sCheckin));
 });
 
-// POST /api/checkins/check-in  — self, for today
+// POST /api/checkins/check-in  — self, for today. Optional `site` (HND | FE | Online)
+// records where this clock-in happened.
 router.post("/check-in", requireAuth, async (req, res) => {
   const date = today();
+  const site = req.body?.site;
+  if (!isSite(site)) return res.status(400).json({ error: "site must be one of HND, FE or Online" });
   const existing = await prisma.checkIn.findUnique({ where: { staffId_date: { staffId: req.user.id, date } } });
   if (existing) {
     // A row created by a summary-first save has timeIn === "" — fill in the
     // real clock-in time now instead of leaving attendance blank for the day.
     if (existing.timeIn) return res.json(sCheckin(existing));
-    const filled = await prisma.checkIn.update({ where: { id: existing.id }, data: { timeIn: nowTime() } });
+    // Record the site alongside the real clock-in time (don't wipe an existing one).
+    const filled = await prisma.checkIn.update({ where: { id: existing.id }, data: { timeIn: nowTime(), ...(site ? { site } : {}) } });
     return res.json(sCheckin(filled));
   }
   // upsert (not create) closes the race where two concurrent check-ins both pass
@@ -38,7 +42,7 @@ router.post("/check-in", requireAuth, async (req, res) => {
   const rec = await prisma.checkIn.upsert({
     where: { staffId_date: { staffId: req.user.id, date } },
     update: {},
-    create: { staffId: req.user.id, date, timeIn: nowTime() },
+    create: { staffId: req.user.id, date, timeIn: nowTime(), site: site || null },
   });
   res.status(201).json(sCheckin(rec));
 });
@@ -61,13 +65,14 @@ router.post("/:id/check-out", requireAuth, async (req, res) => {
 
 // PUT /api/checkins  (admin) — upsert a record for any staff/date
 router.put("/", requireAuth, requireAdmin, async (req, res) => {
-  const { staffId, date, in: tIn, out } = req.body || {};
+  const { staffId, date, in: tIn, out, site } = req.body || {};
   if (!staffId || !date || !tIn) return res.status(400).json({ error: "staffId, date and in required" });
   // Type checks, not just truthiness: a number or object here reached Prisma and
   // came back as an opaque 500.
   if (!isString(staffId)) return res.status(400).json({ error: "staffId must be text" });
   if (!isTime(tIn)) return res.status(400).json({ error: "in must be a time in HH:MM format" });
   if (out != null && out !== "" && !isTime(out)) return res.status(400).json({ error: "out must be a time in HH:MM format" });
+  if (!isSite(site)) return res.status(400).json({ error: "site must be one of HND, FE or Online" });
   // Calendar validity, matching PUT /summary. Without it an admin could file a record
   // on 2026-02-30: the staff app rolls it to 2 March while the dashboard filters on
   // the exact string, so nobody can ever find the row to correct it.
@@ -76,8 +81,8 @@ router.put("/", requireAuth, requireAdmin, async (req, res) => {
   if (!staffExists) return res.status(400).json({ error: "Unknown staff member" });
   const rec = await prisma.checkIn.upsert({
     where: { staffId_date: { staffId, date } },
-    update: { timeIn: tIn, timeOut: out || null },
-    create: { staffId, date, timeIn: tIn, timeOut: out || null },
+    update: { timeIn: tIn, timeOut: out || null, ...(site !== undefined ? { site: site || null } : {}) },
+    create: { staffId, date, timeIn: tIn, timeOut: out || null, site: site || null },
   });
   res.json(sCheckin(rec));
 });

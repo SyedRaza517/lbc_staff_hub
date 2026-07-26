@@ -43,7 +43,15 @@ function isRealDate(v) {
 // decision note; applying it consistently stops one person storing 100kB a day.
 const MAX_TEXT = 2000;
 
+// --- Sites ---
+// Where a person works / clocks in. A closed set: it labels a check-in and is the
+// staff member's home site. Validated so the column can only ever hold one of these.
+const SITES = ["HND", "FE", "Online"];
+// Accepts a site string or null/undefined (the field is always optional).
+const isSite = (v) => v == null || (isString(v) && SITES.includes(v));
+
 module.exports = {
   INT32_MAX, INT32_MIN, isInt32, MAX_ALLOWANCE_DAYS, MAX_ADJUSTMENT_DAYS,
   isString, isNonEmptyString, isRealDate, DATE_RE, MAX_TEXT,
+  SITES, isSite,
 };

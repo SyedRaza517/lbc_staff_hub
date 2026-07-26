@@ -3,6 +3,7 @@
 // returns it, and only to the person enrolling.
 const sStaff = (s) => ({
   id: s.id, name: s.name, role: s.jobTitle, dept: s.dept, email: s.email,
+  site: s.site ?? null,
   allowance: s.allowance, initials: s.initials, colour: s.colour, accountRole: s.accountRole,
   mustChangePassword: s.mustChangePassword ?? false,
   totpEnabled: s.totpEnabled ?? false,
@@ -13,12 +14,12 @@ const sStaff = (s) => ({
 });
 
 const sSignup = (r) => ({
-  id: r.id, name: r.name, email: r.email, role: r.jobTitle, dept: r.dept,
+  id: r.id, name: r.name, email: r.email, role: r.jobTitle, dept: r.dept, site: r.site ?? null,
   status: r.status, note: r.note, decidedBy: r.decidedBy, decidedAt: r.decidedAt,
   requestedAt: r.createdAt,
 });
 const sNotification = (n) => ({ id: n.id, type: n.type, message: n.message, link: n.link, read: n.read, at: n.createdAt });
-const sCheckin = (c) => ({ id: c.id, staffId: c.staffId, date: c.date, in: c.timeIn, out: c.timeOut, summary: c.summary });
+const sCheckin = (c) => ({ id: c.id, staffId: c.staffId, date: c.date, in: c.timeIn, out: c.timeOut, summary: c.summary, site: c.site ?? null });
 const sLeave = (l) => ({
   id: l.id, staffId: l.staffId, type: l.type, start: l.start, end: l.end, days: l.days, reason: l.reason,
   status: l.status, requestedAt: l.requestedAt, decidedBy: l.decidedBy, decidedAt: l.decidedAt, note: l.note,

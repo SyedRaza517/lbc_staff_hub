@@ -10,7 +10,7 @@ const prisma = require("../db");
 const { sSignup, sStaff } = require("../serializers");
 const { requireAuth, requireAdmin, hashPassword } = require("../auth");
 const { notifyStaff, notifyAdmins } = require("../notify");
-const { isInt32, MAX_ALLOWANCE_DAYS } = require("../validate");
+const { isInt32, MAX_ALLOWANCE_DAYS, isSite } = require("../validate");
 const { notifyExistingAccount } = require("../invite");
 const { localDate } = require("../clock");
 
@@ -29,11 +29,13 @@ router.post("/", async (req, res) => {
   const confirmPassword = typeof req.body?.confirmPassword === "string" ? req.body.confirmPassword : "";
   const jobTitle = str(req.body?.position) || str(req.body?.role);
   const dept = str(req.body?.dept);
+  const site = str(req.body?.site) || null;
 
   if (!name) return res.status(400).json({ error: "Full name is required" });
   if (!EMAIL_REGEX.test(email)) return res.status(400).json({ error: "Enter a valid email address" });
   if (!jobTitle) return res.status(400).json({ error: "Position is required" });
   if (!dept) return res.status(400).json({ error: "Department is required" });
+  if (!isSite(site)) return res.status(400).json({ error: "Site must be one of HND, FE or Online" });
   if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
   // The client checks this too, but the API must not trust the client.
   if (confirmPassword && password !== confirmPassword) return res.status(400).json({ error: "Passwords do not match" });
@@ -56,7 +58,7 @@ router.post("/", async (req, res) => {
 
   // A previously rejected applicant may apply again: overwrite the old row so the
   // unique email constraint doesn't permanently bar them.
-  const data = { name, email, passwordHash: hashPassword(password), jobTitle, dept, status: "pending", note: null, decidedBy: null, decidedAt: null };
+  const data = { name, email, passwordHash: hashPassword(password), jobTitle, dept, site, status: "pending", note: null, decidedBy: null, decidedAt: null };
   if (existingRequest) await prisma.signupRequest.update({ where: { id: existingRequest.id }, data });
   else await prisma.signupRequest.create({ data });
 
@@ -112,6 +114,7 @@ router.put("/:id/decision", requireAuth, requireAdmin, async (req, res) => {
       prisma.staff.create({
         data: {
           name: reqRow.name, jobTitle: reqRow.jobTitle, dept: reqRow.dept, email: reqRow.email,
+          site: reqRow.site || null, // home site the applicant picked at sign-up
           passwordHash: reqRow.passwordHash, // they keep the password they chose at sign-up
           accountRole: "STAFF", allowance: days,
           initials: initialsOf(reqRow.name), colour: colourFor(reqRow.email),

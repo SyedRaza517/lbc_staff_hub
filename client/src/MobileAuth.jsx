@@ -13,12 +13,14 @@ import { ForgotPasswordForm } from "./ResetPassword";
 import PhoneShell, { useIsHandset } from "./PhoneShell";
 import {
   GraduationCap, LogIn, UserPlus, Mail, Lock, User, Briefcase, Building2,
-  Loader2, XCircle, CheckCircle2, ArrowLeft, ShieldCheck, Wifi, BatteryFull, Clock,
+  Loader2, XCircle, CheckCircle2, ArrowLeft, ShieldCheck, Wifi, BatteryFull, Clock, MapPin,
 } from "lucide-react";
 
 const NAVY = "#1a3a8f", NAVY_DARK = "#14306f", MAROON = "#9e1b32";
 
 const DEPARTMENTS = ["Teaching", "Administration", "Finance", "Student Services", "IT", "Facilities", "Management"];
+// The staff member's home site. Kept in sync with the server's validate.js SITES.
+const SITES = ["HND", "FE", "Online"];
 
 const nowTime = () => new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
@@ -163,7 +165,7 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
 /* ============================== sign up ============================== */
 
 function SignUp({ goSignIn }) {
-  const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "", position: "", dept: DEPARTMENTS[0] });
+  const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "", position: "", dept: DEPARTMENTS[0], site: SITES[0] });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -205,7 +207,7 @@ function SignUp({ goSignIn }) {
         <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Submitted</p>
         <p className="mt-1 text-xs font-bold text-slate-700">{form.name}</p>
         <p className="text-[11px] text-slate-500">{form.email}</p>
-        <p className="text-[11px] text-slate-500">{form.position} · {form.dept}</p>
+        <p className="text-[11px] text-slate-500">{form.position} · {form.dept} · {form.site}</p>
       </div>
       <button onClick={goSignIn} className="press w-full rounded-xl py-2.5 text-sm font-bold text-white shadow-lg" style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}>
         Back to sign in
@@ -235,6 +237,12 @@ function SignUp({ goSignIn }) {
       <Labelled label="Department" Icon={Building2}>
         <select value={form.dept} onChange={set("dept")} disabled={busy} className={`${inputClass} appearance-none`} style={{ "--tw-ring-color": NAVY }}>
           {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+      </Labelled>
+
+      <Labelled label="Site" Icon={MapPin}>
+        <select value={form.site} onChange={set("site")} disabled={busy} className={`${inputClass} appearance-none`} style={{ "--tw-ring-color": NAVY }}>
+          {SITES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </Labelled>
 

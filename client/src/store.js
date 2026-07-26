@@ -160,7 +160,7 @@ export function useApiStore(notify, user) {
   const actions = {
     refresh,
     // check-ins
-    checkIn: run(() => api.checkIn(), "Checked in — have a great day!"),
+    checkIn: run((site) => api.checkIn(site), "Checked in — have a great day!"),
     checkOut: run((id) => api.checkOut(id), "Checked out. See you tomorrow!"),
     upsertCheckin: run((data) => api.upsertCheckin(data), "Check-in record saved"),
     saveSummary: run((date, text) => api.saveSummary(date, text), "Daily summary saved"),

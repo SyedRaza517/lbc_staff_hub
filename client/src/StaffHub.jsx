@@ -65,6 +65,34 @@ function minutesSinceTime(a) {
   const m = (now.getHours() * 60 + now.getMinutes()) - (pa[0] * 60 + pa[1]);
   return m > 0 ? m : 0;
 }
+// The Monday (YYYY-MM-DD) of the week containing an ISO date. UTC arithmetic so it
+// doesn't drift across a BST boundary.
+const mondayOf = (iso) => {
+  const d = new Date(iso + "T00:00:00Z");
+  const dow = (d.getUTCDay() + 6) % 7; // 0 = Monday
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+};
+
+// Total worked minutes (in→out) for one staff member in a "YYYY-MM" month, plus a
+// per-week breakdown. Only days with BOTH a check-in and check-out can be measured;
+// days still "in" (no check-out) are counted separately so the total stays honest.
+function monthlyHoursFor(checkins, staffId, month) {
+  const rows = (checkins || []).filter(c => c.staffId === staffId && c.in && String(c.date).slice(0, 7) === month);
+  const weeks = new Map(); // mondayISO -> minutes
+  let totalMin = 0, openDays = 0, countedDays = 0;
+  for (const c of rows) {
+    if (!c.out) { openDays++; continue; }
+    const min = minutesBetweenTimes(c.in, c.out);
+    if (!(min > 0)) continue;
+    totalMin += min; countedDays++;
+    const monday = mondayOf(c.date);
+    weeks.set(monday, (weeks.get(monday) || 0) + min);
+  }
+  const weekList = Array.from(weeks.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([monday, min]) => ({ monday, min }));
+  return { totalMin, openDays, countedDays, weekList };
+}
+
 // Average check-in clock time across records with a real `in`; null if none.
 function avgCheckInTime(checkins) {
   const ins = (checkins || []).filter(c => c && c.in).map(c => { const p = String(c.in).split(":").map(Number); return p.length >= 2 && !p.some(isNaN) ? p[0] * 60 + p[1] : null; }).filter(v => v !== null);
@@ -477,6 +505,10 @@ function LeaveLegend({ types = LEAVE_TYPES, className = "" }) {
 }
 
 /* ----- Check-In ----- */
+// The sites a staff member can clock in from. Kept in sync with the server's
+// validate.js SITES list — both must agree or a valid pick is rejected.
+const SITES = ["HND", "FE", "Online"];
+
 function CheckInScreen({ store, me }) {
   const today = todayISO();
   const rec = store.checkins.find(c => c.staffId === me.id && c.date === today);
@@ -484,8 +516,11 @@ function CheckInScreen({ store, me }) {
   // "not checked in" (offer the Check In button, which fills the time server-side).
   const checkedIn = rec && rec.in;
   const [clock, setClock] = useState(new Date());
+  // Which site they're clocking in from today. Must be chosen before the button
+  // enables, so every check-in carries a site.
+  const [site, setSite] = useState(null);
   useEffect(() => { const i = setInterval(() => setClock(new Date()), 1000); return () => clearInterval(i); }, []);
-  const checkIn = () => store.checkIn();
+  const checkIn = () => store.checkIn(site);
   const checkOut = () => store.checkOut(rec.id);
   return (
     <Screen>
@@ -496,7 +531,7 @@ function CheckInScreen({ store, me }) {
         <p className="text-2xl font-extrabold tabular-nums" style={{ color: NAVY }}>{clock.toLocaleTimeString("en-GB")}</p>
         <p className="text-sm text-slate-500">{fmtDay(today)}</p>
         <p className="mb-1 mt-2 text-lg font-bold" style={{ color: checkedIn && !rec.out ? "#059669" : "#475569" }}>{checkedIn ? (rec.out ? "✓ Checked Out" : "● Checked In") : "Not Checked In"}</p>
-        {checkedIn && <p className="text-xs text-slate-500">In at {rec.in}{rec.out && ` · Out at ${rec.out}`}</p>}
+        {checkedIn && <p className="text-xs text-slate-500">In at {rec.in}{rec.out && ` · Out at ${rec.out}`}{rec.site && ` · ${rec.site}`}</p>}
         {checkedIn && (() => {
           // Read-only "hours on site": from in→out if checked out, else in→now. Safe fallback to 0.
           const mins = rec.out ? minutesBetweenTimes(rec.in, rec.out) : minutesSinceTime(rec.in);
@@ -512,8 +547,28 @@ function CheckInScreen({ store, me }) {
             </div>
           );
         })()}
+        {!checkedIn && (
+          <div className="mt-5 text-left">
+            <p className="mb-2 text-center text-xs font-bold uppercase tracking-wide text-slate-400">Where are you working today?</p>
+            <div className="grid grid-cols-3 gap-2">
+              {SITES.map(s => {
+                const active = site === s;
+                return (
+                  <button
+                    key={s}
+                    onClick={() => setSite(s)}
+                    className={`press rounded-xl py-2.5 text-sm font-bold ring-1 transition-all ${active ? "text-white ring-transparent shadow-md" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`}
+                    style={active ? { background: NAVY } : {}}
+                  >
+                    {s}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <div className="mt-5">
-          {!checkedIn && <PrimaryBtn onClick={checkIn} className="w-full !py-3.5 text-base"><LogIn size={20} /> Check In Now</PrimaryBtn>}
+          {!checkedIn && <PrimaryBtn onClick={checkIn} disabled={!site} className="w-full !py-3.5 text-base"><LogIn size={20} /> {site ? `Check In at ${site}` : "Choose a site to check in"}</PrimaryBtn>}
           {checkedIn && !rec.out && <PrimaryBtn onClick={checkOut} colour={MAROON} className="w-full !py-3.5 text-base"><LogOut size={20} /> Check Out</PrimaryBtn>}
           {checkedIn && rec.out && <div className="rounded-xl bg-emerald-50 py-3 text-sm font-semibold text-emerald-700">✓ Your day is complete. Have a great evening!</div>}
         </div>
@@ -525,7 +580,7 @@ function CheckInScreen({ store, me }) {
         )}
         {store.checkins.filter(c => c.staffId === me.id && c.in).slice(0, 6).map((c, i, a) => (
           <div key={c.id} className={`flex items-center justify-between px-4 py-3 transition-colors hover:bg-slate-50/70 fade-up ${i < a.length - 1 ? "border-b border-slate-100" : ""}`} style={{ animationDelay: `${i * 50}ms` }}>
-            <div><p className="text-sm font-semibold text-slate-700">{fmtDay(c.date)}</p><p className="text-xs text-slate-400">In {c.in}{c.out ? ` · Out ${c.out}` : " · still in"}</p></div>
+            <div><p className="text-sm font-semibold text-slate-700">{fmtDay(c.date)}{c.site && <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500 align-middle">{c.site}</span>}</p><p className="text-xs text-slate-400">In {c.in}{c.out ? ` · Out ${c.out}` : " · still in"}</p></div>
             <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${c.out ? "bg-slate-100 text-slate-500" : "bg-emerald-100 text-emerald-700"}`}>{c.out ? "Complete" : "Active"}</span>
           </div>
         ))}
@@ -1523,7 +1578,7 @@ function AdminOverview({ store, setTab }) {
 function AdminCheckin({ store }) {
   const [day, setDay] = useState(todayISO());
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ staffId: "s1", in: "09:00", out: "" });
+  const [form, setForm] = useState({ staffId: "s1", in: "09:00", out: "", site: "" });
   const [query, setQuery] = useState("");
   const recs = store.checkins.filter(c => c.date === day);
   // Only real clock-ins count as present — a summary-first row has an empty `in`.
@@ -1532,7 +1587,7 @@ function AdminCheckin({ store }) {
   const filteredStaff = store.staff.filter(s => !ql || s.name.toLowerCase().includes(ql) || (s.dept || "").toLowerCase().includes(ql));
   const paged = usePaged(filteredStaff, 12, ql);
   const addCheckin = async () => {
-    await store.upsertCheckin({ staffId: form.staffId, date: day, in: form.in, out: form.out || null }); setModal(false);
+    await store.upsertCheckin({ staffId: form.staffId, date: day, in: form.in, out: form.out || null, site: form.site || null }); setModal(false);
   };
   const setOut = (rec) => store.checkOut(rec.id);
   return (
@@ -1556,17 +1611,19 @@ function AdminCheckin({ store }) {
       })()}
       <div className="overflow-x-auto overflow-y-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 fade-up [-webkit-overflow-scrolling:touch] md:overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400"><tr><th className="px-5 py-3">Staff</th><th className="px-5 py-3">Dept</th><th className="px-5 py-3">In</th><th className="px-5 py-3">Out</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Action</th></tr></thead>
+          <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400"><tr><th className="px-5 py-3">Staff</th><th className="px-5 py-3">Dept</th><th className="px-5 py-3">Site</th><th className="px-5 py-3">In</th><th className="px-5 py-3">Out</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Action</th></tr></thead>
           <tbody>
             {paged.slice.map(s => { const r = recs.find(c => c.staffId === s.id); const checkedIn = r && r.in; return (
               <tr key={s.id} className="border-t border-slate-100 transition-colors duration-150 hover:bg-blue-50/40">
                 <td className="px-5 py-3"><div className="flex items-center gap-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-sm" style={{ background: s.colour }}>{s.initials}</span><span className="font-semibold text-slate-700">{s.name}</span></div></td>
-                <td className="px-5 py-3 text-slate-500">{s.dept}</td><td className="px-5 py-3 font-medium text-slate-600">{r?.in || "—"}</td><td className="px-5 py-3 font-medium text-slate-600">{r?.out || (checkedIn ? "in" : "—")}</td>
+                <td className="px-5 py-3 text-slate-500">{s.dept}</td>
+                <td className="px-5 py-3">{r?.site ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">{r.site}</span> : <span className="text-slate-300">—</span>}</td>
+                <td className="px-5 py-3 font-medium text-slate-600">{r?.in || "—"}</td><td className="px-5 py-3 font-medium text-slate-600">{r?.out || (checkedIn ? "in" : "—")}</td>
                 <td className="px-5 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${checkedIn ? (r.out ? "bg-slate-100 text-slate-500" : "bg-emerald-100 text-emerald-700") : "bg-rose-100 text-rose-600"}`}>{checkedIn ? (r.out ? "Complete" : "Present") : "Absent"}</span></td>
-                <td className="px-5 py-3">{checkedIn && !r.out ? <button onClick={() => setOut(r)} className="text-xs font-bold text-blue-600 hover:underline">Check out</button> : <button onClick={() => { setForm({ staffId: s.id, in: r?.in || "09:00", out: r?.out || "" }); setModal(true); }} className="text-xs font-bold text-slate-400 hover:text-slate-600">Edit</button>}</td>
+                <td className="px-5 py-3">{checkedIn && !r.out ? <button onClick={() => setOut(r)} className="text-xs font-bold text-blue-600 hover:underline">Check out</button> : <button onClick={() => { setForm({ staffId: s.id, in: r?.in || "09:00", out: r?.out || "", site: r?.site || "" }); setModal(true); }} className="text-xs font-bold text-slate-400 hover:text-slate-600">Edit</button>}</td>
               </tr>
             ); })}
-            {paged.slice.length === 0 && <tr><td colSpan={6} className="px-5 py-10"><EmptyState Icon={Search} title="No staff match" msg="Try a different name or department." /></td></tr>}
+            {paged.slice.length === 0 && <tr><td colSpan={7} className="px-5 py-10"><EmptyState Icon={Search} title="No staff match" msg="Try a different name or department." /></td></tr>}
           </tbody>
         </table>
       </div>
@@ -1575,6 +1632,7 @@ function AdminCheckin({ store }) {
         <div className="space-y-3">
           <Field label="Staff member"><select value={form.staffId} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))} className={inputCls}>{store.staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
           <div className="grid grid-cols-2 gap-3"><Field label="Time in"><input type="time" value={form.in} onChange={e => setForm(f => ({ ...f, in: e.target.value }))} className={inputCls} /></Field><Field label="Time out (optional)"><input type="time" value={form.out} onChange={e => setForm(f => ({ ...f, out: e.target.value }))} className={inputCls} /></Field></div>
+          <Field label="Site (optional)"><select value={form.site} onChange={e => setForm(f => ({ ...f, site: e.target.value }))} className={inputCls}><option value="">—</option>{SITES.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>
           <p className="text-xs text-slate-400">Date: {fmtDate(day)}</p>
           <PrimaryBtn onClick={addCheckin} className="w-full"><Save size={16} /> Save record</PrimaryBtn>
         </div>
@@ -1811,9 +1869,9 @@ function AdminSignups({ store }) {
 
   const exportCsv = () => downloadCSV("signup-requests.csv", [
     { key: "name", label: "Name" }, { key: "email", label: "Email" }, { key: "role", label: "Position" },
-    { key: "dept", label: "Department" }, { key: "status", label: "Status" },
+    { key: "dept", label: "Department" }, { key: "site", label: "Site" }, { key: "status", label: "Status" },
     { key: "decidedBy", label: "Decided by" }, { key: "decidedAt", label: "Decided on" },
-  ], rows.map(r => ({ ...r, decidedBy: r.decidedBy || "", decidedAt: r.decidedAt || "" })));
+  ], rows.map(r => ({ ...r, site: r.site || "", decidedBy: r.decidedBy || "", decidedAt: r.decidedAt || "" })));
 
   return (
     <>
@@ -1849,6 +1907,7 @@ function AdminSignups({ store }) {
                   <p className="flex items-center gap-1.5"><Mail size={12} className="text-slate-400" /> {r.email}</p>
                   <p className="flex items-center gap-1.5"><Briefcase size={12} className="text-slate-400" /> {r.role}</p>
                   <p className="flex items-center gap-1.5"><Building2 size={12} className="text-slate-400" /> {r.dept}</p>
+                  {r.site && <p className="flex items-center gap-1.5"><MapPin size={12} className="text-slate-400" /> {r.site}</p>}
                   <p className="flex items-center gap-1.5 text-slate-400"><Clock3 size={12} /> Requested {fmtDate(String(r.requestedAt).slice(0, 10))}</p>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2">
@@ -4576,22 +4635,26 @@ function StaffKpiDetail({ k, store }) {
 function AdminStaff({ store }) {
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ name: "", role: "", dept: "", email: "", allowance: 28 });
+  const [form, setForm] = useState({ name: "", role: "", dept: "", email: "", allowance: 28, site: "" });
   const [query, setQuery] = useState("");
   const [deptFilter, setDeptFilter] = useState("");     // "" = all departments
+  const [siteFilter, setSiteFilter] = useState("");     // "" = all sites
+  const [hoursStaff, setHoursStaff] = useState(null);   // staff whose monthly-hours breakdown is open
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+
+  const month = monthOf(todayISO());                    // current "YYYY-MM" for the hours column
 
   const depts = Array.from(new Set(store.staff.map(s => s.dept).filter(Boolean))).sort();
   const deptOptions = Array.from(new Set([...depts, "Sixth Form", "Tuition Centre", "Exam Centre", "Administration", "Higher Education"])).sort();
 
-  const openAdd = () => { setEdit(null); setForm({ name: "", role: "", dept: (deptFilter || depts[0] || "Sixth Form"), email: "", allowance: 28 }); setModal(true); };
-  const openEdit = (s) => { setEdit(s); setForm({ name: s.name, role: s.role || "", dept: s.dept || "", email: s.email, allowance: s.allowance }); setModal(true); };
+  const openAdd = () => { setEdit(null); setForm({ name: "", role: "", dept: (deptFilter || depts[0] || "Sixth Form"), email: "", allowance: 28, site: (siteFilter || "") }); setModal(true); };
+  const openEdit = (s) => { setEdit(s); setForm({ name: s.name, role: s.role || "", dept: s.dept || "", email: s.email, allowance: s.allowance, site: s.site || "" }); setModal(true); };
   const save = async () => {
     if (!form.name.trim()) return;
     try {
-      if (edit) await store.updateStaff(edit.id, { name: form.name, role: form.role, dept: form.dept, email: form.email, allowance: Number(form.allowance) });
-      else await store.addStaff({ name: form.name, role: form.role, dept: form.dept, email: form.email, allowance: Number(form.allowance) });
+      if (edit) await store.updateStaff(edit.id, { name: form.name, role: form.role, dept: form.dept, email: form.email, allowance: Number(form.allowance), site: form.site || null });
+      else await store.addStaff({ name: form.name, role: form.role, dept: form.dept, email: form.email, allowance: Number(form.allowance), site: form.site || null });
       setModal(false);
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
   };
@@ -4605,9 +4668,10 @@ function AdminStaff({ store }) {
   const ql = query.trim().toLowerCase();
   const filtered = store.staff.filter(s => {
     if (deptFilter && s.dept !== deptFilter) return false;
+    if (siteFilter && s.site !== siteFilter) return false;
     return !ql || s.name.toLowerCase().includes(ql) || (s.email || "").toLowerCase().includes(ql) || (s.role || "").toLowerCase().includes(ql) || (s.dept || "").toLowerCase().includes(ql);
   });
-  const paged = usePaged(filtered, 12, `${ql}|${deptFilter}`);
+  const paged = usePaged(filtered, 12, `${ql}|${deptFilter}|${siteFilter}`);
 
   const total = store.staff.length;
   const adminCount = store.staff.filter(s => s.accountRole === "ADMIN").length;
@@ -4617,10 +4681,12 @@ function AdminStaff({ store }) {
   const exportStaff = () => {
     downloadCSV("staff.csv", [
       { key: "name", label: "Name" }, { key: "email", label: "Email" }, { key: "role", label: "Role" },
-      { key: "dept", label: "Department" }, { key: "account", label: "Account role" }, { key: "allowance", label: "Allowance (days)" },
+      { key: "dept", label: "Department" }, { key: "site", label: "Site" }, { key: "hours", label: `Hours (${monthLabel(month)})` },
+      { key: "account", label: "Account role" }, { key: "allowance", label: "Allowance (days)" },
       { key: "twoStep", label: "2-step verification" },
     ], filtered.map(s => ({
-      name: s.name, email: s.email, role: s.role, dept: s.dept, account: s.accountRole,
+      name: s.name, email: s.email, role: s.role, dept: s.dept, site: s.site || "", account: s.accountRole,
+      hours: fmtDuration(monthlyHoursFor(store.checkins, s.id, month).totalMin),
       allowance: s.allowance, twoStep: s.totpEnabled ? "On" : s.totpRequired ? "Setup due" : "Off",
     })));
     store.notify(`Exported staff CSV${deptFilter ? ` — ${deptFilter}` : ""}`);
@@ -4670,14 +4736,22 @@ function AdminStaff({ store }) {
           <Search size={15} className="text-slate-400" />
           <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, email or role…" className="w-48 bg-transparent text-sm outline-none sm:w-64" />
         </div>
+        {/* Site filter — HND / FE / Online (staff pick their home site at sign-up). */}
+        <div className="flex items-center gap-1.5 rounded-xl bg-white px-2.5 py-1.5 ring-1 ring-slate-200">
+          <MapPin size={15} className="text-slate-400" />
+          <select value={siteFilter} onChange={e => setSiteFilter(e.target.value)} className="bg-transparent text-sm font-medium text-slate-600 outline-none">
+            <option value="">All sites</option>
+            {SITES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
         <span className="ml-auto text-xs font-semibold text-slate-400">{filtered.length} of {total}</span>
       </div>
 
       <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 fade-up">
         <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[900px] text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
-              <tr><th className="px-5 py-3">Name</th><th className="px-5 py-3">Role</th><th className="px-5 py-3">Department</th><th className="px-5 py-3 whitespace-nowrap">Account</th><th className="px-5 py-3 whitespace-nowrap">Allowance</th><th className="px-5 py-3 text-right">Actions</th></tr>
+              <tr><th className="px-5 py-3">Name</th><th className="px-5 py-3">Role</th><th className="px-5 py-3">Department</th><th className="px-5 py-3">Site</th><th className="px-5 py-3 whitespace-nowrap">Hours ({monthLabel(month).split(" ")[0]})</th><th className="px-5 py-3 whitespace-nowrap">Account</th><th className="px-5 py-3 whitespace-nowrap">Allowance</th><th className="px-5 py-3 text-right">Actions</th></tr>
             </thead>
             <tbody>
               {paged.slice.map(s => (
@@ -4696,6 +4770,22 @@ function AdminStaff({ store }) {
                     <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">{s.dept || "—"}</span>
                   </td>
                   <td className="px-5 py-3">
+                    {s.site
+                      ? <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 ring-1 ring-blue-100">{s.site}</span>
+                      : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-5 py-3">
+                    {(() => {
+                      const h = monthlyHoursFor(store.checkins, s.id, month);
+                      if (h.totalMin <= 0) return <span className="text-slate-300">—</span>;
+                      return (
+                        <button onClick={() => setHoursStaff(s)} title="See the weekly breakdown" className="press inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 text-[12px] font-bold text-emerald-700 ring-1 ring-emerald-100 transition hover:bg-emerald-100">
+                          <Timer size={12} /> {fmtDuration(h.totalMin)}
+                        </button>
+                      );
+                    })()}
+                  </td>
+                  <td className="px-5 py-3">
                     {s.accountRole === "ADMIN"
                       ? <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-bold text-indigo-700">Admin</span>
                       : <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-500">Staff</span>}
@@ -4709,7 +4799,7 @@ function AdminStaff({ store }) {
                   </td>
                 </tr>
               ))}
-              {paged.slice.length === 0 && <tr><td colSpan={6} className="px-5 py-10"><EmptyState Icon={Users} title={total === 0 ? "No staff yet" : "No staff match"} msg={total === 0 ? "Add your first staff member." : deptFilter ? `No staff in ${deptFilter}. Try another department.` : "Try a different search."} /></td></tr>}
+              {paged.slice.length === 0 && <tr><td colSpan={8} className="px-5 py-10"><EmptyState Icon={Users} title={total === 0 ? "No staff yet" : "No staff match"} msg={total === 0 ? "Add your first staff member." : (deptFilter || siteFilter) ? `No staff match this filter. Try another.` : "Try a different search."} /></td></tr>}
             </tbody>
           </table>
         </div>
@@ -4728,7 +4818,10 @@ function AdminStaff({ store }) {
             </Field>
           </div>
           <Field label="Email address"><input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@lbc.ac.uk" className={inputCls} /></Field>
-          <Field label="Holiday allowance (days)"><input type="number" min={0} value={form.allowance} onChange={e => setForm(f => ({ ...f, allowance: e.target.value }))} className={inputCls} /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Site"><select value={form.site} onChange={e => setForm(f => ({ ...f, site: e.target.value }))} className={inputCls}><option value="">Not set</option>{SITES.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>
+            <Field label="Holiday allowance (days)"><input type="number" min={0} value={form.allowance} onChange={e => setForm(f => ({ ...f, allowance: e.target.value }))} className={inputCls} /></Field>
+          </div>
           {!edit && <p className="text-[11px] text-slate-400">The new account is created inactive — they get an email invitation to set their own password before they can sign in.</p>}
           <PrimaryBtn onClick={save} disabled={!form.name.trim() || !form.email.trim()} className="w-full"><Save size={16} /> {edit ? "Save changes" : "Add staff"}</PrimaryBtn>
         </div>
@@ -4747,6 +4840,40 @@ function AdminStaff({ store }) {
           <PrimaryBtn colour={MAROON} onClick={confirmRemove} disabled={deleteBusy} className="w-full"><Trash2 size={16} /> {deleteBusy ? "Removing…" : `Remove ${deleteTarget?.name || ""}`}</PrimaryBtn>
           <button onClick={() => setDeleteTarget(null)} disabled={deleteBusy} className="press w-full text-center text-xs font-semibold text-slate-400 transition hover:text-slate-600">Cancel</button>
         </div>
+      </Modal>
+
+      {/* Monthly hours breakdown — opened by clicking a staff member's hours pill. */}
+      <Modal open={!!hoursStaff} onClose={() => setHoursStaff(null)} title={`Hours worked — ${hoursStaff?.name || ""}`}>
+        {hoursStaff && (() => {
+          const h = monthlyHoursFor(store.checkins, hoursStaff.id, month);
+          const fmtWk = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+          const weekEnd = (iso) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 6); return d.toISOString().slice(0, 10); };
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between rounded-xl bg-emerald-50 px-3.5 py-3 ring-1 ring-emerald-100">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-600">{monthLabel(month)}</p>
+                  <p className="text-[11px] text-emerald-700/70">{h.countedDays} day{h.countedDays === 1 ? "" : "s"} counted</p>
+                </div>
+                <span className="text-xl font-extrabold text-emerald-700">{fmtDuration(h.totalMin)}</span>
+              </div>
+              <p className="px-1 text-xs font-bold uppercase tracking-wide text-slate-400">Per week (from check-in → check-out)</p>
+              {h.weekList.length === 0 && <EmptyState Icon={Timer} title="Nothing to show yet" msg="Hours appear once a check-in has a matching check-out this month." />}
+              {h.weekList.map(w => (
+                <div key={w.monday} className="flex items-center justify-between rounded-xl bg-slate-50 px-3.5 py-2.5 ring-1 ring-slate-100">
+                  <span className="text-sm font-semibold text-slate-600">{fmtWk(w.monday)} – {fmtWk(weekEnd(w.monday))}</span>
+                  <span className="text-sm font-bold tabular-nums text-slate-700">{fmtDuration(w.min)}</span>
+                </div>
+              ))}
+              {h.openDays > 0 && (
+                <p className="flex items-start gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-700 ring-1 ring-amber-100">
+                  <AlertCircle size={13} className="mt-px shrink-0" />
+                  {h.openDays} day{h.openDays === 1 ? "" : "s"} this month {h.openDays === 1 ? "has" : "have"} a check-in but no check-out, so {h.openDays === 1 ? "it is" : "they are"} not included in these hours.
+                </p>
+              )}
+            </div>
+          );
+        })()}
       </Modal>
     </>
   );

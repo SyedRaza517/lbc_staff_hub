@@ -97,7 +97,7 @@ export const api = {
   resetStaffTotp: (id) => request(`/staff/${id}/totp`, { method: "DELETE" }),
   // check-ins
   listCheckins: (date) => request(`/checkins${date ? `?date=${date}` : ""}`),
-  checkIn: () => request("/checkins/check-in", { method: "POST" }),
+  checkIn: (site) => request("/checkins/check-in", { method: "POST", body: site ? { site } : {} }),
   checkOut: (id) => request(`/checkins/${id}/check-out`, { method: "POST" }),
   upsertCheckin: (data) => request("/checkins", { method: "PUT", body: data }),
   saveSummary: (date, summary) => request("/checkins/summary", { method: "PUT", body: { date, summary } }),

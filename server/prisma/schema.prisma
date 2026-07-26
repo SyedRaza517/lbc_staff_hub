@@ -21,6 +21,10 @@ model Staff {
   email        String   @unique
   passwordHash String
   accountRole  String   @default("STAFF") // ADMIN | STAFF
+  // The staff member's home site — chosen at sign-up. HND | FE | Online. Nullable
+  // because accounts that predate this field (and admin-created ones) may not have
+  // set one; the Staff-tab site filter treats those as "unset".
+  site         String?
   allowance    Int      @default(28)
   initials     String
   colour       String
@@ -118,6 +122,7 @@ model SignupRequest {
   passwordHash String
   jobTitle     String   // "position" on the sign-up form
   dept         String
+  site         String?  // HND | FE | Online — home site chosen on the sign-up form
   status       String   @default("pending") // pending | approved | rejected
   note         String?  // admin's reason, shown to nobody yet but kept for audit
   decidedBy    String?
@@ -149,6 +154,7 @@ model CheckIn {
   timeIn    String
   timeOut   String?
   summary   String   @default("")
+  site      String?  // HND | FE | Online — where this clock-in happened
   createdAt DateTime @default(now())
 
   @@unique([staffId, date])
