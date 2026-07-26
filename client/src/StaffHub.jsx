@@ -850,7 +850,7 @@ function BiometricSetting() {
         <div className="min-w-0 pr-3">
           <span className="block text-sm font-semibold capitalize text-slate-700">{label}</span>
           <span className="block text-[11px] text-slate-400">
-            {status.available ? "Lock the app when you switch away from it" : "Set up biometrics in your device settings first"}
+            {status.available ? "Ask for this when you sign in or reopen the app" : "Set up biometrics in your device settings first"}
           </span>
         </div>
         <button

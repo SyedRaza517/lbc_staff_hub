@@ -8,7 +8,7 @@ import MobileAuth from "./MobileAuth";
 import ResetPasswordPage from "./ResetPassword";
 import AcceptInvite from "./AcceptInvite";
 import { useIsHandset, isNativeApp } from "./PhoneShell";
-import BiometricGate, { useAppLock } from "./BiometricGate";
+import BiometricGate, { useAppLock, BiometricSetupPrompt } from "./BiometricGate";
 import { StaffApp, AdminDashboard } from "./StaffHub";
 import { LogOut, CheckCircle2, XCircle, Sparkles, Loader2, GraduationCap, Clock, KeyRound, Lock, ShieldCheck, X, WifiOff } from "lucide-react";
 
@@ -204,7 +204,7 @@ export default function App() {
   });
   // Biometric app lock — only ever active inside the packaged app, and only when
   // the user has switched it on.
-  const { locked, unlock } = useAppLock();
+  const { locked, unlock } = useAppLock(Boolean(user));
 
   const clearTokenFromUrl = () => {
     // Drop the token from the address bar so a refresh (or a shared screenshot of
@@ -280,7 +280,13 @@ export default function App() {
   );
   // Someone who came in through the staff app lands in the staff app, even if
   // they're an admin — otherwise picking "Staff App" would drop them on the dashboard.
-  return <Shell user={user} logout={logout} initialView={entry === "app" ? "app" : undefined} />;
+  return (
+    <>
+      <Shell user={user} logout={logout} initialView={entry === "app" ? "app" : undefined} />
+      {/* One-time offer (phone app only) to protect sign-in with Face ID / fingerprint. */}
+      <BiometricSetupPrompt />
+    </>
+  );
 }
 
 function Shell({ user, logout, initialView }) {
