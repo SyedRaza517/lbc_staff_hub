@@ -873,6 +873,11 @@ function BiometricSetting() {
 const fmtHours = (mins) => { const h = mins / 60; return (Math.round(h * 10) / 10).toString().replace(/\.0$/, ""); };
 const monthOf = (iso) => iso.slice(0, 7);
 const monthLabel = (m) => new Date(m + "-01T00:00:00").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+// Shift a "YYYY-MM" string by whole months, TIMEZONE-SAFELY. Doing this via a local
+// Date + toISOString() drifts a month under BST (local midnight = 23:00 UTC the day
+// before), which made the forward/back buttons land on the wrong month. Pure UTC
+// arithmetic on the year/month numbers avoids that entirely.
+const shiftMonthStr = (m, delta) => { const [y, mo] = m.split("-").map(Number); const d = new Date(Date.UTC(y, mo - 1 + delta, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
 const lastDayOfMonth = (m) => { const [y, mo] = m.split("-").map(Number); return new Date(y, mo, 0).getDate(); };
 const prettyDay = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
 
@@ -961,7 +966,7 @@ function TimesheetScreen({ store, me }) {
   }, [month, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const reload = () => setReloadKey(k => k + 1);
 
-  const shiftMonth = (delta) => { const d = new Date(month + "-01T00:00:00"); d.setMonth(d.getMonth() + delta); setMonth(d.toISOString().slice(0, 7)); };
+  const shiftMonth = (delta) => setMonth(shiftMonthStr(month, delta));
 
   const list = entries || [];
   const totalMin = list.reduce((s, e) => s + e.minutes, 0);
@@ -1295,7 +1300,7 @@ function AdminTimesheets({ store }) {
     catch (_) {} finally { setBusy(false); }
   };
 
-  const shiftMonth = (delta) => { const d = new Date(month + "-01T00:00:00"); d.setMonth(d.getMonth() + delta); setMonth(d.toISOString().slice(0, 7)); };
+  const shiftMonth = (delta) => setMonth(shiftMonthStr(month, delta));
   const list = entries || [];
   const byStaff = {};
   for (const e of list) (byStaff[e.staffId] = byStaff[e.staffId] || { staffId: e.staffId, name: e.staffName, dept: e.staffDept, initials: e.staffInitials, colour: e.staffColour, entries: [] }).entries.push(e);
