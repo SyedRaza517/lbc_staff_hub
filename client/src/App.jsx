@@ -10,7 +10,7 @@ import AcceptInvite from "./AcceptInvite";
 import { useIsHandset, isNativeApp } from "./PhoneShell";
 import BiometricGate, { useAppLock } from "./BiometricGate";
 import { StaffApp, AdminDashboard } from "./StaffHub";
-import { Smartphone, Monitor, LogOut, CheckCircle2, XCircle, Sparkles, Loader2, GraduationCap, Clock, KeyRound, Lock, ShieldCheck, X, WifiOff } from "lucide-react";
+import { LogOut, CheckCircle2, XCircle, Sparkles, Loader2, GraduationCap, Clock, KeyRound, Lock, ShieldCheck, X, WifiOff } from "lucide-react";
 
 const NAVY = "#1a3a8f", NAVY_DARK = "#14306f", MAROON = "#9e1b32";
 const initialsOf = (name) => String(name || "").trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
@@ -354,15 +354,10 @@ function Shell({ user, logout, initialView }) {
           <span className="hidden font-extrabold tracking-tight text-white sm:inline" style={{ fontFamily: "'Lora', serif" }}>LBC</span>
         </div>
         <div className="flex flex-1 items-center justify-center gap-2">
-          {isAdmin ? (
-            <>
-              <span className="mr-1 hidden font-semibold tracking-wide text-slate-400 sm:inline">VIEW MODE:</span>
-              <button onClick={() => setView("app")} className={`press flex items-center gap-1.5 rounded-full px-3.5 py-1.5 font-semibold transition-all duration-300 ${view === "app" ? "bg-white text-slate-900 shadow-md" : "text-slate-300 hover:bg-white/10"}`}><Smartphone size={14} /> Staff App</button>
-              <button onClick={() => setView("admin")} className={`press flex items-center gap-1.5 rounded-full px-3.5 py-1.5 font-semibold transition-all duration-300 ${view === "admin" ? "bg-white text-slate-900 shadow-md" : "text-slate-300 hover:bg-white/10"}`}><Monitor size={14} /> Admin Dashboard</button>
-            </>
-          ) : (
-            <span className="font-semibold tracking-wide text-slate-200">London Brookes College · Staff Hub</span>
-          )}
+          {/* The Staff-App / Admin-Dashboard view toggle used to live here. It's
+              gone now: the front-door Landing screen already asks which one to
+              open, so switching again from the header was redundant. */}
+          <span className="font-semibold tracking-wide text-slate-200">London Brookes College · Staff Hub</span>
         </div>
         <div className="flex items-center gap-2.5">
           <LiveClock />
