@@ -282,7 +282,7 @@ export default function App() {
   // they're an admin — otherwise picking "Staff App" would drop them on the dashboard.
   return (
     <>
-      <Shell user={user} logout={logout} initialView={entry === "app" ? "app" : undefined} />
+      <Shell user={user} logout={logout} initialView={entry === "app" ? "app" : entry === "admin" ? "admin" : undefined} />
       {/* One-time offer (phone app only) to protect sign-in with Face ID / fingerprint. */}
       <BiometricSetupPrompt />
     </>
@@ -293,7 +293,12 @@ function Shell({ user, logout, initialView }) {
   const { applySession } = useAuth();
   const handset = useIsHandset();
   const isAdmin = user.accountRole === "ADMIN";
-  const [view, setView] = useState(initialView || (isAdmin ? "admin" : "app"));
+  // On a phone, admins (including limited admins who registered via the app) land in
+  // the staff app and open their permitted dashboard from More — so they keep their
+  // staff experience (check-in, leave) and aren't dropped straight into the console.
+  // On desktop, admins still land on the dashboard. A deliberate "Admin" front-door
+  // choice (initialView="admin") always wins.
+  const [view, setView] = useState(initialView || ((isAdmin && !handset) ? "admin" : "app"));
   const [currentStaffId, setCurrentStaffId] = useState(user.id);
   const [toasts, setToasts] = useState([]);
   const [notes, setNotes] = useState([]);
@@ -380,7 +385,7 @@ function Shell({ user, logout, initialView }) {
       <div key={view} className={handset ? "min-h-0 flex-1" : "fade-up"}>
         {view === "app"
           ? <StaffApp store={store} currentStaffId={isAdmin ? currentStaffId : user.id} setCurrentStaffId={setCurrentStaffId} logout={logout} onChangePassword={() => setShowChangePw(true)} onSwitchToAdmin={isAdmin ? () => setView("admin") : undefined} />
-          : <AdminDashboard store={store} />}
+          : <AdminDashboard store={store} onExitToStaffApp={handset ? () => setView("app") : undefined} />}
       </div>
 
       {/* The overlay below is scrollable and top-aligned: on a landscape iPhone

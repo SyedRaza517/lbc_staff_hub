@@ -1270,7 +1270,7 @@ const canAccessPage = (user, key) => {
   return pages == null || (Array.isArray(pages) && pages.includes(key));
 };
 
-export function AdminDashboard({ store }) {
+export function AdminDashboard({ store, onExitToStaffApp }) {
   const me = store.currentUser;
   if (!store.isAdmin) return <div className="p-4 text-slate-400">Access denied</div>;
   const allNav = [
@@ -1321,6 +1321,9 @@ export function AdminDashboard({ store }) {
       </aside>
       <main className="flex-1 overflow-x-hidden bg-slate-100 p-5 md:p-7">
         <div className="mb-4 flex gap-1.5 overflow-x-auto md:hidden">
+          {/* On a phone, a way back to the staff app — admins (incl. limited admins
+              who registered on the app) keep both their staff view and the console. */}
+          {onExitToStaffApp && <button onClick={onExitToStaffApp} className="flex shrink-0 items-center gap-1.5 rounded-full border-2 border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 active:scale-95"><ChevronLeft size={14} /> Staff App</button>}
           {nav.map(n => <button key={n.key} onClick={() => setTab(n.key)} className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm transition-all active:scale-95 ${activeKey === n.key ? "text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`} style={activeKey === n.key ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}><n.I size={14} /> {n.label}</button>)}
         </div>
         {activeKey === "overview" && <AdminOverview store={store} setTab={setTab} />}
