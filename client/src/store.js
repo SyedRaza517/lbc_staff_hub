@@ -173,6 +173,14 @@ export function useApiStore(notify, user) {
     saveSummary: run((date, text) => api.saveSummary(date, text), "Daily summary saved"),
     // leave
     requestLeave: run((data) => api.requestLeave(data), "Leave request submitted"),
+    // Admin adds an already-approved holiday: create the request, then approve it in
+    // one action so it lands straight on the calendar. The allowance is still enforced
+    // server-side on the approval (paid types); unpaid never draws down.
+    addApprovedLeave: run(async (data) => {
+      const rec = await api.requestLeave(data);
+      if (rec?.id && rec.status === "pending") await api.decideLeave(rec.id, "approved");
+      return rec;
+    }, "Holiday added to the calendar"),
     decideLeave: run((id, status, note) => api.decideLeave(id, status, note), (id, status) => `Request ${status}`, "info"),
     // balances
     adjustBalance: run((staffId, days, note) => api.addAdjustment({ staffId, days, note }), "Adjustment applied"),

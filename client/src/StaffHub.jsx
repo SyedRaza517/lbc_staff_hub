@@ -1843,7 +1843,58 @@ function AdminBalances({ store }) {
 }
 
 /* ----- Dashboard: Calendar ----- */
-function AdminCalendar({ store }) { return <><AdminHeader title="Holiday Calendar" subtitle="Organisation-wide view of approved absences" Icon={CalendarDays} /><div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 fade-up"><MonthGrid store={store} big /><div className="mt-4 border-t border-slate-100 pt-4"><p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">Leave types</p><LeaveLegend /></div></div></>; }
+function AdminCalendar({ store }) {
+  const [modal, setModal] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ staffId: "", type: "annual", start: todayISO(), end: todayISO(), reason: "" });
+
+  const openAdd = () => { setForm({ staffId: store.staff[0]?.id || "", type: "annual", start: todayISO(), end: todayISO(), reason: "" }); setModal(true); };
+  const days = daysBetween(form.start, form.end);
+  const staff = store.staff.find(s => s.id === form.staffId);
+  const remaining = form.staffId ? store.effectiveAllowance(form.staffId) - store.usedDays(form.staffId) : 0;
+  // Paid types draw down the allowance; unpaid does not. Block over-allowance before
+  // creating anything, so a rejected approval never leaves a dangling pending request.
+  const overAllowance = form.type !== "unpaid" && form.staffId && days > remaining;
+
+  const addHoliday = async () => {
+    if (!form.staffId || overAllowance) return;
+    setBusy(true);
+    try {
+      await store.addApprovedLeave({ staffId: form.staffId, type: form.type, start: form.start, end: form.end, reason: form.reason.trim() || "Added by admin" });
+      setModal(false);
+    } catch (_) { /* store toasts the error and refetches; keep the modal open */ }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <AdminHeader title="Holiday Calendar" subtitle="Organisation-wide view of approved absences" Icon={CalendarDays}
+        action={<PrimaryBtn onClick={openAdd}><Plus size={16} /> Add holiday</PrimaryBtn>} />
+      <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 fade-up">
+        <MonthGrid store={store} big />
+        <div className="mt-4 border-t border-slate-100 pt-4"><p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">Leave types</p><LeaveLegend /></div>
+      </div>
+
+      <Modal open={modal} onClose={() => setModal(false)} title="Add holiday">
+        <div className="space-y-3">
+          <Field label="Staff member"><select value={form.staffId} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))} className={inputCls}>{store.staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+          <Field label="Type"><select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} className={inputCls}>{LEAVE_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="From"><input type="date" value={form.start} onChange={e => setForm(f => ({ ...f, start: e.target.value, end: e.target.value > f.end ? e.target.value : f.end }))} className={inputCls} /></Field>
+            <Field label="To"><input type="date" value={form.end} min={form.start} onChange={e => setForm(f => ({ ...f, end: e.target.value }))} className={inputCls} /></Field>
+          </div>
+          <Field label="Reason"><input value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} placeholder="Optional" className={inputCls} /></Field>
+          <div className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-100">
+            Added as an <b>approved</b> absence — it appears on the calendar straight away.{" "}
+            {form.type === "unpaid" ? "Unpaid leave doesn't use the holiday allowance." : staff ? `${days}d requested · ${remaining}d allowance left.` : ""}
+          </div>
+          {overAllowance && <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-600">Not enough allowance: {remaining}d left but {days}d requested. Choose Unpaid Leave, or a shorter period.</p>}
+          <PrimaryBtn onClick={addHoliday} disabled={busy || !form.staffId || overAllowance} className="w-full"><Plus size={16} /> {busy ? "Adding…" : "Add holiday"}</PrimaryBtn>
+        </div>
+      </Modal>
+    </>
+  );
+}
 
 /* ----- Dashboard: Leave Requests ----- */
 function AdminRequests({ store }) {
