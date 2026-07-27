@@ -512,6 +512,7 @@ router.post("/sessions", requireAuth, requireAdmin, async (req, res) => {
       moduleId, date, startTime: start, endTime: end,
       description: str(req.body?.description) || mod.code,
       audience: str(req.body?.audience) || "All students",
+      kind: str(req.body?.kind) || "",
     },
   });
   res.status(201).json(sSession(s));
@@ -538,6 +539,7 @@ router.put("/sessions/:id", requireAuth, requireAdmin, async (req, res) => {
   if (end <= start) return res.status(400).json({ error: "End time must be after the start time" });
   if (req.body?.description !== undefined) data.description = str(req.body.description);
   if (req.body?.audience !== undefined) data.audience = str(req.body.audience) || "All students";
+  if (req.body?.kind !== undefined) data.kind = str(req.body.kind);
   const s = await prisma.hndSession.update({ where: { id: existing.id }, data });
   res.json(sSession(s));
 });
@@ -567,7 +569,7 @@ router.post("/modules/:id/sessions/generate", requireAuth, requireAdmin, async (
   // so 3h → 1 register, 6h → 2, and so on. Registers fall into fixed 3-hour blocks.
   const hours = Number(req.body?.hours);
   const HOURS_PER_REGISTER = 3;
-  const BLOCKS = [["09:00", "12:00"], ["13:00", "16:00"], ["16:00", "19:00"], ["19:00", "22:00"]];
+  const BLOCKS = [["10:00", "13:00"], ["14:00", "17:00"], ["17:00", "20:00"], ["20:00", "23:00"]];
   let blocks;
   if (Number.isFinite(hours) && hours > 0) {
     const perDay = Math.min(Math.max(1, Math.round(hours / HOURS_PER_REGISTER)), BLOCKS.length);
@@ -592,11 +594,13 @@ router.post("/modules/:id/sessions/generate", requireAuth, requireAdmin, async (
   // without duplicating ones already generated.
   const existing = await prisma.hndSession.findMany({ where: { moduleId: mod.id, date: { in: dates } }, select: { date: true, startTime: true } });
   const have = new Set(existing.map((x) => `${x.date}|${x.startTime}`));
+  // On a multi-register day the first block is Teaching, the second a Seminar.
+  const KINDS = ["Teaching", "Seminar", "Teaching", "Seminar"];
   const toCreate = [];
   for (const date of dates) {
-    for (const [s, e] of blocks) {
-      if (!have.has(`${date}|${s}`)) toCreate.push({ moduleId: mod.id, date, startTime: s, endTime: e, description: mod.code, audience });
-    }
+    blocks.forEach(([s, e], i) => {
+      if (!have.has(`${date}|${s}`)) toCreate.push({ moduleId: mod.id, date, startTime: s, endTime: e, description: mod.code, audience, kind: KINDS[i] || "" });
+    });
   }
   if (toCreate.length) await prisma.hndSession.createMany({ data: toCreate });
   res.status(201).json({ ok: true, weeks: dates.length, registersPerWeek: blocks.length, created: toCreate.length });

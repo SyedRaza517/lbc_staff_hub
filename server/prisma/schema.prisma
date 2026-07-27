@@ -407,6 +407,9 @@ model HndSession {
   endTime     String    // HH:MM
   description String    @default("")
   audience    String    @default("All students")
+  // What kind of session this register is, e.g. "Teaching" or "Seminar". On a
+  // 6-hour day the first register is Teaching and the second Seminar.
+  kind        String    @default("")
   createdAt   DateTime  @default(now())
 
   marks AttendanceMark[]

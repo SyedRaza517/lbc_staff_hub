@@ -2342,11 +2342,14 @@ function HndOverviewStats({ store, attendance, modules, students, sessions }) {
 }
 
 /* ----- Sessions list (per module) ----- */
+// 24h "HH:MM" → compact 12h, e.g. "10:00" → "10AM", "13:30" → "1:30PM".
+const fmt12 = (t) => { if (!t) return ""; const [h, m] = String(t).split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; const hh = h % 12 || 12; return m ? `${hh}:${String(m).padStart(2, "0")}${ap}` : `${hh}${ap}`; };
+
 function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped }) {
   const [filter, setFilter] = useState("all"); // all | past | upcoming
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ date: todayISO(), start: "10:00", end: "13:00", description: "", audience: "All students" });
+  const [form, setForm] = useState({ date: todayISO(), start: "10:00", end: "13:00", description: "", audience: "All students", kind: "Teaching" });
 
   const today = todayISO();
   const mine = scoped.filter(s => s.moduleId === moduleId);
@@ -2366,8 +2369,8 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
   const formSemester = semesterOf(form.date, store.semesters);
   const outOfScope = store.semesterId && (store.semesterId === "unassigned" ? !!formSemester : formSemester?.id !== store.semesterId);
 
-  const openAdd = () => { setEdit(null); setForm({ date: today, start: "10:00", end: "13:00", description: selected?.code || "", audience: "All students" }); setModal(true); };
-  const openEdit = (s) => { setEdit(s); setForm({ date: s.date, start: s.start, end: s.end, description: s.description, audience: s.audience }); setModal(true); };
+  const openAdd = () => { setEdit(null); setForm({ date: today, start: "10:00", end: "13:00", description: selected?.code || "", audience: "All students", kind: "Teaching" }); setModal(true); };
+  const openEdit = (s) => { setEdit(s); setForm({ date: s.date, start: s.start, end: s.end, description: s.description, audience: s.audience, kind: s.kind || "Teaching" }); setModal(true); };
   const save = async () => {
     try {
       if (edit) await store.updateSession(edit.id, form);
@@ -2433,7 +2436,7 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
-              <tr><th className="px-5 py-3">Date</th><th className="px-5 py-3">Type</th><th className="px-5 py-3">Description</th><th className="px-5 py-3">Register</th><th className="px-5 py-3 text-right">Actions</th></tr>
+              <tr><th className="px-5 py-3">Date</th><th className="px-5 py-3">Time</th><th className="px-5 py-3">Type</th><th className="px-5 py-3">Description</th><th className="px-5 py-3">Register</th><th className="px-5 py-3 text-right">Actions</th></tr>
             </thead>
             <tbody>
               {paged.slice.map(s => {
@@ -2445,14 +2448,18 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
                     <td className="px-5 py-3">
                       <button onClick={() => onTake(s.id)} className="text-left font-semibold transition hover:underline" style={{ color: NAVY }}>{fmtDay(s.date)}</button>
                       {s.date === today && <span className="ml-2 rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold text-blue-700">TODAY</span>}
-                      {(() => { const ri = regInfo(s); return ri.total > 1 ? <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">Register {ri.idx} of {ri.total}</span> : null; })()}
                       {/* Only worth showing when it isn't already implied by the picker. */}
                       {!store.semesterId && store.semesters.length > 0 && (
                         <p className={`mt-0.5 text-[10px] font-semibold ${sem ? "text-slate-400" : "text-amber-600"}`}>{sem ? sem.name : "Outside any semester"}</p>
                       )}
                     </td>
+                    <td className="px-5 py-3 font-medium text-slate-600 whitespace-nowrap tabular-nums">{fmt12(s.start)} – {fmt12(s.end)}</td>
                     <td className="px-5 py-3 text-slate-500">{s.audience}</td>
-                    <td className="px-5 py-3 font-medium text-slate-600">{s.description || "—"}</td>
+                    <td className="px-5 py-3">
+                      {s.kind
+                        ? <span className="rounded-full px-2.5 py-1 text-[11px] font-bold" style={s.kind === "Teaching" ? { background: "#e0e7ff", color: "#4338ca" } : s.kind === "Seminar" ? { background: "#f3e8ff", color: "#7e22ce" } : { background: "#f1f5f9", color: "#475569" }}>{s.kind}</span>
+                        : <span className="font-medium text-slate-600">{s.description || "—"}</span>}
+                    </td>
                     <td className="px-5 py-3">
                       {done
                         ? <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">Taken · {s.markedCount}</span>
@@ -2473,7 +2480,7 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
                 );
               })}
               {paged.slice.length === 0 && (
-                <tr><td colSpan={5} className="px-5 py-10">
+                <tr><td colSpan={6} className="px-5 py-10">
                   <EmptyState Icon={CalendarDays} title="No sessions"
                     msg={store.semesterId
                       ? `No sessions for this module in ${semesterLabel(store.semesterId, store.semesters)}. Switch the semester picker to "All semesters" to see the rest.`
@@ -2493,8 +2500,11 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
             <Field label="Start time"><input type="time" value={form.start} onChange={e => setForm(f => ({ ...f, start: e.target.value }))} className={inputCls} /></Field>
             <Field label="End time"><input type="time" value={form.end} onChange={e => setForm(f => ({ ...f, end: e.target.value }))} className={inputCls} /></Field>
           </div>
-          <Field label="Type"><select value={form.audience} onChange={e => setForm(f => ({ ...f, audience: e.target.value }))} className={inputCls}><option>All students</option><option>Group A</option><option>Group B</option></select></Field>
-          <Field label="Description"><input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder={selected?.code || "e.g. Workshop"} className={inputCls} /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Audience"><select value={form.audience} onChange={e => setForm(f => ({ ...f, audience: e.target.value }))} className={inputCls}><option>All students</option><option>Group A</option><option>Group B</option></select></Field>
+            <Field label="Session type"><select value={form.kind} onChange={e => setForm(f => ({ ...f, kind: e.target.value }))} className={inputCls}>{["Teaching", "Seminar", "Workshop", "Lecture", "Lab", "Tutorial"].map(k => <option key={k} value={k}>{k}</option>)}</select></Field>
+          </div>
+          <Field label="Description (optional)"><input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder={selected?.code || "e.g. Workshop"} className={inputCls} /></Field>
           {outOfScope && (
             <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200">
               <AlertCircle size={14} className="mt-0.5 shrink-0" />

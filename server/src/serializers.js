@@ -63,7 +63,7 @@ const sStudent = (s) => ({
 });
 const sSession = (x) => ({
   id: x.id, moduleId: x.moduleId, date: x.date, start: x.startTime, end: x.endTime,
-  description: x.description, audience: x.audience,
+  description: x.description, audience: x.audience, kind: x.kind ?? "",
   ...(x._count ? { markedCount: x._count.marks } : {}),
 });
 const sMark = (m) => ({ id: m.id, sessionId: m.sessionId, studentId: m.studentId, status: m.status, remark: m.remark, takenBy: m.takenBy, takenAt: m.takenAt });
