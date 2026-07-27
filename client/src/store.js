@@ -136,30 +136,34 @@ export function useApiStore(notify, user) {
     };
   }, [user, refresh, refreshHnd, refreshInteractions, refreshAssessments, hndLoaded, interactionsLoaded, assessmentsLoaded]);
 
-  // wrap an action so errors surface as toasts and the relevant data refetches
+  // Wrap an action so errors surface as toasts and the relevant data resyncs.
+  // The resync runs in the BACKGROUND (not awaited): the save itself is awaited so
+  // errors are caught and the toast is accurate, but the UI updates the instant the
+  // save returns rather than waiting for a full refetch — which, at scale, made every
+  // save/edit feel slow. The list catches up a moment later when the refetch lands.
   const run = (fn, okMsg, okType = "success") => async (...args) => {
-    try { const r = await fn(...args); await refresh(); if (okMsg) notify?.(typeof okMsg === "function" ? okMsg(...args) : okMsg, okType); return r; }
+    try { const r = await fn(...args); if (okMsg) notify?.(typeof okMsg === "function" ? okMsg(...args) : okMsg, okType); refresh().catch(() => {}); return r; }
     // Re-sync on failure too: a rejected action (e.g. 409 already-decided, 400 over-allowance)
     // usually means our cached view is stale, so refetch to match server truth.
-    catch (e) { await refresh().catch(() => {}); notify?.(e.message || "Action failed", "error"); throw e; }
+    catch (e) { refresh().catch(() => {}); notify?.(e.message || "Action failed", "error"); throw e; }
   };
 
   // Same wrapper, but resyncs the HND collections instead of the staff ones.
   const runHnd = (fn, okMsg, okType = "success") => async (...args) => {
-    try { const r = await fn(...args); await refreshHnd(); if (okMsg) notify?.(typeof okMsg === "function" ? okMsg(...args) : okMsg, okType); return r; }
-    catch (e) { await refreshHnd().catch(() => {}); notify?.(e.message || "Action failed", "error"); throw e; }
+    try { const r = await fn(...args); if (okMsg) notify?.(typeof okMsg === "function" ? okMsg(...args) : okMsg, okType); refreshHnd().catch(() => {}); return r; }
+    catch (e) { refreshHnd().catch(() => {}); notify?.(e.message || "Action failed", "error"); throw e; }
   };
 
   // Same wrapper, resyncing the PAT interactions list.
   const runPat = (fn, okMsg, okType = "success") => async (...args) => {
-    try { const r = await fn(...args); await refreshInteractions(); if (okMsg) notify?.(typeof okMsg === "function" ? okMsg(...args) : okMsg, okType); return r; }
-    catch (e) { await refreshInteractions().catch(() => {}); notify?.(e.message || "Action failed", "error"); throw e; }
+    try { const r = await fn(...args); if (okMsg) notify?.(typeof okMsg === "function" ? okMsg(...args) : okMsg, okType); refreshInteractions().catch(() => {}); return r; }
+    catch (e) { refreshInteractions().catch(() => {}); notify?.(e.message || "Action failed", "error"); throw e; }
   };
 
   // Same wrapper, resyncing the assessments list + overview.
   const runAssess = (fn, okMsg, okType = "success") => async (...args) => {
-    try { const r = await fn(...args); await refreshAssessments(); if (okMsg) notify?.(typeof okMsg === "function" ? okMsg(...args) : okMsg, okType); return r; }
-    catch (e) { await refreshAssessments().catch(() => {}); notify?.(e.message || "Action failed", "error"); throw e; }
+    try { const r = await fn(...args); if (okMsg) notify?.(typeof okMsg === "function" ? okMsg(...args) : okMsg, okType); refreshAssessments().catch(() => {}); return r; }
+    catch (e) { refreshAssessments().catch(() => {}); notify?.(e.message || "Action failed", "error"); throw e; }
   };
 
   // Timesheets are month-scoped and the TimesheetScreen reloads its own list, so
