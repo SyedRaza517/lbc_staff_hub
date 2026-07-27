@@ -34,6 +34,15 @@ const NAVY_DARK = "#14306f";
 const MAROON = "#9e1b32";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
+// Combine several per-module attendance summaries into one overall (P/L/E/A + %),
+// re-deriving the percentage from summed earned/possible so it stays weighted by
+// sessions, not a naive average of percentages.
+const aggregateStats = (list) => {
+  const acc = { P: 0, L: 0, E: 0, A: 0, marked: 0, earned: 0, possible: 0 };
+  (list || []).forEach(s => { acc.P += s.P || 0; acc.L += s.L || 0; acc.E += s.E || 0; acc.A += s.A || 0; acc.marked += s.marked || 0; acc.earned += s.earned || 0; acc.possible += s.possible || 0; });
+  acc.pct = acc.possible > 0 ? Math.round((acc.earned / acc.possible) * 1000) / 10 : null;
+  return acc;
+};
 const fmtDate = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 const fmtDay  = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
 const nowTime = () => new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
@@ -3069,7 +3078,8 @@ function AdminStudents({ store }) {
   // list figure rolls over automatically, matching the per-student breakdown. Uses the
   // per-module earned/possible the attendance matrix already provides.
   const attnToday = todayISO();
-  const moduleEndById = Object.fromEntries(store.modules.map(m => [m.id, m.endDate || null]));
+  const moduleEndById = {};
+  (store.sessions || []).forEach(se => { const cur = moduleEndById[se.moduleId]; if (!cur || se.date > cur) moduleEndById[se.moduleId] = se.date; });
   const isCurrentModule = (mid) => { const end = moduleEndById[mid]; return !end || end >= attnToday; };
   const currentPctOf = (s) => {
     const row = attnRowById[s.id];
@@ -3280,7 +3290,7 @@ function AdminStudents({ store }) {
         </div>
       </Modal>
 
-      <Modal open={!!attnFor} onClose={() => setAttnFor(null)} title="Attendance by term" width={560}>
+      <Modal open={!!attnFor} onClose={() => setAttnFor(null)} title="Attendance breakdown" width={560}>
         {attnFor && <StudentAttendanceDetail student={attnFor} store={store} />}
       </Modal>
     </>
@@ -3293,19 +3303,27 @@ function AdminStudents({ store }) {
 // modules, then each previous term as its own collapsible record. The overall is
 // scoped to the current term only, so it resets each term.
 function StudentAttendanceDetail({ student, store }) {
-  const [data, setData] = useState(null);
-  const [err, setErr] = useState("");
   const R = 42, CIRC = 2 * Math.PI * R;
 
-  useEffect(() => {
-    let cancelled = false;
-    setData(null); setErr("");
-    store.getStudentTermAttendance(student.id)
-      .then(d => { if (!cancelled) setData(d); })
-      .catch(e => { if (!cancelled) setErr(e.message || "Could not load attendance"); });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [student.id]);
+  // Computed entirely from data the Students tab already loads — no extra request,
+  // so it works instantly and doesn't depend on the API being redeployed. A module's
+  // end date is its last session (store.sessions); once that date passes the module is
+  // "finished" and drops into "previous", and the overall counts only current modules.
+  const today = todayISO();
+  const row = (store.attendance?.rows || []).find(r => r.student.id === student.id) || null;
+  const moduleById = Object.fromEntries((store.modules || []).map(m => [m.id, m]));
+  const endByModule = {};
+  (store.sessions || []).forEach(se => { const cur = endByModule[se.moduleId]; if (!cur || se.date > cur) endByModule[se.moduleId] = se.date; });
+  const emptyStats = { P: 0, L: 0, E: 0, A: 0, marked: 0, earned: 0, possible: 0, pct: null };
+  const moduleRows = (student.moduleIds || []).map(mid => {
+    const mod = moduleById[mid] || { id: mid, code: "?", name: "Unknown module" };
+    const endDate = endByModule[mid] || null;
+    return { module: { id: mod.id, code: mod.code, name: mod.name }, summary: row?.modules?.[mid] || emptyStats, endDate, finished: !!(endDate && endDate < today) };
+  });
+  const currentModules = moduleRows.filter(r => !r.finished).sort((a, b) => (a.endDate || "9999").localeCompare(b.endDate || "9999"));
+  const previous = moduleRows.filter(r => r.finished).sort((a, b) => (b.endDate || "").localeCompare(a.endDate || ""));
+  const overall = aggregateStats(currentModules.map(r => r.summary));
+  const current = { modules: currentModules, overall };
 
   const header = (
     <div className="flex items-center gap-3">
@@ -3339,11 +3357,8 @@ function StudentAttendanceDetail({ student, store }) {
     );
   };
 
-  if (err) return <div className="space-y-4">{header}<div className="rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-600 ring-1 ring-rose-200">{err}</div></div>;
-  if (!data) return <div className="space-y-4">{header}<div className="skeleton h-48 rounded-2xl" /></div>;
+  if (!store.attendance) return <div className="space-y-4">{header}<div className="skeleton h-48 rounded-2xl" /></div>;
 
-  const current = data.current || { modules: [], overall: { pct: null, P: 0, L: 0, E: 0, A: 0, marked: 0 } };
-  const previous = data.previous || [];
   const oTone = pctTone(current.overall.pct ?? null);
 
   return (
