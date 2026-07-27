@@ -37,4 +37,13 @@ function summarise(marks) {
   };
 }
 
-module.exports = { STATUSES, POINTS, MAX_POINTS, isStatus, summarise };
+// Same result as summarise() but from pre-counted P/L/E/A totals — used when the
+// counting was already done in the database (GROUP BY) rather than in Node.
+function summariseCounts(P = 0, L = 0, E = 0, A = 0) {
+  const marked = P + L + E + A;
+  const earned = P * POINTS.P + L * POINTS.L + E * POINTS.E + A * POINTS.A;
+  const possible = marked * MAX_POINTS;
+  return { P, L, E, A, marked, earned, possible, pct: possible > 0 ? Math.round((earned / possible) * 1000) / 10 : null };
+}
+
+module.exports = { STATUSES, POINTS, MAX_POINTS, isStatus, summarise, summariseCounts };

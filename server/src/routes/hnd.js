@@ -5,7 +5,7 @@ const router = require("express").Router();
 const prisma = require("../db");
 const { sSemester, sProgramme, sCohort, sTerm, sModule, sStudent, sSession, sMark } = require("../serializers");
 const { requireAuth, requireAdmin, requireAnyPage } = require("../auth");
-const { isStatus, summarise } = require("../attendance");
+const { isStatus, summarise, summariseCounts } = require("../attendance");
 
 // DEF-01: HND registers are an admin-only feature (they live entirely in the admin
 // dashboard; no staff/mobile flow reads them). Guard EVERY route — reads included —
@@ -716,84 +716,96 @@ router.get("/attendance", requireAuth, async (req, res) => {
   const semesterId = str(req.query?.semesterId);
   const semesters = await prisma.semester.findMany({ orderBy: { start: "asc" } });
 
-  let scope = null; // null = everything (cumulative)
-  // ?termId=<id> scopes to one term's date range — attendance for that term only.
+  // ?termId=<id> scopes to one term's dates; ?semesterId scopes to a semester (or
+  // "unassigned" = outside every semester); omitted = everything cumulative.
   const termId = str(req.query?.termId);
-  if (termId) {
-    const term = await prisma.term.findUnique({ where: { id: termId } });
-    if (!term) return res.status(404).json({ error: "Term not found" });
-    scope = (date) => date >= term.start && date <= term.end;
-  } else if (semesterId === "unassigned") {
-    scope = (date) => !semesters.some((s) => inRange(date, s));
-  } else if (semesterId) {
-    const sem = semesters.find((s) => s.id === semesterId);
-    if (!sem) return res.status(404).json({ error: "Semester not found" });
-    scope = (date) => inRange(date, sem);
-  }
+  const term = termId ? await prisma.term.findUnique({ where: { id: termId } }) : null;
+  if (termId && !term) return res.status(404).json({ error: "Term not found" });
+  if (semesterId && semesterId !== "unassigned" && !semesters.some((s) => s.id === semesterId))
+    return res.status(404).json({ error: "Semester not found" });
 
-  const [modules, students, allMarks, allSessions, enrolAgg] = await Promise.all([
+  // The date scope as a SQL predicate on a session-date column, so the counting
+  // happens IN POSTGRES. Previously this pulled every AttendanceMark row into Node
+  // and grouped them in memory, which OOM-crashed the server at scale. Values come
+  // from our own semester/term rows (never user input), so inlining them is safe.
+  const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
+  const dateCond = (col) => {
+    if (termId) { return `${col} >= ${q(term.start)} AND ${col} <= ${q(term.end)}`; }
+    if (semesterId === "unassigned") {
+      if (!semesters.length) return "TRUE";
+      return `NOT (${semesters.map((s) => `(${col} >= ${q(s.start)} AND ${col} <= ${q(s.end)})`).join(" OR ")})`;
+    }
+    if (semesterId) { const sem = semesters.find((s) => s.id === semesterId); return `${col} >= ${q(sem.start)} AND ${col} <= ${q(sem.end)}`; }
+    return "TRUE";
+  };
+
+  const [modules, students, perSM, sessAgg, enrolAgg] = await Promise.all([
     prisma.hndModule.findMany({ orderBy: { code: "asc" } }),
     prisma.student.findMany({
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
       include: { enrolments: { select: { moduleId: true } } },
     }),
-    // Only the three columns the matrix needs; resolve module/date from an
-    // in-memory session lookup rather than a per-row join.
-    prisma.attendanceMark.findMany({ select: { studentId: true, status: true, sessionId: true } }),
-    prisma.hndSession.findMany({ select: { id: true, moduleId: true, date: true } }),
+    // One aggregate row per (student, module): the four status counts, scoped by date.
+    prisma.$queryRawUnsafe(`
+      SELECT am."studentId" sid, se."moduleId" mid,
+        count(*) FILTER (WHERE am.status='P')::int p,
+        count(*) FILTER (WHERE am.status='L')::int l,
+        count(*) FILTER (WHERE am.status='E')::int e,
+        count(*) FILTER (WHERE am.status='A')::int a
+      FROM "AttendanceMark" am JOIN "HndSession" se ON se.id = am."sessionId"
+      WHERE ${dateCond("se.date")}
+      GROUP BY am."studentId", se."moduleId"`),
+    // Session counts per module: all-time and scoped, in one pass.
+    prisma.$queryRawUnsafe(`
+      SELECT "moduleId" mid, count(*)::int all_c,
+        count(*) FILTER (WHERE ${dateCond("date")})::int scoped_c
+      FROM "HndSession" GROUP BY "moduleId"`),
     prisma.enrolment.groupBy({ by: ["moduleId"], _count: { _all: true } }),
   ]);
 
-  const sessById = new Map(allSessions.map((s) => [s.id, s]));
-  for (const m of allMarks) { const se = sessById.get(m.sessionId); m.moduleId = se ? se.moduleId : null; m.date = se ? se.date : null; }
-
-  const marks = scope ? allMarks.filter((m) => scope(m.date)) : allMarks;
-  const sessions = scope ? allSessions.filter((s) => scope(s.date)) : allSessions;
-
-  // Single pass: group marks by student→module AND by module (cohort totals),
-  // instead of re-filtering the whole mark set per module.
-  const index = new Map();          // studentId -> Map(moduleId -> marks[])
-  const marksByModule = new Map();  // moduleId  -> marks[]
-  for (const m of marks) {
-    if (!index.has(m.studentId)) index.set(m.studentId, new Map());
-    const per = index.get(m.studentId);
-    if (!per.has(m.moduleId)) per.set(m.moduleId, []);
-    per.get(m.moduleId).push(m);
-    if (!marksByModule.has(m.moduleId)) marksByModule.set(m.moduleId, []);
-    marksByModule.get(m.moduleId).push(m);
+  // studentId -> Map(moduleId -> {P,L,E,A}); plus per-module and global totals.
+  const index = new Map();
+  const modTot = new Map();
+  const gTot = { P: 0, L: 0, E: 0, A: 0 };
+  for (const r of perSM) {
+    if (!index.has(r.sid)) index.set(r.sid, new Map());
+    index.get(r.sid).set(r.mid, r);
+    const mt = modTot.get(r.mid) || { P: 0, L: 0, E: 0, A: 0 };
+    mt.P += r.p; mt.L += r.l; mt.E += r.e; mt.A += r.a; modTot.set(r.mid, mt);
+    gTot.P += r.p; gTot.L += r.l; gTot.E += r.e; gTot.A += r.a;
   }
 
-  // Per student, iterate only the modules they're enrolled on or have marks for
-  // — not every module in the college (was O(students × all modules)).
   const rows = students.map((s) => {
     const per = index.get(s.id) || new Map();
     const enrolledIds = new Set(s.enrolments.map((e) => e.moduleId));
     const relevant = new Set([...enrolledIds, ...per.keys()]);
     const modulesOut = {};
+    const acc = { P: 0, L: 0, E: 0, A: 0 };
     for (const modId of relevant) {
-      modulesOut[modId] = { ...summarise(per.get(modId) || []), enrolled: enrolledIds.has(modId) };
+      const c = per.get(modId) || { p: 0, l: 0, e: 0, a: 0 };
+      modulesOut[modId] = { ...summariseCounts(c.p, c.l, c.e, c.a), enrolled: enrolledIds.has(modId) };
+      acc.P += c.p; acc.L += c.l; acc.E += c.e; acc.A += c.a;
     }
-    const all = [...per.values()].flat();
-    return { student: sStudent(s), modules: modulesOut, overall: summarise(all) };
+    return { student: sStudent(s), modules: modulesOut, overall: summariseCounts(acc.P, acc.L, acc.E, acc.A) };
   });
 
-  // Session counts per module: scoped (for moduleTotals) and all-time (module shape).
   const scopedSess = new Map(), allSess = new Map();
-  for (const se of sessions) scopedSess.set(se.moduleId, (scopedSess.get(se.moduleId) || 0) + 1);
-  for (const se of allSessions) allSess.set(se.moduleId, (allSess.get(se.moduleId) || 0) + 1);
+  for (const r of sessAgg) { scopedSess.set(r.mid, r.scoped_c); allSess.set(r.mid, r.all_c); }
   const enrolCount = new Map(enrolAgg.map((e) => [e.moduleId, e._count._all]));
+  const scopedSessionTotal = sessAgg.reduce((n, r) => n + r.scoped_c, 0);
 
   const moduleTotals = {};
   for (const mod of modules) {
-    moduleTotals[mod.id] = { ...summarise(marksByModule.get(mod.id) || []), sessionCount: scopedSess.get(mod.id) || 0 };
+    const mt = modTot.get(mod.id) || { P: 0, L: 0, E: 0, A: 0 };
+    moduleTotals[mod.id] = { ...summariseCounts(mt.P, mt.L, mt.E, mt.A), sessionCount: scopedSess.get(mod.id) || 0 };
   }
 
   res.json({
     modules: modules.map((m) => ({ ...sModule(m), studentCount: enrolCount.get(m.id) || 0, sessionCount: allSess.get(m.id) || 0 })),
     rows,
     moduleTotals,
-    overall: summarise(marks),
-    scope: { semesterId: semesterId || "", sessionCount: sessions.length },
+    overall: summariseCounts(gTot.P, gTot.L, gTot.E, gTot.A),
+    scope: { semesterId: semesterId || "", sessionCount: scopedSessionTotal },
   });
 });
 
