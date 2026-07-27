@@ -486,7 +486,9 @@ router.put("/students/:id/enrolments", requireAuth, requireAdmin, async (req, re
 router.get("/sessions", requireAuth, async (req, res) => {
   const moduleId = str(req.query?.moduleId);
   const [rows, agg] = await Promise.all([
-    prisma.hndSession.findMany({ where: moduleId ? { moduleId } : undefined, orderBy: [{ date: "desc" }, { startTime: "asc" }] }),
+    // Oldest first: the start-date register is on top, and within a day the earlier
+    // block (e.g. 09:00 before 13:00) comes first.
+    prisma.hndSession.findMany({ where: moduleId ? { moduleId } : undefined, orderBy: [{ date: "asc" }, { startTime: "asc" }] }),
     prisma.attendanceMark.groupBy({ by: ["sessionId"], _count: { _all: true }, where: moduleId ? { session: { moduleId } } : undefined }),
   ]);
   const cMap = new Map(agg.map((a) => [a.sessionId, a._count._all]));
