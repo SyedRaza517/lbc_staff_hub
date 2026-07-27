@@ -292,17 +292,19 @@ export default function App() {
 function Shell({ user, logout, entry }) {
   const { applySession } = useAuth();
   const handset = useIsHandset();
+  const native = isNativeApp();
   const isAdmin = user.accountRole === "ADMIN";
-  // Where to land, decided by the person's ACCESS, not just the door they picked:
-  //   • chose "Staff App"            → staff app
-  //   • chose "Admin" AND is an admin → dashboard (filtered to their pages) — this is
-  //     honoured even on a narrow screen, since they explicitly asked for it
-  //   • not an admin                  → staff app (never a dead-end "Access denied")
-  //   • no explicit choice (native)   → desktop admins get the dashboard; on a phone
-  //     everyone starts in the staff app and opens the dashboard from More
-  const initialView = entry === "app" ? "app"
+  // The packaged MOBILE APP is the staff app only — no admin dashboard, no switching.
+  // The admin dashboard is a WEBSITE feature. So:
+  //   • native app                    → always the staff app (even for admins)
+  //   • web, chose "Staff App"        → staff app
+  //   • web, chose "Admin" & is admin → dashboard (filtered to their pages)
+  //   • web, not an admin             → staff app (never a dead-end)
+  //   • web, no explicit choice       → admins land on the dashboard
+  const initialView = native ? "app"
+    : entry === "app" ? "app"
     : (entry === "admin" && isAdmin) ? "admin"
-    : (isAdmin && !handset) ? "admin"
+    : isAdmin ? "admin"
     : "app";
   const [view, setView] = useState(initialView);
   const [currentStaffId, setCurrentStaffId] = useState(user.id);
@@ -390,7 +392,7 @@ function Shell({ user, logout, entry }) {
 
       <div key={view} className={handset ? "min-h-0 flex-1" : "fade-up"}>
         {view === "app"
-          ? <StaffApp store={store} currentStaffId={isAdmin ? currentStaffId : user.id} setCurrentStaffId={setCurrentStaffId} logout={logout} onChangePassword={() => setShowChangePw(true)} onSwitchToAdmin={isAdmin ? () => setView("admin") : undefined} />
+          ? <StaffApp store={store} currentStaffId={isAdmin ? currentStaffId : user.id} setCurrentStaffId={setCurrentStaffId} logout={logout} onChangePassword={() => setShowChangePw(true)} onSwitchToAdmin={(!native && isAdmin) ? () => setView("admin") : undefined} />
           : <AdminDashboard store={store} onExitToStaffApp={handset ? () => setView("app") : undefined} />}
       </div>
 
