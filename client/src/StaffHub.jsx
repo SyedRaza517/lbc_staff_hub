@@ -3073,10 +3073,11 @@ function AdminStudents({ store }) {
   const attnRowById = Object.fromEntries((store.attendance?.rows || []).map(r => [r.student.id, r]));
   const moduleById = Object.fromEntries(store.modules.map(m => [m.id, m]));
 
-  // Each student's overall % counts only their CURRENT modules — the ones that haven't
-  // finished yet. A module finishes once its last session (endDate) has passed, so the
-  // list figure rolls over automatically, matching the per-student breakdown. Uses the
-  // per-module earned/possible the attendance matrix already provides.
+  // Each student's overall % counts only their CURRENT, still-enrolled modules. A module
+  // finishes once its last session (endDate) has passed, so the figure rolls over
+  // automatically. We iterate the student's ENROLMENTS (s.moduleIds) — not every module
+  // in row.modules — so leftover marks from modules the student was un-enrolled from
+  // don't count. This matches the per-student breakdown modal exactly.
   const attnToday = todayISO();
   const moduleEndById = {};
   (store.sessions || []).forEach(se => { const cur = moduleEndById[se.moduleId]; if (!cur || se.date > cur) moduleEndById[se.moduleId] = se.date; });
@@ -3085,7 +3086,7 @@ function AdminStudents({ store }) {
     const row = attnRowById[s.id];
     if (!row) return null;
     let earned = 0, possible = 0;
-    Object.keys(row.modules).forEach(mid => { if (isCurrentModule(mid)) { const st = row.modules[mid]; earned += st.earned || 0; possible += st.possible || 0; } });
+    (s.moduleIds || []).forEach(mid => { if (isCurrentModule(mid)) { const st = row.modules[mid]; if (st) { earned += st.earned || 0; possible += st.possible || 0; } } });
     return possible > 0 ? Math.round((earned / possible) * 1000) / 10 : null;
   };
 
