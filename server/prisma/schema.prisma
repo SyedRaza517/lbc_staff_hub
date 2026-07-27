@@ -249,8 +249,28 @@ model Cohort {
   startDate   String?   // optional YYYY-MM-DD — when the intake begins
   createdAt   DateTime  @default(now())
 
+  terms Term[]
+
   @@unique([programmeId, name]) // no duplicate intake names within one programme
   @@index([programmeId])
+}
+
+// One teaching term within a cohort. An HND cohort runs 6: Year 1 Terms 1-3 and
+// Year 2 Terms 1-3. Each has real dates; the term whose range contains "today" is
+// the cohort's ACTIVE term (units in it take attendance; past terms are frozen).
+model Term {
+  id        String   @id @default(cuid())
+  cohort    Cohort   @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  cohortId  String
+  year      Int      // 1 | 2
+  index     Int      // 1 | 2 | 3  (term number within the year)
+  name      String   // e.g. "Year 1 · Term 1"
+  start     String   // YYYY-MM-DD, inclusive
+  end       String   // YYYY-MM-DD, inclusive
+  createdAt DateTime @default(now())
+
+  @@unique([cohortId, year, index]) // one of each term per cohort
+  @@index([cohortId])
 }
 
 // A taught HND module, e.g. code "OBM" / name "Organisational Behaviour Management".

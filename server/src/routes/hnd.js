@@ -3,7 +3,7 @@
 // rest of the admin console.
 const router = require("express").Router();
 const prisma = require("../db");
-const { sSemester, sProgramme, sCohort, sModule, sStudent, sSession, sMark } = require("../serializers");
+const { sSemester, sProgramme, sCohort, sTerm, sModule, sStudent, sSession, sMark } = require("../serializers");
 const { requireAuth, requireAdmin, requireAnyPage } = require("../auth");
 const { isStatus, summarise } = require("../attendance");
 
@@ -186,6 +186,63 @@ router.put("/cohorts/:id", requireAuth, requireAdmin, async (req, res) => {
 router.delete("/cohorts/:id", requireAuth, requireAdmin, async (req, res) => {
   try { await prisma.cohort.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Cohort not found" }); }
+});
+
+/* ============================== terms ============================== */
+// Each cohort runs 6 terms (Year 1 T1-3, Year 2 T1-3). Dates drive which term is
+// "active" (contains today) — that's what opens/pauses attendance later.
+
+// Add whole days to a YYYY-MM-DD string, UTC-safe.
+const addDays = (iso, days) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); };
+
+router.get("/terms", requireAuth, async (req, res) => {
+  const cohortId = str(req.query?.cohortId);
+  const where = cohortId ? { cohortId } : {};
+  const rows = await prisma.term.findMany({ where, orderBy: [{ cohortId: "asc" }, { year: "asc" }, { index: "asc" }] });
+  res.json(rows.map(sTerm));
+});
+
+// Generate the standard 6 terms for a cohort, back-to-back from a start date.
+// Body: { start?, weeksPerTerm? } — start defaults to the cohort's own start date.
+router.post("/cohorts/:id/terms/generate", requireAuth, requireAdmin, async (req, res) => {
+  const cohort = await prisma.cohort.findUnique({ where: { id: req.params.id } });
+  if (!cohort) return res.status(404).json({ error: "Cohort not found" });
+  const start = str(req.body?.start) || cohort.startDate;
+  if (!start || !isDate(start)) return res.status(400).json({ error: "A valid start date is needed — set the cohort's start date or pass one" });
+  const weeks = Number.isInteger(req.body?.weeksPerTerm) && req.body.weeksPerTerm > 0 && req.body.weeksPerTerm <= 52 ? req.body.weeksPerTerm : 14;
+  if (await prisma.term.count({ where: { cohortId: cohort.id } }) > 0) {
+    return res.status(409).json({ error: "This cohort already has terms — edit or delete them first" });
+  }
+  const len = weeks * 7;
+  const data = [];
+  let cursor = start;
+  for (let i = 0; i < 6; i++) {
+    const year = i < 3 ? 1 : 2, index = (i % 3) + 1;
+    const end = addDays(cursor, len - 1);
+    data.push({ cohortId: cohort.id, year, index, name: `Year ${year} · Term ${index}`, start: cursor, end });
+    cursor = addDays(end, 1);
+  }
+  await prisma.term.createMany({ data });
+  const terms = await prisma.term.findMany({ where: { cohortId: cohort.id }, orderBy: [{ year: "asc" }, { index: "asc" }] });
+  res.status(201).json(terms.map(sTerm));
+});
+
+router.put("/terms/:id", requireAuth, requireAdmin, async (req, res) => {
+  const existing = await prisma.term.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: "Term not found" });
+  const data = {};
+  if (req.body?.name !== undefined) { const n = str(req.body.name); if (!n) return res.status(400).json({ error: "Term name required" }); data.name = n; }
+  if (req.body?.start !== undefined) { if (!isDate(str(req.body.start))) return res.status(400).json({ error: "Valid start date required (YYYY-MM-DD)" }); data.start = str(req.body.start); }
+  if (req.body?.end !== undefined) { if (!isDate(str(req.body.end))) return res.status(400).json({ error: "Valid end date required (YYYY-MM-DD)" }); data.end = str(req.body.end); }
+  const start = data.start ?? existing.start, end = data.end ?? existing.end;
+  if (end < start) return res.status(400).json({ error: "End date must be on or after the start date" });
+  const t = await prisma.term.update({ where: { id: existing.id }, data });
+  res.json(sTerm(t));
+});
+
+router.delete("/terms/:id", requireAuth, requireAdmin, async (req, res) => {
+  try { await prisma.term.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
+  catch (_e) { res.status(404).json({ error: "Term not found" }); }
 });
 
 /* ============================== modules ============================== */

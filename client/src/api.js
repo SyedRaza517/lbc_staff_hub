@@ -129,6 +129,11 @@ export const api = {
   addCohort: (data) => request("/hnd/cohorts", { method: "POST", body: data }),
   updateCohort: (id, data) => request(`/hnd/cohorts/${id}`, { method: "PUT", body: data }),
   removeCohort: (id) => request(`/hnd/cohorts/${id}`, { method: "DELETE" }),
+  // Terms (6 per cohort: Y1 T1-3, Y2 T1-3)
+  listTerms: (cohortId) => request(`/hnd/terms${cohortId ? `?cohortId=${encodeURIComponent(cohortId)}` : ""}`),
+  generateTerms: (cohortId, data) => request(`/hnd/cohorts/${cohortId}/terms/generate`, { method: "POST", body: data || {} }),
+  updateTerm: (id, data) => request(`/hnd/terms/${id}`, { method: "PUT", body: data }),
+  removeTerm: (id) => request(`/hnd/terms/${id}`, { method: "DELETE" }),
   listModules: () => request("/hnd/modules"),
   addModule: (data) => request("/hnd/modules", { method: "POST", body: data }),
   updateModule: (id, data) => request(`/hnd/modules/${id}`, { method: "PUT", body: data }),

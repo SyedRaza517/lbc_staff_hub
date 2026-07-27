@@ -3504,12 +3504,16 @@ function HndProgrammes({ store, onOpen }) {
   );
 }
 
-/* ----- Cohorts: intakes (e.g. "SEP 2025") under one programme ----- */
+/* ----- Cohorts & terms: intakes (e.g. "SEP 2025") under one programme ----- */
 function CohortManager({ store, programme, onClose }) {
   const [name, setName] = useState("");
   const [start, setStart] = useState("");
   const [busy, setBusy] = useState(false);
+  const [termCohort, setTermCohort] = useState(null); // cohort whose terms are being edited
   const list = (store.cohorts || []).filter(c => c.programmeId === programme.id);
+  const termsOf = (cid) => (store.terms || []).filter(t => t.cohortId === cid).sort((a, b) => a.year - b.year || a.index - b.index);
+  const today = todayISO();
+  const isActiveTerm = (t) => today >= t.start && today <= t.end;
 
   const add = async () => {
     if (!name.trim()) return;
@@ -3518,35 +3522,78 @@ function CohortManager({ store, programme, onClose }) {
     catch (_) { /* store toasts the error (e.g. duplicate name) */ }
     finally { setBusy(false); }
   };
-  const remove = async (c) => {
-    if (!window.confirm(`Delete cohort "${c.name}"?`)) return;
-    await store.removeCohort(c.id);
+  const remove = async (c) => { if (window.confirm(`Delete cohort "${c.name}"? Its terms are removed too.`)) await store.removeCohort(c.id); };
+  const genTerms = async (c) => {
+    if (!c.startDate) { store.notify?.("Set this cohort's start date first (it dates the terms).", "error"); return; }
+    setBusy(true);
+    try { await store.generateTerms(c.id, {}); } catch (_) {} finally { setBusy(false); }
   };
+  const setTermDate = async (t, field, value) => { if (value) { try { await store.updateTerm(t.id, { [field]: value }); } catch (_) {} } };
+  const delTerm = async (t) => { if (window.confirm(`Delete ${t.name}?`)) await store.removeTerm(t.id); };
 
+  // ---- Term editor for one cohort ----
+  if (termCohort) {
+    const ts = termsOf(termCohort.id);
+    return (
+      <Modal open onClose={onClose} title={`Terms — ${termCohort.name}`}>
+        <div className="space-y-3">
+          <button onClick={() => setTermCohort(null)} className="flex items-center gap-1 text-xs font-bold text-slate-500 transition hover:text-slate-700"><ChevronLeft size={14} /> Back to cohorts</button>
+          <p className="text-[11px] text-slate-500">An HND runs <b>6 terms</b> — Year 1 &amp; Year 2, three each. The term whose dates contain today is the <b>current</b> one; that's what will open attendance later.</p>
+          {ts.length === 0 && (
+            <div className="rounded-xl bg-slate-50 p-4 text-center ring-1 ring-slate-100">
+              <p className="text-sm text-slate-500">No terms set up yet.</p>
+              {!termCohort.startDate && <p className="mt-1 text-[11px] font-semibold text-amber-600">Set this cohort's start date first so the terms get dated automatically.</p>}
+              <PrimaryBtn onClick={() => genTerms(termCohort)} disabled={busy || !termCohort.startDate} className="mt-3"><Plus size={16} /> Generate 6 terms</PrimaryBtn>
+            </div>
+          )}
+          {ts.map(t => (
+            <div key={t.id} className={`rounded-xl p-3 ring-1 ${isActiveTerm(t) ? "bg-emerald-50/60 ring-emerald-200" : "bg-white ring-slate-200"}`}>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-bold text-slate-700">{t.name}{isActiveTerm(t) && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Current</span>}</p>
+                <button onClick={() => delTerm(t)} title="Delete term" className="rounded p-1 text-slate-300 transition hover:text-rose-500"><Trash2 size={14} /></button>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Field label="From"><input type="date" value={t.start} onChange={e => setTermDate(t, "start", e.target.value)} className={inputCls} /></Field>
+                <Field label="To"><input type="date" value={t.end} min={t.start} onChange={e => setTermDate(t, "end", e.target.value)} className={inputCls} /></Field>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Modal>
+    );
+  }
+
+  // ---- Cohort list ----
   return (
     <Modal open onClose={onClose} title={`Cohorts — ${programme.name}`}>
       <div className="space-y-3">
-        <p className="text-[11px] text-slate-500">An intake of students on this programme — e.g. <b>SEP 2025</b>, <b>Jan 2024</b>. The same programme can run several cohorts over time.</p>
+        <p className="text-[11px] text-slate-500">An intake of students on this programme — e.g. <b>SEP 2025</b>, <b>Jan 2024</b>. Each cohort runs its own 6 terms.</p>
 
         <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-100">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
             <input value={name} onChange={e => setName(e.target.value)} placeholder="Cohort name, e.g. SEP 2025" className={inputCls} onKeyDown={e => { if (e.key === "Enter") add(); }} />
-            <input type="date" value={start} onChange={e => setStart(e.target.value)} title="Start date (optional)" className={inputCls} />
+            <input type="date" value={start} onChange={e => setStart(e.target.value)} title="Start date" className={inputCls} />
           </div>
           <PrimaryBtn onClick={add} disabled={busy || !name.trim()} className="mt-2 w-full"><Plus size={16} /> {busy ? "Adding…" : "Add cohort"}</PrimaryBtn>
         </div>
 
         <div className="space-y-2">
           {list.length === 0 && <EmptyState Icon={Layers} title="No cohorts yet" msg="Add your first intake above." />}
-          {list.map(c => (
-            <div key={c.id} className="flex items-center justify-between rounded-xl bg-white px-3 py-2.5 ring-1 ring-slate-200">
-              <div>
-                <p className="text-sm font-bold text-slate-700">{c.name}</p>
-                {c.startDate && <p className="text-[11px] text-slate-400">Starts {fmtDate(c.startDate)}</p>}
+          {list.map(c => {
+            const n = termsOf(c.id).length;
+            return (
+              <div key={c.id} className="flex items-center justify-between rounded-xl bg-white px-3 py-2.5 ring-1 ring-slate-200">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-700">{c.name}</p>
+                  <p className="text-[11px] text-slate-400">{c.startDate ? `Starts ${fmtDate(c.startDate)}` : "No start date"} · {n} term{n === 1 ? "" : "s"}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button onClick={() => setTermCohort(c)} className="press flex items-center gap-1 rounded-lg border-2 border-slate-200 px-2.5 py-1.5 text-[11px] font-bold text-slate-600 transition hover:border-indigo-300 hover:bg-indigo-50"><CalendarDays size={13} /> Terms</button>
+                  <button onClick={() => remove(c)} title="Delete cohort" className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={16} /></button>
+                </div>
               </div>
-              <button onClick={() => remove(c)} title="Delete cohort" className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={16} /></button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </Modal>

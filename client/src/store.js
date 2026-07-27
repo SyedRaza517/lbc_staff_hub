@@ -23,6 +23,7 @@ export function useApiStore(notify, user) {
   const [semesters, setSemesters] = useState([]);
   const [programmes, setProgrammes] = useState([]);
   const [cohorts, setCohorts] = useState([]);
+  const [terms, setTerms] = useState([]);
   const [unassignedSessions, setUnassignedSessions] = useState(0);
   const [attendance, setAttendance] = useState(null);
   const [hndLoaded, setHndLoaded] = useState(false);
@@ -70,9 +71,10 @@ export function useApiStore(notify, user) {
       setSemesters(sem.semesters); setUnassignedSessions(sem.unassignedSessions);
       setProgrammes(pr);
       setAttendance(at);
-      // Cohorts load tolerantly: if the endpoint lags behind on a deploy (Vercel
-      // client ahead of the Render server), it must not break the rest of the page.
+      // Cohorts & terms load tolerantly: if an endpoint lags behind on a deploy
+      // (Vercel client ahead of the Render server), it must not break the rest.
       try { setCohorts(await api.listCohorts()); } catch (_) { setCohorts([]); }
+      try { setTerms(await api.listTerms()); } catch (_) { setTerms([]); }
     } catch (e) { notify?.(e.message || "Failed to load registers", "error"); }
     setHndLoaded(true);
   }, [notify, semesterId]);
@@ -218,6 +220,10 @@ export function useApiStore(notify, user) {
     addCohort: runHnd((data) => api.addCohort(data), (d) => `Cohort ${d.name} added`),
     updateCohort: runHnd((id, data) => api.updateCohort(id, data), "Cohort updated"),
     removeCohort: runHnd((id) => api.removeCohort(id), "Cohort removed", "error"),
+    // Terms (6 per cohort)
+    generateTerms: runHnd((cohortId, data) => api.generateTerms(cohortId, data), "6 terms created"),
+    updateTerm: runHnd((id, data) => api.updateTerm(id, data), "Term updated"),
+    removeTerm: runHnd((id) => api.removeTerm(id), "Term removed", "error"),
     addModule: runHnd((data) => api.addModule(data), (d) => `Module ${String(d.code).toUpperCase()} added`),
     updateModule: runHnd((id, data) => api.updateModule(id, data), "Module updated"),
     removeModule: runHnd((id) => api.removeModule(id), "Module removed", "error"),
@@ -258,7 +264,7 @@ export function useApiStore(notify, user) {
 
   return {
     staff, leave, checkins, docs, adjustments, signups, loaded,
-    modules, students, sessions, semesters, programmes, cohorts, unassignedSessions, semesterId, attendance, hndLoaded,
+    modules, students, sessions, semesters, programmes, cohorts, terms, unassignedSessions, semesterId, attendance, hndLoaded,
     interactions, interactionsLoaded,
     assessments, assessmentOverview, assessmentsLoaded,
     usedDays, adjDays, effectiveAllowance,
