@@ -3389,18 +3389,30 @@ function CourseMenu({ onEdit, onDelete, onCohorts, editLabel = "Edit course", de
 // a colour. Kept in sync with the register palette for a coherent look.
 const PROGRAMME_COLOURS = ["#1a3a8f", "#0d7a5f", "#6d28d9", "#b45309", "#0e7490", "#9e1b32", "#2563eb", "#5b6472"];
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 function HndProgrammes({ store, onOpen }) {
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ name: "", colour: PROGRAMME_COLOURS[0] });
+  const nowYear = new Date().getFullYear();
+  // cohortMonth/cohortYear seed the programme's FIRST intake when adding.
+  const [form, setForm] = useState({ name: "", colour: PROGRAMME_COLOURS[0], cohortMonth: 9, cohortYear: nowYear });
   const [cohortProg, setCohortProg] = useState(null); // the programme whose cohorts are being managed
+  const YEARS = Array.from({ length: 7 }, (_, i) => nowYear - 2 + i);
 
-  const openAdd = () => { setEdit(null); setForm({ name: "", colour: PROGRAMME_COLOURS[0] }); setModal(true); };
-  const openEdit = (p) => { setEdit(p); setForm({ name: p.name, colour: p.colour || PROGRAMME_COLOURS[0] }); setModal(true); };
+  const openAdd = () => { setEdit(null); setForm({ name: "", colour: PROGRAMME_COLOURS[0], cohortMonth: 9, cohortYear: nowYear }); setModal(true); };
+  const openEdit = (p) => { setEdit(p); setForm({ name: p.name, colour: p.colour || PROGRAMME_COLOURS[0], cohortMonth: 9, cohortYear: nowYear }); setModal(true); };
   const save = async () => {
     try {
-      if (edit) await store.updateProgramme(edit.id, form);
-      else await store.addProgramme(form);
+      if (edit) {
+        await store.updateProgramme(edit.id, { name: form.name, colour: form.colour });
+      } else {
+        const prog = await store.addProgramme({ name: form.name, colour: form.colour });
+        // Seed the first cohort (intake) from the chosen month + year, e.g. "Sep 2025".
+        if (prog?.id) {
+          await store.addCohort({ programmeId: prog.id, name: `${MONTHS[form.cohortMonth - 1]} ${form.cohortYear}`, startDate: `${form.cohortYear}-${String(form.cohortMonth).padStart(2, "0")}-01` });
+        }
+      }
       setModal(false);
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
   };
@@ -3433,7 +3445,13 @@ function HndProgrammes({ store, onOpen }) {
               </div>
               <div className="flex flex-1 flex-col p-4">
                 <h3 className="text-base font-extrabold leading-snug" style={{ color: NAVY_DARK }}>{p.name}</h3>
-                <p className="mt-1 text-xs font-semibold text-slate-400">{p.moduleCount || 0} course{(p.moduleCount || 0) === 1 ? "" : "s"} · {p.cohortCount || 0} cohort{(p.cohortCount || 0) === 1 ? "" : "s"}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-400">{p.moduleCount || 0} course{(p.moduleCount || 0) === 1 ? "" : "s"}</p>
+                {(() => {
+                  const cs = (store.cohorts || []).filter(c => c.programmeId === p.id);
+                  return cs.length > 0
+                    ? <div className="mt-1.5 flex flex-wrap gap-1">{cs.map(c => <span key={c.id} className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 ring-1 ring-indigo-100">{c.name}</span>)}</div>
+                    : <p className="mt-1 text-[11px] font-semibold text-slate-300">No cohorts yet</p>;
+                })()}
                 <div className="mt-4 flex gap-2">
                   <button onClick={() => onOpen(p.id)} className="press flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-slate-200 py-2.5 text-sm font-bold transition hover:border-indigo-300 hover:bg-indigo-50" style={{ color: NAVY }}>
                     View courses <ArrowRight size={15} />
@@ -3464,6 +3482,19 @@ function HndProgrammes({ store, onOpen }) {
               ))}
             </div>
           </Field>
+          {!edit && (
+            <Field label="First cohort (intake)">
+              <div className="grid grid-cols-2 gap-2">
+                <select value={form.cohortMonth} onChange={e => setForm(f => ({ ...f, cohortMonth: Number(e.target.value) }))} className={inputCls}>
+                  {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                </select>
+                <select value={form.cohortYear} onChange={e => setForm(f => ({ ...f, cohortYear: Number(e.target.value) }))} className={inputCls}>
+                  {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">Creates the first intake — <b>{MONTHS[form.cohortMonth - 1]} {form.cohortYear}</b>. You can add more later via Manage cohorts.</p>
+            </Field>
+          )}
           <PrimaryBtn onClick={save} disabled={!form.name.trim()} className="w-full"><Save size={16} /> {edit ? "Save changes" : "Add programme"}</PrimaryBtn>
         </div>
       </Modal>
