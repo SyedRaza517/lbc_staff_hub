@@ -3062,8 +3062,28 @@ function AdminStudents({ store }) {
   // Each student's overall attendance %, plus the full per-module row, from the
   // same scoped figures the registers page shows.
   const attnRowById = Object.fromEntries((store.attendance?.rows || []).map(r => [r.student.id, r]));
-  const overallById = Object.fromEntries((store.attendance?.rows || []).map(r => [r.student.id, r.overall?.pct ?? null]));
   const moduleById = Object.fromEntries(store.modules.map(m => [m.id, m]));
+
+  // Each student's CURRENT-term overall %, so the list matches the term breakdown and
+  // resets each term. Computed from their active term's modules using the per-module
+  // earned/possible the attendance matrix already provides.
+  const attnToday = todayISO();
+  const termsByCohort = {};
+  (store.terms || []).forEach(t => { (termsByCohort[t.cohortId] = termsByCohort[t.cohortId] || []).push(t); });
+  const activeTermId = (cohortId) => {
+    const ts = (termsByCohort[cohortId] || []).slice().sort((a, b) => a.start.localeCompare(b.start));
+    const cur = ts.find(t => attnToday >= t.start && attnToday <= t.end) || ts.find(t => t.start > attnToday);
+    return cur ? cur.id : null;
+  };
+  const moduleTermById = Object.fromEntries(store.modules.map(m => [m.id, m.termId]));
+  const currentPctOf = (s) => {
+    const atid = s.cohortId ? activeTermId(s.cohortId) : null;
+    const row = attnRowById[s.id];
+    if (!atid || !row) return null;
+    let earned = 0, possible = 0;
+    Object.keys(row.modules).forEach(mid => { if (moduleTermById[mid] === atid) { const st = row.modules[mid]; earned += st.earned || 0; possible += st.possible || 0; } });
+    return possible > 0 ? Math.round((earned / possible) * 1000) / 10 : null;
+  };
 
   const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", active: true, cohortId: "", moduleIds: [] }); setModal(true); };
   const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, active: s.active !== false, cohortId: s.cohortId || "", moduleIds: s.moduleIds || [] }); setModal(true); };
@@ -3098,7 +3118,7 @@ function AdminStudents({ store }) {
   const total = store.students.length;
   const activeCount = store.students.filter(s => s.active !== false).length;
   const enrolledCount = store.students.filter(s => (s.moduleIds || []).length > 0).length;
-  const pcts = store.students.map(s => overallById[s.id]).filter(v => v !== null && v !== undefined);
+  const pcts = store.students.map(s => currentPctOf(s)).filter(v => v !== null && v !== undefined);
   const avgAtt = pcts.length ? Math.round((pcts.reduce((a, b) => a + b, 0) / pcts.length) * 10) / 10 : null;
 
   const exportStudents = () => {
@@ -3113,7 +3133,7 @@ function AdminStudents({ store }) {
         firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email,
         status: s.active === false ? "Inactive" : "Active",
         modules: (s.moduleIds || []).map(id => moduleById[id]?.code).filter(Boolean).join(" "),
-        attendance: overallById[s.id] == null ? "" : `${overallById[s.id]}%`,
+        attendance: currentPctOf(s) == null ? "" : `${currentPctOf(s)}%`,
       })),
     );
     store.notify?.("Exported students CSV");
@@ -3176,7 +3196,7 @@ function AdminStudents({ store }) {
             </thead>
             <tbody>
               {paged.slice.map(s => {
-                const pct = overallById[s.id];
+                const pct = currentPctOf(s);
                 const tone = pctTone(pct ?? null);
                 return (
                   <tr key={s.id} className="border-t border-slate-100 transition-colors duration-150 hover:bg-blue-50/30">
