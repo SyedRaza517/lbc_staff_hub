@@ -292,19 +292,14 @@ export default function App() {
 function Shell({ user, logout, entry }) {
   const { applySession } = useAuth();
   const handset = useIsHandset();
-  const native = isNativeApp();
   const isAdmin = user.accountRole === "ADMIN";
-  // The packaged MOBILE APP is the staff app only — no admin dashboard, no switching.
-  // The admin dashboard is a WEBSITE feature. So:
-  //   • native app                    → always the staff app (even for admins)
-  //   • web, chose "Staff App"        → staff app
-  //   • web, chose "Admin" & is admin → dashboard (filtered to their pages)
-  //   • web, not an admin             → staff app (never a dead-end)
-  //   • web, no explicit choice       → admins land on the dashboard
-  const initialView = native ? "app"
-    : entry === "app" ? "app"
+  // The mobile app opens on the STAFF app — that's its home. Admins can still switch
+  // to the dashboard from More, kept available FOR NOW while the dashboard is being
+  // tested on phones (the plan is app = staff-only later). On desktop web, admins
+  // land straight on the dashboard; the dashboard is fundamentally a website feature.
+  const initialView = entry === "app" ? "app"
     : (entry === "admin" && isAdmin) ? "admin"
-    : isAdmin ? "admin"
+    : (isAdmin && !handset) ? "admin"
     : "app";
   const [view, setView] = useState(initialView);
   const [currentStaffId, setCurrentStaffId] = useState(user.id);
@@ -392,7 +387,7 @@ function Shell({ user, logout, entry }) {
 
       <div key={view} className={handset ? "min-h-0 flex-1" : "fade-up"}>
         {view === "app"
-          ? <StaffApp store={store} currentStaffId={isAdmin ? currentStaffId : user.id} setCurrentStaffId={setCurrentStaffId} logout={logout} onChangePassword={() => setShowChangePw(true)} onSwitchToAdmin={(!native && isAdmin) ? () => setView("admin") : undefined} />
+          ? <StaffApp store={store} currentStaffId={isAdmin ? currentStaffId : user.id} setCurrentStaffId={setCurrentStaffId} logout={logout} onChangePassword={() => setShowChangePw(true)} onSwitchToAdmin={isAdmin ? () => setView("admin") : undefined} />
           : <AdminDashboard store={store} onExitToStaffApp={handset ? () => setView("app") : undefined} />}
       </div>
 
