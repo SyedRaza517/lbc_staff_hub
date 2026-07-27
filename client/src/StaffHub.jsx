@@ -2350,7 +2350,16 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
 
   const today = todayISO();
   const mine = scoped.filter(s => s.moduleId === moduleId);
-  const filtered = mine.filter(s => filter === "all" || (filter === "past" ? s.date <= today : s.date > today));
+  // Number the registers that fall on the same day (a 6-hour day has two), so they
+  // stay distinguishable now the time column is gone.
+  const byDate = {};
+  mine.forEach(s => { (byDate[s.date] = byDate[s.date] || []).push(s); });
+  Object.values(byDate).forEach(arr => arr.sort((a, b) => (a.start || "").localeCompare(b.start || "")));
+  const regInfo = (s) => { const arr = byDate[s.date] || [s]; return { idx: arr.findIndex(x => x.id === s.id) + 1, total: arr.length }; };
+  // Always list in order from the start date (ascending), regardless of server order.
+  const filtered = mine
+    .filter(s => filter === "all" || (filter === "past" ? s.date <= today : s.date > today))
+    .sort((a, b) => a.date.localeCompare(b.date) || (a.start || "").localeCompare(b.start || ""));
   const paged = usePaged(filtered, 10, `${moduleId}|${filter}|${store.semesterId}`);
   // Warn before a session is filed outside the semester currently being viewed —
   // it would save fine but immediately disappear from this list.
@@ -2424,7 +2433,7 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
-              <tr><th className="px-5 py-3">Date</th><th className="px-5 py-3">Time</th><th className="px-5 py-3">Type</th><th className="px-5 py-3">Description</th><th className="px-5 py-3">Register</th><th className="px-5 py-3 text-right">Actions</th></tr>
+              <tr><th className="px-5 py-3">Date</th><th className="px-5 py-3">Type</th><th className="px-5 py-3">Description</th><th className="px-5 py-3">Register</th><th className="px-5 py-3 text-right">Actions</th></tr>
             </thead>
             <tbody>
               {paged.slice.map(s => {
@@ -2436,12 +2445,12 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
                     <td className="px-5 py-3">
                       <button onClick={() => onTake(s.id)} className="text-left font-semibold transition hover:underline" style={{ color: NAVY }}>{fmtDay(s.date)}</button>
                       {s.date === today && <span className="ml-2 rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold text-blue-700">TODAY</span>}
+                      {(() => { const ri = regInfo(s); return ri.total > 1 ? <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">Register {ri.idx} of {ri.total}</span> : null; })()}
                       {/* Only worth showing when it isn't already implied by the picker. */}
                       {!store.semesterId && store.semesters.length > 0 && (
                         <p className={`mt-0.5 text-[10px] font-semibold ${sem ? "text-slate-400" : "text-amber-600"}`}>{sem ? sem.name : "Outside any semester"}</p>
                       )}
                     </td>
-                    <td className="px-5 py-3 font-medium text-slate-600 tabular-nums">{s.start} – {s.end}</td>
                     <td className="px-5 py-3 text-slate-500">{s.audience}</td>
                     <td className="px-5 py-3 font-medium text-slate-600">{s.description || "—"}</td>
                     <td className="px-5 py-3">
@@ -2464,7 +2473,7 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
                 );
               })}
               {paged.slice.length === 0 && (
-                <tr><td colSpan={6} className="px-5 py-10">
+                <tr><td colSpan={5} className="px-5 py-10">
                   <EmptyState Icon={CalendarDays} title="No sessions"
                     msg={store.semesterId
                       ? `No sessions for this module in ${semesterLabel(store.semesterId, store.semesters)}. Switch the semester picker to "All semesters" to see the rest.`
