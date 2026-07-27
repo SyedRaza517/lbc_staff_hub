@@ -3649,7 +3649,7 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
   const [form, setForm] = useState({ code: "", name: "", tutor: "", programmeId: "", cohortId: "", termId: "" });
   const [picked, setPicked] = useState([]);           // studentIds enrolled on this course
   const [pickQuery, setPickQuery] = useState("");     // search within the student picker
-  const [sched, setSched] = useState({ start: todayISO(), end: "", startTime: "10:00", endTime: "13:00" });
+  const [sched, setSched] = useState({ start: todayISO(), end: "", hours: 3 });
   const [savedId, setSavedId] = useState(null);       // id of the course just created, for the schedule step
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
@@ -3664,7 +3664,7 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
   const openAdd = () => {
     setEdit(null); setStep("details"); setSavedId(null); setPicked([]); setPickQuery("");
     setForm({ code: "", name: "", tutor: "", programmeId: defaultProgramme, cohortId: "", termId: "" });
-    setSched({ start: todayISO(), end: "", startTime: "10:00", endTime: "13:00" });
+    setSched({ start: todayISO(), end: "", hours: 3 });
     setModal(true);
   };
   const openEdit = (m) => {
@@ -3899,39 +3899,45 @@ function StudentPicker({ students, picked, onToggle, query, setQuery, onAll, onN
 // Step 2 of course creation: pick the term's start/end and weekly time, and it
 // creates one register per week. Shows a live count of what will be created.
 function ScheduleStep({ sched, setSched, busy, onCreate, onSkip }) {
-  const valid = sched.start && sched.end && sched.end >= sched.start && sched.startTime && sched.endTime && sched.endTime > sched.startTime;
+  const perWeek = Math.max(1, Math.round((Number(sched.hours) || 3) / 3)); // 3h → 1, 6h → 2 …
+  const valid = sched.start && sched.end && sched.end >= sched.start && Number(sched.hours) >= 3;
   // Count weeks the same way the server does — from the start, every 7 days.
   let weeks = 0;
-  if (valid) {
+  if (sched.start && sched.end && sched.end >= sched.start) {
     const cur = new Date(`${sched.start}T00:00:00Z`), last = new Date(`${sched.end}T00:00:00Z`);
     while (cur <= last && weeks < 60) { weeks++; cur.setUTCDate(cur.getUTCDate() + 7); }
   }
   const weekday = sched.start ? new Date(`${sched.start}T00:00:00`).toLocaleDateString("en-GB", { weekday: "long" }) : "";
+  const total = weeks * perWeek;
   return (
     <div className="space-y-3">
       <div className="flex items-start gap-2.5 rounded-xl bg-emerald-50 px-3.5 py-3 text-xs ring-1 ring-emerald-200">
         <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" />
-        <p className="font-semibold text-emerald-800">Course saved. Now set its term dates and a register will be created for every week.</p>
+        <p className="font-semibold text-emerald-800">Course saved. Set its dates and taught hours — one register is created per 3 hours, every week.</p>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Course starts"><input type="date" value={sched.start} onChange={e => setSched(s => ({ ...s, start: e.target.value }))} className={inputCls} /></Field>
-        <Field label="Course ends"><input type="date" value={sched.end} min={sched.start} onChange={e => setSched(s => ({ ...s, end: e.target.value }))} className={inputCls} /></Field>
+        <Field label="Start date"><input type="date" value={sched.start} onChange={e => setSched(s => ({ ...s, start: e.target.value }))} className={inputCls} /></Field>
+        <Field label="End date"><input type="date" value={sched.end} min={sched.start} onChange={e => setSched(s => ({ ...s, end: e.target.value }))} className={inputCls} /></Field>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Weekly start time"><input type="time" value={sched.startTime} onChange={e => setSched(s => ({ ...s, startTime: e.target.value }))} className={inputCls} /></Field>
-        <Field label="Weekly end time"><input type="time" value={sched.endTime} onChange={e => setSched(s => ({ ...s, endTime: e.target.value }))} className={inputCls} /></Field>
-      </div>
+      <Field label="Hours per week">
+        <select value={sched.hours} onChange={e => setSched(s => ({ ...s, hours: Number(e.target.value) }))} className={inputCls}>
+          <option value={3}>3 hours — 1 register</option>
+          <option value={6}>6 hours — 2 registers</option>
+          <option value={9}>9 hours — 3 registers</option>
+          <option value={12}>12 hours — 4 registers</option>
+        </select>
+      </Field>
       {sched.start && sched.end && sched.end < sched.start && <p className="text-[11px] font-semibold text-rose-600">The end date must be on or after the start date.</p>}
       {valid && (
         <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3.5 py-2.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
           <CalendarDays size={15} className="text-slate-400" />
-          Creates <span className="font-extrabold" style={{ color: NAVY }}>{weeks}</span> weekly register{weeks === 1 ? "" : "s"} — every <b>{weekday}</b>, {sched.startTime}–{sched.endTime}.
+          Creates <span className="font-extrabold" style={{ color: NAVY }}>{total}</span> register{total === 1 ? "" : "s"} — <b>{weeks}</b> {weekday} week{weeks === 1 ? "" : "s"} × <b>{perWeek}</b> per week.
         </div>
       )}
       <div className="flex gap-2">
         <button onClick={onSkip} disabled={busy} className="press flex-1 rounded-xl border-2 border-slate-200 py-2.5 text-sm font-bold text-slate-500 transition hover:bg-slate-50 disabled:opacity-40">Skip for now</button>
         <PrimaryBtn onClick={onCreate} disabled={busy || !valid} colour="#0d7a5f" className="flex-1">
-          {busy ? <><Loader size={16} /> Creating…</> : <><CalendarCheck size={16} /> Create {valid ? weeks : ""} register{weeks === 1 ? "" : "s"}</>}
+          {busy ? <><Loader size={16} /> Creating…</> : <><CalendarCheck size={16} /> Create {valid ? total : ""} register{total === 1 ? "" : "s"}</>}
         </PrimaryBtn>
       </div>
     </div>

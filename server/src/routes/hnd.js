@@ -557,13 +557,25 @@ router.post("/modules/:id/sessions/generate", requireAuth, requireAdmin, async (
 
   const start = str(req.body?.start);
   const end = str(req.body?.end);
-  const startTime = str(req.body?.startTime) || "10:00";
-  const endTime = str(req.body?.endTime) || "13:00";
   const audience = str(req.body?.audience) || "All students";
   if (!isDate(start) || !isDate(end)) return res.status(400).json({ error: "Valid start and end dates required (YYYY-MM-DD)" });
   if (end < start) return res.status(400).json({ error: "End date must be on or after the start date" });
-  if (!isTime(startTime) || !isTime(endTime)) return res.status(400).json({ error: "Valid start and end times required (HH:MM)" });
-  if (endTime <= startTime) return res.status(400).json({ error: "End time must be after the start time" });
+
+  // Registers per class day come from the taught hours: each register covers 3 hours,
+  // so 3h → 1 register, 6h → 2, and so on. Registers fall into fixed 3-hour blocks.
+  const hours = Number(req.body?.hours);
+  const HOURS_PER_REGISTER = 3;
+  const BLOCKS = [["09:00", "12:00"], ["13:00", "16:00"], ["16:00", "19:00"], ["19:00", "22:00"]];
+  let blocks;
+  if (Number.isFinite(hours) && hours > 0) {
+    const perDay = Math.min(Math.max(1, Math.round(hours / HOURS_PER_REGISTER)), BLOCKS.length);
+    blocks = BLOCKS.slice(0, perDay);
+  } else {
+    // Backward-compatible fallback: a single register at any supplied times.
+    const st = isTime(str(req.body?.startTime)) ? str(req.body.startTime) : "09:00";
+    const et = isTime(str(req.body?.endTime)) ? str(req.body.endTime) : "12:00";
+    blocks = [[st, et]];
+  }
 
   // Step weekly in UTC so a timezone can't nudge a date across midnight.
   const dates = [];
@@ -574,15 +586,18 @@ router.post("/modules/:id/sessions/generate", requireAuth, requireAdmin, async (
     cursor.setUTCDate(cursor.getUTCDate() + 7);
   }
 
-  const existing = await prisma.hndSession.findMany({ where: { moduleId: mod.id, date: { in: dates } }, select: { date: true } });
-  const have = new Set(existing.map((x) => x.date));
-  const toCreate = dates.filter((d) => !have.has(d));
-  if (toCreate.length) {
-    await prisma.hndSession.createMany({
-      data: toCreate.map((date) => ({ moduleId: mod.id, date, startTime, endTime, description: mod.code, audience })),
-    });
+  // A register is unique per (date, block start-time), so we can add missing blocks
+  // without duplicating ones already generated.
+  const existing = await prisma.hndSession.findMany({ where: { moduleId: mod.id, date: { in: dates } }, select: { date: true, startTime: true } });
+  const have = new Set(existing.map((x) => `${x.date}|${x.startTime}`));
+  const toCreate = [];
+  for (const date of dates) {
+    for (const [s, e] of blocks) {
+      if (!have.has(`${date}|${s}`)) toCreate.push({ moduleId: mod.id, date, startTime: s, endTime: e, description: mod.code, audience });
+    }
   }
-  res.status(201).json({ ok: true, weeks: dates.length, created: toCreate.length, skipped: dates.length - toCreate.length });
+  if (toCreate.length) await prisma.hndSession.createMany({ data: toCreate });
+  res.status(201).json({ ok: true, weeks: dates.length, registersPerWeek: blocks.length, created: toCreate.length });
 });
 
 /* ============================== the register ============================== */
