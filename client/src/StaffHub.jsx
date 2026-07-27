@@ -3064,24 +3064,18 @@ function AdminStudents({ store }) {
   const attnRowById = Object.fromEntries((store.attendance?.rows || []).map(r => [r.student.id, r]));
   const moduleById = Object.fromEntries(store.modules.map(m => [m.id, m]));
 
-  // Each student's CURRENT-term overall %, so the list matches the term breakdown and
-  // resets each term. Computed from their active term's modules using the per-module
-  // earned/possible the attendance matrix already provides.
+  // Each student's overall % counts only their CURRENT modules — the ones that haven't
+  // finished yet. A module finishes once its last session (endDate) has passed, so the
+  // list figure rolls over automatically, matching the per-student breakdown. Uses the
+  // per-module earned/possible the attendance matrix already provides.
   const attnToday = todayISO();
-  const termsByCohort = {};
-  (store.terms || []).forEach(t => { (termsByCohort[t.cohortId] = termsByCohort[t.cohortId] || []).push(t); });
-  const activeTermId = (cohortId) => {
-    const ts = (termsByCohort[cohortId] || []).slice().sort((a, b) => a.start.localeCompare(b.start));
-    const cur = ts.find(t => attnToday >= t.start && attnToday <= t.end) || ts.find(t => t.start > attnToday);
-    return cur ? cur.id : null;
-  };
-  const moduleTermById = Object.fromEntries(store.modules.map(m => [m.id, m.termId]));
+  const moduleEndById = Object.fromEntries(store.modules.map(m => [m.id, m.endDate || null]));
+  const isCurrentModule = (mid) => { const end = moduleEndById[mid]; return !end || end >= attnToday; };
   const currentPctOf = (s) => {
-    const atid = s.cohortId ? activeTermId(s.cohortId) : null;
     const row = attnRowById[s.id];
-    if (!atid || !row) return null;
+    if (!row) return null;
     let earned = 0, possible = 0;
-    Object.keys(row.modules).forEach(mid => { if (moduleTermById[mid] === atid) { const st = row.modules[mid]; earned += st.earned || 0; possible += st.possible || 0; } });
+    Object.keys(row.modules).forEach(mid => { if (isCurrentModule(mid)) { const st = row.modules[mid]; earned += st.earned || 0; possible += st.possible || 0; } });
     return possible > 0 ? Math.round((earned / possible) * 1000) / 10 : null;
   };
 
@@ -3301,7 +3295,6 @@ function AdminStudents({ store }) {
 function StudentAttendanceDetail({ student, store }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
-  const [openTerms, setOpenTerms] = useState({}); // key -> expanded?
   const R = 42, CIRC = 2 * Math.PI * R;
 
   useEffect(() => {
@@ -3324,14 +3317,18 @@ function StudentAttendanceDetail({ student, store }) {
     </div>
   );
 
-  const ModuleRow = ({ mod, stats, i }) => {
+  const fmtDate = (iso) => { if (!iso) return null; const [y, m, d] = iso.split("-"); const mm = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1] || m; return `${Number(d)} ${mm} ${y}`; };
+
+  const ModuleRow = ({ mod, stats, i, end, ended }) => {
     const t = pctTone(stats.pct ?? null);
     return (
       <div className={`flex items-center gap-3 px-3.5 py-2.5 ${i ? "border-t border-slate-100" : ""}`}>
         <span className="flex h-8 w-11 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{mod.code.slice(0, 5)}</span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-bold text-slate-700" title={mod.name}>{mod.name}</p>
-          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${stats.pct ?? 0}%`, background: t.colour }} /></div>
+          {end
+            ? <p className="mt-0.5 text-[10px] font-medium text-slate-400">{ended ? "Ended" : "Ends"} {fmtDate(end)}</p>
+            : <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${stats.pct ?? 0}%`, background: t.colour }} /></div>}
         </div>
         <div className="shrink-0 text-right text-[10px] font-semibold tabular-nums text-slate-400">
           <span style={{ color: ATT_STATUSES[0].colour }}>P{stats.P}</span> <span style={{ color: ATT_STATUSES[1].colour }}>L{stats.L}</span> <span style={{ color: ATT_STATUSES[2].colour }}>E{stats.E}</span> <span style={{ color: ATT_STATUSES[3].colour }}>A{stats.A}</span>
@@ -3345,85 +3342,60 @@ function StudentAttendanceDetail({ student, store }) {
   if (err) return <div className="space-y-4">{header}<div className="rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-600 ring-1 ring-rose-200">{err}</div></div>;
   if (!data) return <div className="space-y-4">{header}<div className="skeleton h-48 rounded-2xl" /></div>;
 
-  const current = data.groups.find(g => g.isCurrent);
-  const others = data.groups.filter(g => !g.isCurrent);
-  const oTone = pctTone(current?.overall.pct ?? null);
-  const labelOf = (g) => g.term ? g.term.name : "Unassigned units";
-  const badgeOf = (g) => g.isCurrent ? { t: "Current", cls: "bg-emerald-100 text-emerald-700" }
-    : g.status === "past" ? { t: "Ended", cls: "bg-slate-100 text-slate-500" }
-      : g.status === "future" ? { t: "Upcoming", cls: "bg-blue-50 text-blue-600" }
-        : { t: "No term", cls: "bg-amber-50 text-amber-600" };
+  const current = data.current || { modules: [], overall: { pct: null, P: 0, L: 0, E: 0, A: 0, marked: 0 } };
+  const previous = data.previous || [];
+  const oTone = pctTone(current.overall.pct ?? null);
 
   return (
     <div className="space-y-4">
       {header}
 
-      {/* Current term — the live, resetting overall */}
-      {current ? (
-        <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-emerald-200">
-          <div className="mb-3 flex items-center gap-2">
-            <p className="text-sm font-extrabold text-slate-800">{current.term ? current.term.name : "Current term"}</p>
-            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Current term</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="relative h-24 w-24 shrink-0">
-              <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
-                <circle cx="60" cy="60" r={R} fill="none" stroke="#e2e8f0" strokeWidth="12" />
-                <circle cx="60" cy="60" r={R} fill="none" stroke={oTone.colour} strokeWidth="12" strokeLinecap="round" strokeDasharray={`${CIRC}`} strokeDashoffset={`${CIRC * (1 - (current.overall.pct ?? 0) / 100)}`} style={{ transition: "stroke-dashoffset 1s ease" }} />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-xl font-extrabold tabular-nums" style={{ color: oTone.colour }}>{fmtPct(current.overall.pct ?? null)}</span>
-                <span className="text-[10px] font-medium text-slate-400">overall</span>
-              </div>
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="grid grid-cols-4 gap-1.5 text-center">
-                {ATT_STATUSES.map(s => (
-                  <div key={s.key} className="rounded-lg py-1.5" style={{ background: s.colour + "12" }}>
-                    <p className="text-sm font-extrabold tabular-nums" style={{ color: s.colour }}>{current.overall[s.key] ?? 0}</p>
-                    <p className="text-[9px] font-medium text-slate-400">{s.label}</p>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-2 text-[11px] text-slate-400">{current.overall.marked ?? 0} session{(current.overall.marked ?? 0) === 1 ? "" : "s"} marked this term</p>
-            </div>
-          </div>
-          <div className="mt-3 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200/70">
-            {current.modules.map((mr, i) => <ModuleRow key={mr.module.id} mod={mr.module} stats={mr.summary} i={i} />)}
-            {current.modules.length === 0 && <div className="px-4 py-6"><EmptyState Icon={Percent} title="No modules assigned yet" msg="Assign this term's modules to the student (Edit student → Modules)." /></div>}
-          </div>
+      {/* Current modules — the live overall that rolls over as modules finish */}
+      <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-emerald-200">
+        <div className="mb-3 flex items-center gap-2">
+          <p className="text-sm font-extrabold text-slate-800">Current modules</p>
+          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">{current.modules.length} running</span>
         </div>
-      ) : (
-        <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700 ring-1 ring-amber-200">No active term for this student's cohort right now — assign a cohort and set its term dates.</div>
-      )}
-
-      {/* Previous / other terms */}
-      {others.length > 0 && (
-        <div>
-          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Previous assigned modules</p>
-          <div className="space-y-2">
-            {others.map(g => {
-              const key = g.termId || "unassigned";
-              const open = !!openTerms[key];
-              const sb = badgeOf(g);
-              const tone = pctTone(g.overall.pct ?? null);
-              return (
-                <div key={key} className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200/70">
-                  <button onClick={() => setOpenTerms(o => ({ ...o, [key]: !o[key] }))} className="flex w-full items-center gap-2 px-3.5 py-3 text-left transition hover:bg-slate-50">
-                    <ChevronDown size={15} className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
-                    <span className="flex-1 truncate text-sm font-bold text-slate-700">{labelOf(g)} <span className="text-[11px] font-medium text-slate-400">· {g.modules.length} module{g.modules.length === 1 ? "" : "s"}</span></span>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${sb.cls}`}>{sb.t}</span>
-                    <span className={`rounded-lg px-2 py-1 text-xs font-extrabold tabular-nums ${tone.bg} ${tone.text}`}>{fmtPct(g.overall.pct ?? null)}</span>
-                  </button>
-                  {open && <div className="border-t border-slate-100">{g.modules.map((mr, i) => <ModuleRow key={mr.module.id} mod={mr.module} stats={mr.summary} i={i} />)}{g.modules.length === 0 && <p className="px-4 py-4 text-center text-xs text-slate-400">No modules.</p>}</div>}
+        <div className="flex items-center gap-4">
+          <div className="relative h-24 w-24 shrink-0">
+            <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
+              <circle cx="60" cy="60" r={R} fill="none" stroke="#e2e8f0" strokeWidth="12" />
+              <circle cx="60" cy="60" r={R} fill="none" stroke={oTone.colour} strokeWidth="12" strokeLinecap="round" strokeDasharray={`${CIRC}`} strokeDashoffset={`${CIRC * (1 - (current.overall.pct ?? 0) / 100)}`} style={{ transition: "stroke-dashoffset 1s ease" }} />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-xl font-extrabold tabular-nums" style={{ color: oTone.colour }}>{fmtPct(current.overall.pct ?? null)}</span>
+              <span className="text-[10px] font-medium text-slate-400">overall</span>
+            </div>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="grid grid-cols-4 gap-1.5 text-center">
+              {ATT_STATUSES.map(s => (
+                <div key={s.key} className="rounded-lg py-1.5" style={{ background: s.colour + "12" }}>
+                  <p className="text-sm font-extrabold tabular-nums" style={{ color: s.colour }}>{current.overall[s.key] ?? 0}</p>
+                  <p className="text-[9px] font-medium text-slate-400">{s.label}</p>
                 </div>
-              );
-            })}
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400">{current.overall.marked ?? 0} session{(current.overall.marked ?? 0) === 1 ? "" : "s"} marked across current modules</p>
+          </div>
+        </div>
+        <div className="mt-3 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200/70">
+          {current.modules.map((mr, i) => <ModuleRow key={mr.module.id} mod={mr.module} stats={mr.summary} i={i} end={mr.endDate} ended={false} />)}
+          {current.modules.length === 0 && <div className="px-4 py-6"><EmptyState Icon={Percent} title="No current modules" msg="Every assigned module has finished, or none are assigned yet. Assign modules via Edit student → Modules." /></div>}
+        </div>
+      </div>
+
+      {/* Previous assigned modules — finished ones, moved here automatically */}
+      {previous.length > 0 && (
+        <div>
+          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Previous assigned modules · {previous.length}</p>
+          <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200/70">
+            {previous.map((mr, i) => <ModuleRow key={mr.module.id} mod={mr.module} stats={mr.summary} i={i} end={mr.endDate} ended={true} />)}
           </div>
         </div>
       )}
 
-      <p className="text-[11px] text-slate-400">The overall counts only the current term (it resets each term). P = Present (2) · L = Late (1) · E = Excused (1) · A = Absent (0). Only marked sessions count.</p>
+      <p className="text-[11px] text-slate-400">A module moves to “previous” automatically once its last session date has passed. The overall counts only current modules. P = Present (2) · L = Late (1) · E = Excused (1) · A = Absent (0). Only marked sessions count.</p>
     </div>
   );
 }

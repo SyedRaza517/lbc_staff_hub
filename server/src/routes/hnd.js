@@ -269,11 +269,12 @@ router.get("/modules", requireAuth, async (_req, res) => {
   const [rows, enrolAgg, sessAgg] = await Promise.all([
     prisma.hndModule.findMany({ orderBy: { code: "asc" } }),
     prisma.enrolment.groupBy({ by: ["moduleId"], _count: { _all: true } }),
-    prisma.hndSession.groupBy({ by: ["moduleId"], _count: { _all: true } }),
+    prisma.hndSession.groupBy({ by: ["moduleId"], _count: { _all: true }, _max: { date: true } }),
   ]);
   const eMap = new Map(enrolAgg.map((e) => [e.moduleId, e._count._all]));
   const sMap = new Map(sessAgg.map((s) => [s.moduleId, s._count._all]));
-  res.json(rows.map((m) => ({ ...sModule(m), studentCount: eMap.get(m.id) || 0, sessionCount: sMap.get(m.id) || 0 })));
+  const endMap = new Map(sessAgg.map((s) => [s.moduleId, s._max.date || null]));
+  res.json(rows.map((m) => ({ ...sModule(m), studentCount: eMap.get(m.id) || 0, sessionCount: sMap.get(m.id) || 0, endDate: endMap.get(m.id) || null })));
 });
 
 router.post("/modules", requireAuth, requireAdmin, async (req, res) => {
@@ -797,50 +798,56 @@ router.get("/attendance", requireAuth, async (req, res) => {
 });
 
 // GET /api/hnd/students/:id/attendance-terms
-// A student's attendance grouped BY TERM: the current (active) term's modules and
-// overall, plus each previous term as its own frozen record. "Current" is the term
-// containing today, or the next upcoming one if we're between terms. This is what
-// powers the rolling, per-term overall (it resets each term).
+// A student's attendance split into CURRENT vs PREVIOUS modules by each module's own
+// end date. A module's end date is its last scheduled session (the "end date" set when
+// its registers were created). Once that date passes, the module has finished and drops
+// into "previous"; the overall % counts only the modules still running, so it rolls
+// over automatically as modules finish.
 router.get("/students/:id/attendance-terms", requireAuth, async (req, res) => {
   const student = await prisma.student.findUnique({ where: { id: req.params.id }, include: { enrolments: { select: { moduleId: true } } } });
   if (!student) return res.status(404).json({ error: "Student not found" });
   const enrolledIds = student.enrolments.map((e) => e.moduleId);
   const safeIds = enrolledIds.length ? enrolledIds : ["__none__"];
 
-  const [modules, terms, marks, sessions] = await Promise.all([
+  const [modules, marks, sessions] = await Promise.all([
     prisma.hndModule.findMany({ where: { id: { in: safeIds } } }),
-    student.cohortId ? prisma.term.findMany({ where: { cohortId: student.cohortId }, orderBy: [{ year: "asc" }, { index: "asc" }] }) : Promise.resolve([]),
     prisma.attendanceMark.findMany({ where: { studentId: student.id }, select: { status: true, sessionId: true } }),
-    prisma.hndSession.findMany({ where: { moduleId: { in: safeIds } }, select: { id: true, moduleId: true } }),
+    prisma.hndSession.findMany({ where: { moduleId: { in: safeIds } }, select: { id: true, moduleId: true, date: true } }),
   ]);
 
   const today = localDate();
-  // Current term: the one containing today, else the next upcoming one (between terms).
-  const current = terms.find((t) => today >= t.start && today <= t.end) || terms.find((t) => t.start > today) || null;
-  const currentTermId = current ? current.id : null;
 
-  const sessMod = new Map(sessions.map((s) => [s.id, s.moduleId]));
+  // Each module's end date = the date of its last scheduled session.
+  const endByModule = new Map();
+  const sessMod = new Map();
+  for (const s of sessions) {
+    sessMod.set(s.id, s.moduleId);
+    const cur = endByModule.get(s.moduleId);
+    if (!cur || s.date > cur) endByModule.set(s.moduleId, s.date);
+  }
+
   const marksByModule = new Map();
   for (const m of marks) { const mid = sessMod.get(m.sessionId); if (!mid) continue; if (!marksByModule.has(mid)) marksByModule.set(mid, []); marksByModule.get(mid).push(m); }
 
-  // Group the student's enrolled modules by term (or "unassigned" for term-less ones).
-  const groupsMap = new Map();
-  for (const mod of modules) { const key = mod.termId || "unassigned"; if (!groupsMap.has(key)) groupsMap.set(key, []); groupsMap.get(key).push(mod); }
+  // A module is "finished" once its last session date is in the past. Modules with no
+  // sessions yet have no end date, so they stay current.
+  const rowFor = (mod) => {
+    const endDate = endByModule.get(mod.id) || null;
+    return { module: sModule(mod), summary: summarise(marksByModule.get(mod.id) || []), endDate, finished: !!(endDate && endDate < today) };
+  };
+  const rows = modules.map(rowFor);
+  const currentRows = rows.filter((r) => !r.finished).sort((a, b) => (a.endDate || "9999").localeCompare(b.endDate || "9999"));
+  const previousRows = rows.filter((r) => r.finished).sort((a, b) => (b.endDate || "").localeCompare(a.endDate || ""));
 
-  const termById = new Map(terms.map((t) => [t.id, t]));
-  const groups = [];
-  for (const [key, mods] of groupsMap) {
-    const term = key === "unassigned" ? null : termById.get(key) || null;
-    const status = !term ? "none" : (today >= term.start && today <= term.end) ? "current" : (today > term.end ? "past" : "future");
-    const moduleRows = mods.map((mod) => ({ module: sModule(mod), summary: summarise(marksByModule.get(mod.id) || []) }));
-    const overall = summarise(mods.flatMap((mod) => marksByModule.get(mod.id) || []));
-    groups.push({ termId: term ? term.id : null, term: term ? sTerm(term) : null, isCurrent: key === currentTermId, status, modules: moduleRows, overall });
-  }
-  // Current first, then past (most recent first), future, then unassigned.
-  const rank = (g) => (g.isCurrent ? 0 : g.status === "past" ? 1 : g.status === "future" ? 2 : 3);
-  groups.sort((a, b) => rank(a) - rank(b) || (b.term?.start || "").localeCompare(a.term?.start || ""));
+  const currentOverall = summarise(currentRows.flatMap((r) => marksByModule.get(r.module.id) || []));
 
-  res.json({ studentId: student.id, cohortId: student.cohortId || null, currentTermId, groups });
+  res.json({
+    studentId: student.id,
+    cohortId: student.cohortId || null,
+    today,
+    current: { modules: currentRows, overall: currentOverall },
+    previous: previousRows,
+  });
 });
 
 module.exports = router;
