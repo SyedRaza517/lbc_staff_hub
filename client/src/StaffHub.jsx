@@ -2511,6 +2511,7 @@ function HndRegister({ store, sessionId, onBack }) {
   const [saving, setSaving] = useState(false);
   const [bulk, setBulk] = useState("");
   const [query, setQuery] = useState("");
+  const [reopened, setReopened] = useState(false);  // admin unlocked a paused (past/future term) register to correct it
 
   const load = useCallback(async () => {
     try {
@@ -2526,9 +2527,19 @@ function HndRegister({ store, sessionId, onBack }) {
   if (!data) return <><AdminHeader title="Register" subtitle="Loading…" Icon={ClipboardList} /><div className="skeleton h-64 rounded-2xl" /></>;
 
   const { session, module: mod, rows } = data;
-  const setStatus = (studentId, status) => setDraft(d => ({ ...d, [studentId]: { ...d[studentId], status: d[studentId]?.status === status ? null : status } }));
-  const setRemark = (studentId, remark) => setDraft(d => ({ ...d, [studentId]: { ...d[studentId], remark } }));
+  // Term gate: a unit assigned to a term only accepts marks during that term's dates.
+  // Outside it (past or not-yet-started) the register is read-only — "paused" — until
+  // an admin reopens it for a correction. Units with no term are always editable.
+  const fullMod = store.modules.find(m => m.id === mod.id) || mod;
+  const term = fullMod.termId ? (store.terms || []).find(t => t.id === fullMod.termId) : null;
+  const today = todayISO();
+  const termState = !term ? "none" : (today >= term.start && today <= term.end) ? "current" : (today > term.end ? "past" : "future");
+  const locked = termState === "past" || termState === "future";
+  const readOnly = locked && !reopened;
+  const setStatus = (studentId, status) => { if (readOnly) return; setDraft(d => ({ ...d, [studentId]: { ...d[studentId], status: d[studentId]?.status === status ? null : status } })); };
+  const setRemark = (studentId, remark) => { if (readOnly) return; setDraft(d => ({ ...d, [studentId]: { ...d[studentId], remark } })); };
   const applyBulk = (status) => {
+    if (readOnly) return;
     setBulk(status);
     if (!status) return;
     setDraft(d => Object.fromEntries(rows.map(r => [r.student.id, { ...d[r.student.id], status }])));
@@ -2544,8 +2555,10 @@ function HndRegister({ store, sessionId, onBack }) {
   const save = async () => {
     setSaving(true);
     try {
-      await store.saveRegister(sessionId, rows.map(r => ({ studentId: r.student.id, status: draft[r.student.id]?.status || null, remark: draft[r.student.id]?.remark || "" })));
+      // `locked` term → send the admin override so the server accepts the correction.
+      await store.saveRegister(sessionId, rows.map(r => ({ studentId: r.student.id, status: draft[r.student.id]?.status || null, remark: draft[r.student.id]?.remark || "" })), locked);
       await load();
+      setReopened(false);
     } catch (_e) { /* the store already surfaced the error as a toast */ }
     setSaving(false);
   };
@@ -2591,10 +2604,26 @@ function HndRegister({ store, sessionId, onBack }) {
         action={
           <div className="flex flex-wrap items-center gap-2">
             <ExportBtn onClick={exportRegister} label="Export" />
-            <PrimaryBtn onClick={save} disabled={!dirty || saving} colour={dirty ? NAVY : "#94a3b8"}>{saving ? <><Loader size={16} /> Saving…</> : <><Save size={16} /> Save register</>}</PrimaryBtn>
+            <PrimaryBtn onClick={save} disabled={!dirty || saving || readOnly} colour={dirty && !readOnly ? NAVY : "#94a3b8"}>{saving ? <><Loader size={16} /> Saving…</> : <><Save size={16} /> Save register</>}</PrimaryBtn>
           </div>
         }
       />
+
+      {/* Term status: paused registers are read-only until an admin reopens them. */}
+      {term && (
+        <div className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 ring-1 fade-up ${termState === "current" ? "bg-emerald-50 ring-emerald-200" : "bg-amber-50 ring-amber-200"}`}>
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            {termState === "current"
+              ? <span className="flex items-center gap-1.5 text-emerald-700"><CheckCircle2 size={16} /> {term.name} is current — attendance is open.</span>
+              : <span className="flex items-center gap-1.5 text-amber-700"><AlertCircle size={16} /> {term.name} {termState === "past" ? "has ended" : "hasn't started"} — this register is paused{reopened ? " (reopened for corrections)" : ""}.</span>}
+          </div>
+          {locked && !reopened && (
+            <button onClick={() => setReopened(true)} className="press flex items-center gap-1.5 rounded-xl bg-white px-3 py-1.5 text-xs font-bold text-amber-700 ring-1 ring-amber-300 transition hover:bg-amber-100">
+              <Edit3 size={14} /> Reopen for corrections
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Live tally for this session */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -2871,16 +2900,16 @@ function HndPercentages({ store }) {
 function HndStudents({ store }) {
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ firstName: "", lastName: "", studentRef: "", email: "", moduleIds: [] });
+  const [form, setForm] = useState({ firstName: "", lastName: "", studentRef: "", email: "", cohortId: "", moduleIds: [] });
   const [query, setQuery] = useState("");
 
-  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", moduleIds: [] }); setModal(true); };
-  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, moduleIds: s.moduleIds || [] }); setModal(true); };
+  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", cohortId: "", moduleIds: [] }); setModal(true); };
+  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, cohortId: s.cohortId || "", moduleIds: s.moduleIds || [] }); setModal(true); };
   const toggleModule = (id) => setForm(f => ({ ...f, moduleIds: f.moduleIds.includes(id) ? f.moduleIds.filter(x => x !== id) : [...f.moduleIds, id] }));
   const save = async () => {
     try {
       if (edit) {
-        await store.updateStudent(edit.id, { firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email });
+        await store.updateStudent(edit.id, { firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, cohortId: form.cohortId || null });
         await store.setEnrolments(edit.id, form.moduleIds);
       } else {
         await store.addStudent(form);
@@ -2955,6 +2984,12 @@ function HndStudents({ store }) {
           <Field label="Student number"><input value={form.studentRef} onChange={e => setForm(f => ({ ...f, studentRef: e.target.value }))} placeholder="e.g. 100121" className={inputCls} /></Field>
           <Field label="Email address"><input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder={emailPreview || "100121@londonbrookescollege.co.uk"} className={inputCls} /></Field>
           {!form.email && emailPreview && <p className="-mt-1 text-[11px] text-slate-400">Leave blank to use <span className="font-semibold">{emailPreview}</span></p>}
+          <Field label="Cohort (intake)">
+            <select value={form.cohortId} onChange={e => setForm(f => ({ ...f, cohortId: e.target.value }))} className={inputCls}>
+              <option value="">— none —</option>
+              {store.cohorts.map(c => { const p = store.programmes.find(x => x.id === c.programmeId); return <option key={c.id} value={c.id}>{p ? `${p.name} — ${c.name}` : c.name}</option>; })}
+            </select>
+          </Field>
           <Field label="Modules">
             <div className="grid grid-cols-2 gap-1.5">
               {store.modules.map(m => (
@@ -2988,7 +3023,7 @@ function AdminStudents({ store }) {
   const { refreshHnd, hndLoaded } = store;
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ firstName: "", lastName: "", studentRef: "", email: "", active: true, moduleIds: [] });
+  const [form, setForm] = useState({ firstName: "", lastName: "", studentRef: "", email: "", active: true, cohortId: "", moduleIds: [] });
   const [query, setQuery] = useState("");
   const [moduleFilter, setModuleFilter] = useState("");     // "" = any module
   const [statusFilter, setStatusFilter] = useState("all");  // all | active | inactive
@@ -3004,16 +3039,16 @@ function AdminStudents({ store }) {
   const overallById = Object.fromEntries((store.attendance?.rows || []).map(r => [r.student.id, r.overall?.pct ?? null]));
   const moduleById = Object.fromEntries(store.modules.map(m => [m.id, m]));
 
-  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", active: true, moduleIds: [] }); setModal(true); };
-  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, active: s.active !== false, moduleIds: s.moduleIds || [] }); setModal(true); };
+  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", active: true, cohortId: "", moduleIds: [] }); setModal(true); };
+  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, active: s.active !== false, cohortId: s.cohortId || "", moduleIds: s.moduleIds || [] }); setModal(true); };
   const toggleModule = (id) => setForm(f => ({ ...f, moduleIds: f.moduleIds.includes(id) ? f.moduleIds.filter(x => x !== id) : [...f.moduleIds, id] }));
   const save = async () => {
     try {
       if (edit) {
-        await store.updateStudent(edit.id, { firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, active: form.active });
+        await store.updateStudent(edit.id, { firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, active: form.active, cohortId: form.cohortId || null });
         await store.setEnrolments(edit.id, form.moduleIds);
       } else {
-        await store.addStudent({ firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, moduleIds: form.moduleIds });
+        await store.addStudent({ firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, cohortId: form.cohortId || null, moduleIds: form.moduleIds });
       }
       setModal(false);
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
@@ -3169,6 +3204,12 @@ function AdminStudents({ store }) {
           <Field label="Student number"><input value={form.studentRef} onChange={e => setForm(f => ({ ...f, studentRef: e.target.value }))} placeholder="e.g. 100121" className={inputCls} /></Field>
           <Field label="Email address"><input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder={emailPreview || "100121@londonbrookescollege.co.uk"} className={inputCls} /></Field>
           {!form.email && emailPreview && <p className="-mt-1 text-[11px] text-slate-400">Leave blank to use <span className="font-semibold">{emailPreview}</span></p>}
+          <Field label="Cohort (intake)">
+            <select value={form.cohortId} onChange={e => setForm(f => ({ ...f, cohortId: e.target.value }))} className={inputCls}>
+              <option value="">— none —</option>
+              {store.cohorts.map(c => { const p = store.programmes.find(x => x.id === c.programmeId); return <option key={c.id} value={c.id}>{p ? `${p.name} — ${c.name}` : c.name}</option>; })}
+            </select>
+          </Field>
           {edit && (
             <Field label="Status">
               <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
@@ -3605,7 +3646,7 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
   const [modal, setModal] = useState(false);
   const [step, setStep] = useState("details");       // details -> schedule (new courses only)
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ code: "", name: "", tutor: "", programmeId: "" });
+  const [form, setForm] = useState({ code: "", name: "", tutor: "", programmeId: "", cohortId: "", termId: "" });
   const [picked, setPicked] = useState([]);           // studentIds enrolled on this course
   const [pickQuery, setPickQuery] = useState("");     // search within the student picker
   const [sched, setSched] = useState({ start: todayISO(), end: "", startTime: "10:00", endTime: "13:00" });
@@ -3622,13 +3663,13 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
   const enrolledIds = (moduleId) => store.students.filter(s => (s.moduleIds || []).includes(moduleId)).map(s => s.id);
   const openAdd = () => {
     setEdit(null); setStep("details"); setSavedId(null); setPicked([]); setPickQuery("");
-    setForm({ code: "", name: "", tutor: "", programmeId: defaultProgramme });
+    setForm({ code: "", name: "", tutor: "", programmeId: defaultProgramme, cohortId: "", termId: "" });
     setSched({ start: todayISO(), end: "", startTime: "10:00", endTime: "13:00" });
     setModal(true);
   };
   const openEdit = (m) => {
     setEdit(m); setStep("details"); setSavedId(m.id); setPicked(enrolledIds(m.id)); setPickQuery("");
-    setForm({ code: m.code, name: m.name, tutor: m.tutor || "", programmeId: m.programmeId || "" });
+    setForm({ code: m.code, name: m.name, tutor: m.tutor || "", programmeId: m.programmeId || "", cohortId: m.cohortId || "", termId: m.termId || "" });
     setModal(true);
   };
   const togglePick = (id) => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
@@ -3717,6 +3758,12 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
           // the student count is the module's all-time total.
           const sessionCount = totals?.sessionCount ?? m.sessionCount;
           const tone = pctTone(pct);
+          // Cohort/term this unit runs in, and whether that term is current (open),
+          // ended (paused) or upcoming — the visible side of the pause/activate.
+          const uTerm = m.termId ? (store.terms || []).find(t => t.id === m.termId) : null;
+          const uCohort = m.cohortId ? (store.cohorts || []).find(c => c.id === m.cohortId) : null;
+          const uToday = todayISO();
+          const uState = !uTerm ? null : (uToday >= uTerm.start && uToday <= uTerm.end) ? "current" : (uToday > uTerm.end ? "past" : "future");
           return (
             <div key={m.id} className="fade-up group flex flex-col overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md hover:ring-slate-300/80" style={{ animationDelay: `${i * 45}ms` }}>
               {/* Patterned banner with the course code as a cohort-style badge */}
@@ -3730,6 +3777,12 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
                 {prog
                   ? <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide" style={{ color: prog.colour }}><Layers size={11} /> {prog.name}</p>
                   : <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-300">No programme</p>}
+                {(uCohort || uTerm) && (
+                  <p className="mb-1 flex flex-wrap items-center gap-1 text-[10px] font-bold">
+                    {uCohort && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">{uCohort.name}</span>}
+                    {uTerm && <span className={`rounded px-1.5 py-0.5 ${uState === "current" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{uTerm.name.replace("Year ", "Y").replace(" · Term ", "T")}{uState === "current" ? " · Current" : uState === "past" ? " · Ended" : " · Upcoming"}</span>}
+                  </p>
+                )}
                 <h3 className="text-[15px] font-extrabold leading-snug" style={{ color: NAVY_DARK }} title={m.name}>{m.name}</h3>
 
                 {/* Attendance figures kept — this is a register system, after all */}
@@ -3762,11 +3815,27 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
         {step === "details" ? (
           <div className="space-y-3">
             <Field label="Programme">
-              <select value={form.programmeId} onChange={e => setForm(f => ({ ...f, programmeId: e.target.value }))} className={inputCls}>
+              <select value={form.programmeId} onChange={e => setForm(f => ({ ...f, programmeId: e.target.value, cohortId: "", termId: "" }))} className={inputCls}>
                 <option value="">— none —</option>
                 {store.programmes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </Field>
+            {/* Which intake + term this unit runs in. Optional, but needed for the
+                term-based attendance pause/activate. Term list follows the cohort. */}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Cohort">
+                <select value={form.cohortId} onChange={e => setForm(f => ({ ...f, cohortId: e.target.value, termId: "" }))} disabled={!form.programmeId} className={inputCls}>
+                  <option value="">— none —</option>
+                  {store.cohorts.filter(c => c.programmeId === form.programmeId).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Term">
+                <select value={form.termId} onChange={e => setForm(f => ({ ...f, termId: e.target.value }))} disabled={!form.cohortId} className={inputCls}>
+                  <option value="">— none —</option>
+                  {store.terms.filter(t => t.cohortId === form.cohortId).sort((a, b) => a.year - b.year || a.index - b.index).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </Field>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Course code"><input value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))} placeholder="e.g. OBM" className={inputCls} /></Field>
               <Field label="Tutor"><select value={form.tutor} onChange={e => setForm(f => ({ ...f, tutor: e.target.value }))} className={inputCls}><option value="">— none —</option>{store.staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></Field>

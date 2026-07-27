@@ -249,7 +249,9 @@ model Cohort {
   startDate   String?   // optional YYYY-MM-DD — when the intake begins
   createdAt   DateTime  @default(now())
 
-  terms Term[]
+  terms    Term[]
+  modules  HndModule[]
+  students Student[]
 
   @@unique([programmeId, name]) // no duplicate intake names within one programme
   @@index([programmeId])
@@ -269,6 +271,8 @@ model Term {
   end       String   // YYYY-MM-DD, inclusive
   createdAt DateTime @default(now())
 
+  modules HndModule[]
+
   @@unique([cohortId, year, index]) // one of each term per cohort
   @@index([cohortId])
 }
@@ -281,6 +285,13 @@ model HndModule {
   tutor       String     @default("")
   programme   Programme? @relation(fields: [programmeId], references: [id], onDelete: SetNull)
   programmeId String?
+  // A unit can belong to a specific cohort + term (the intake and teaching term it
+  // runs in). Nullable so existing units and the "just a module" case still work;
+  // set-null on delete keeps registers if a cohort/term is removed.
+  cohort      Cohort?    @relation(fields: [cohortId], references: [id], onDelete: SetNull)
+  cohortId    String?
+  term        Term?      @relation(fields: [termId], references: [id], onDelete: SetNull)
+  termId      String?
   createdAt   DateTime   @default(now())
 
   sessions    HndSession[]
@@ -288,6 +299,8 @@ model HndModule {
   assessments Assessment[]
 
   @@index([programmeId])
+  @@index([cohortId])
+  @@index([termId])
 }
 
 // An assessment belonging to a module (course) — e.g. "Assignment 1" worth 40%.
@@ -335,12 +348,18 @@ model Student {
   initials   String
   colour     String
   active     Boolean  @default(true)
+  // The intake this student belongs to. Nullable so existing students still load;
+  // set-null on delete keeps the student if their cohort is removed.
+  cohort     Cohort?  @relation(fields: [cohortId], references: [id], onDelete: SetNull)
+  cohortId   String?
   createdAt  DateTime @default(now())
 
   enrolments   Enrolment[]
   marks        AttendanceMark[]
   interactions Interaction[]
   grades       AssessmentGrade[]
+
+  @@index([cohortId])
 }
 
 // A PAT (Personal Academic Tutor) interaction — a logged meeting/contact with a

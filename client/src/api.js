@@ -150,9 +150,9 @@ export const api = {
   updateSession: (id, data) => request(`/hnd/sessions/${id}`, { method: "PUT", body: data }),
   removeSession: (id) => request(`/hnd/sessions/${id}`, { method: "DELETE" }),
   getRegister: (sessionId) => request(`/hnd/sessions/${sessionId}/register`),
-  saveRegister: (sessionId, marks) => request(`/hnd/sessions/${sessionId}/register`, { method: "PUT", body: { marks } }),
+  saveRegister: (sessionId, marks, override) => request(`/hnd/sessions/${sessionId}/register`, { method: "PUT", body: { marks, ...(override ? { override: true } : {}) } }),
   // semesterId: "" = all semesters, "unassigned" = sessions outside every semester
-  getAttendance: (semesterId) => request(`/hnd/attendance${semesterId ? `?semesterId=${encodeURIComponent(semesterId)}` : ""}`),
+  getAttendance: (semesterId, termId) => request(`/hnd/attendance${termId ? `?termId=${encodeURIComponent(termId)}` : semesterId ? `?semesterId=${encodeURIComponent(semesterId)}` : ""}`),
   // PAT (Personal Academic Tutor) interactions
   listInteractions: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/interactions${q ? `?${q}` : ""}`); },
   addInteraction: (data) => request("/interactions", { method: "POST", body: data }),

@@ -51,12 +51,14 @@ const sCohort = (c) => ({ id: c.id, name: c.name, programmeId: c.programmeId, st
 const sTerm = (t) => ({ id: t.id, cohortId: t.cohortId, year: t.year, index: t.index, name: t.name, start: t.start, end: t.end });
 const sModule = (m) => ({
   id: m.id, code: m.code, name: m.name, tutor: m.tutor, programmeId: m.programmeId ?? null,
+  cohortId: m.cohortId ?? null, termId: m.termId ?? null,
   // Present only when the query asked Prisma to count relations.
   ...(m._count ? { sessionCount: m._count.sessions, studentCount: m._count.enrolments } : {}),
 });
 const sStudent = (s) => ({
   id: s.id, firstName: s.firstName, lastName: s.lastName, name: `${s.firstName} ${s.lastName}`,
   studentRef: s.studentRef, email: s.email, initials: s.initials, colour: s.colour, active: s.active,
+  cohortId: s.cohortId ?? null,
   ...(s.enrolments ? { moduleIds: s.enrolments.map((e) => e.moduleId) } : {}),
 });
 const sSession = (x) => ({

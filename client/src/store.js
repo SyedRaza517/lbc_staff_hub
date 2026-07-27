@@ -236,7 +236,7 @@ export function useApiStore(notify, user) {
     addSession: runHnd((data) => api.addSession(data), "Session added"),
     updateSession: runHnd((id, data) => api.updateSession(id, data), "Session updated"),
     removeSession: runHnd((id) => api.removeSession(id), "Session removed", "error"),
-    saveRegister: runHnd((sessionId, marks) => api.saveRegister(sessionId, marks), "Register saved"),
+    saveRegister: runHnd((sessionId, marks, override) => api.saveRegister(sessionId, marks, override), "Register saved"),
     getRegister: (sessionId) => api.getRegister(sessionId),
     // PAT interactions
     refreshInteractions,

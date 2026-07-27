@@ -22,6 +22,7 @@ const str = (v) => (typeof v === "string" ? v.trim() : "");
 // impossible dates were accepted. A session dated to a day that doesn't exist falls
 // outside every semester range and shows different totals depending on the scope.
 const { isRealDate } = require("../validate");
+const { localDate } = require("../clock");
 const isDate = (v) => isRealDate(v);
 const isTime = (v) => /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 
@@ -93,6 +94,21 @@ async function resolveProgramme(raw) {
   const exists = await prisma.programme.findUnique({ where: { id } });
   if (!exists) return { error: "Unknown programme" };
   return { value: id };
+}
+
+// Resolve a unit's cohort + term, ensuring the term (if any) belongs to the cohort.
+// Either may be null. A term given without a cohort derives the cohort from it.
+async function resolveCohortTerm(rawCohort, rawTerm) {
+  const cohortId = str(rawCohort) || null;
+  const termId = str(rawTerm) || null;
+  if (cohortId && !(await prisma.cohort.findUnique({ where: { id: cohortId } }))) return { error: "Unknown cohort" };
+  if (termId) {
+    const t = await prisma.term.findUnique({ where: { id: termId } });
+    if (!t) return { error: "Unknown term" };
+    if (cohortId && t.cohortId !== cohortId) return { error: "That term isn't in the chosen cohort" };
+    return { cohortId: cohortId || t.cohortId, termId };
+  }
+  return { cohortId, termId: null };
 }
 
 router.get("/programmes", requireAuth, async (_req, res) => {
@@ -269,8 +285,10 @@ router.post("/modules", requireAuth, requireAdmin, async (req, res) => {
   if (clash) return res.status(409).json({ error: `Module code "${code}" already exists` });
   const prog = await resolveProgramme(req.body?.programmeId);
   if (prog.error) return res.status(400).json({ error: prog.error });
+  const ct = await resolveCohortTerm(req.body?.cohortId, req.body?.termId);
+  if (ct.error) return res.status(400).json({ error: ct.error });
   const m = await prisma.hndModule.create({
-    data: { code, name, tutor: str(req.body?.tutor), programmeId: prog.skip ? null : prog.value },
+    data: { code, name, tutor: str(req.body?.tutor), programmeId: prog.skip ? null : prog.value, cohortId: ct.cohortId, termId: ct.termId },
   });
   res.status(201).json(sModule(m));
 });
@@ -295,6 +313,12 @@ router.put("/modules/:id", requireAuth, requireAdmin, async (req, res) => {
   const prog = await resolveProgramme(req.body?.programmeId);
   if (prog.error) return res.status(400).json({ error: prog.error });
   if (!prog.skip) data.programmeId = prog.value;
+  // cohort/term are set together (the UI picks a cohort then its term).
+  if (req.body?.cohortId !== undefined || req.body?.termId !== undefined) {
+    const ct = await resolveCohortTerm(req.body?.cohortId, req.body?.termId);
+    if (ct.error) return res.status(400).json({ error: ct.error });
+    data.cohortId = ct.cohortId; data.termId = ct.termId;
+  }
   const m = await prisma.hndModule.update({ where: { id: existing.id }, data });
   res.json(sModule(m));
 });
@@ -363,10 +387,12 @@ router.post("/students", requireAuth, requireAdmin, async (req, res) => {
     const found = await prisma.hndModule.count({ where: { id: { in: moduleIds } } });
     if (found !== moduleIds.length) return res.status(400).json({ error: "One or more modules do not exist" });
   }
+  const cohortId = str(req.body?.cohortId) || null;
+  if (cohortId && !(await prisma.cohort.findUnique({ where: { id: cohortId } }))) return res.status(400).json({ error: "Unknown cohort" });
 
   const s = await prisma.student.create({
     data: {
-      firstName, lastName, studentRef, email,
+      firstName, lastName, studentRef, email, cohortId,
       initials: initialsOf(firstName, lastName),
       colour: colourFor(studentRef + lastName),
       enrolments: { create: moduleIds.map((moduleId) => ({ moduleId })) },
@@ -409,6 +435,11 @@ router.put("/students/:id", requireAuth, requireAdmin, async (req, res) => {
     data.email = email;
   }
   if (typeof req.body?.active === "boolean") data.active = req.body.active;
+  if (req.body?.cohortId !== undefined) {
+    const cohortId = str(req.body.cohortId) || null;
+    if (cohortId && !(await prisma.cohort.findUnique({ where: { id: cohortId } }))) return res.status(400).json({ error: "Unknown cohort" });
+    data.cohortId = cohortId;
+  }
 
   const s = await prisma.student.update({
     where: { id: existing.id }, data,
@@ -602,8 +633,20 @@ router.get("/sessions/:id/register", requireAuth, async (req, res) => {
 // body are written, so a half-finished register can be saved and resumed.
 // A row with status null/"" clears that student's mark.
 router.put("/sessions/:id/register", requireAuth, requireAdmin, async (req, res) => {
-  const session = await prisma.hndSession.findUnique({ where: { id: req.params.id } });
+  const session = await prisma.hndSession.findUnique({ where: { id: req.params.id }, include: { module: { include: { term: true } } } });
   if (!session) return res.status(404).json({ error: "Session not found" });
+
+  // Term gate: if the unit belongs to a term, only its ACTIVE window (today within
+  // the term dates) accepts marks. A past or not-yet-started term is locked, so
+  // attendance "pauses" when the term ends — unless an admin reopens it to fix a
+  // mark (override:true). Units with no term are unaffected.
+  const term = session.module?.term;
+  if (term && req.body?.override !== true) {
+    const today = localDate();
+    if (today < term.start || today > term.end) {
+      return res.status(423).json({ error: `${term.name} is ${today > term.end ? "over" : "not open yet"} — reopen it to edit this register.`, locked: true });
+    }
+  }
 
   const marks = Array.isArray(req.body?.marks) ? req.body.marks : null;
   if (!marks) return res.status(400).json({ error: "marks array required" });
@@ -651,8 +694,14 @@ router.get("/attendance", requireAuth, async (req, res) => {
   const semesterId = str(req.query?.semesterId);
   const semesters = await prisma.semester.findMany({ orderBy: { start: "asc" } });
 
-  let scope = null; // null = everything
-  if (semesterId === "unassigned") {
+  let scope = null; // null = everything (cumulative)
+  // ?termId=<id> scopes to one term's date range — attendance for that term only.
+  const termId = str(req.query?.termId);
+  if (termId) {
+    const term = await prisma.term.findUnique({ where: { id: termId } });
+    if (!term) return res.status(404).json({ error: "Term not found" });
+    scope = (date) => date >= term.start && date <= term.end;
+  } else if (semesterId === "unassigned") {
     scope = (date) => !semesters.some((s) => inRange(date, s));
   } else if (semesterId) {
     const sem = semesters.find((s) => s.id === semesterId);
