@@ -2456,9 +2456,16 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
                     <td className="px-5 py-3 font-medium text-slate-600 whitespace-nowrap tabular-nums">{fmt12(s.start)} – {fmt12(s.end)}</td>
                     <td className="px-5 py-3 text-slate-500">{s.audience}</td>
                     <td className="px-5 py-3">
-                      {s.kind
-                        ? <span className="rounded-full px-2.5 py-1 text-[11px] font-bold" style={s.kind === "Teaching" ? { background: "#e0e7ff", color: "#4338ca" } : s.kind === "Seminar" ? { background: "#f3e8ff", color: "#7e22ce" } : { background: "#f1f5f9", color: "#475569" }}>{s.kind}</span>
-                        : <span className="font-medium text-slate-600">{s.description || "—"}</span>}
+                      {(() => {
+                        // Prefer the register's saved type; otherwise derive it from its
+                        // position that day — 1st = Teaching, 2nd = Seminar — so registers
+                        // created before the type existed still read correctly.
+                        const ri = regInfo(s);
+                        const label = s.kind || (ri.total > 1 ? (ri.idx === 1 ? "Teaching" : ri.idx === 2 ? "Seminar" : `Register ${ri.idx}`) : "");
+                        return label
+                          ? <span className="rounded-full px-2.5 py-1 text-[11px] font-bold" style={label === "Teaching" ? { background: "#e0e7ff", color: "#4338ca" } : label === "Seminar" ? { background: "#f3e8ff", color: "#7e22ce" } : { background: "#f1f5f9", color: "#475569" }}>{label}</span>
+                          : <span className="font-medium text-slate-600">{s.description || "—"}</span>;
+                      })()}
                     </td>
                     <td className="px-5 py-3">
                       {done
