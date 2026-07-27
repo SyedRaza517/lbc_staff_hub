@@ -153,6 +153,8 @@ export const api = {
   saveRegister: (sessionId, marks, override) => request(`/hnd/sessions/${sessionId}/register`, { method: "PUT", body: { marks, ...(override ? { override: true } : {}) } }),
   // semesterId: "" = all semesters, "unassigned" = sessions outside every semester
   getAttendance: (semesterId, termId) => request(`/hnd/attendance${termId ? `?termId=${encodeURIComponent(termId)}` : semesterId ? `?semesterId=${encodeURIComponent(semesterId)}` : ""}`),
+  // A student's attendance grouped by term (current + previous terms).
+  studentTermAttendance: (id) => request(`/hnd/students/${id}/attendance-terms`),
   // PAT (Personal Academic Tutor) interactions
   listInteractions: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/interactions${q ? `?${q}` : ""}`); },
   addInteraction: (data) => request("/interactions", { method: "POST", body: data }),

@@ -3266,8 +3266,8 @@ function AdminStudents({ store }) {
         </div>
       </Modal>
 
-      <Modal open={!!attnFor} onClose={() => setAttnFor(null)} title="Attendance breakdown" width={560}>
-        {attnFor && <StudentAttendanceDetail student={attnFor} row={attnRowById[attnFor.id]} modules={store.modules} scopeName={semesterLabel(store.semesterId, store.semesters)} />}
+      <Modal open={!!attnFor} onClose={() => setAttnFor(null)} title="Attendance by term" width={560}>
+        {attnFor && <StudentAttendanceDetail student={attnFor} store={store} />}
       </Modal>
     </>
   );
@@ -3275,86 +3275,135 @@ function AdminStudents({ store }) {
 
 // One student's attendance, broken down per module and overall. Reads the same
 // scoped figures as the registers page (row comes from store.attendance.rows).
-function StudentAttendanceDetail({ student, row, modules, scopeName }) {
-  const moduleById = Object.fromEntries(modules.map(m => [m.id, m]));
-  const overall = row?.overall;
-  const entries = (row ? Object.keys(row.modules) : [])
-    .map(id => ({ m: moduleById[id], stats: row.modules[id] }))
-    .filter(e => e.m)
-    .sort((a, b) => a.m.code.localeCompare(b.m.code));
-  const oTone = pctTone(overall?.pct ?? null);
-  const R = 46, CIRC = 2 * Math.PI * R;
+// Per-student attendance grouped BY TERM: the current (active) term's overall +
+// modules, then each previous term as its own collapsible record. The overall is
+// scoped to the current term only, so it resets each term.
+function StudentAttendanceDetail({ student, store }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [openTerms, setOpenTerms] = useState({}); // key -> expanded?
+  const R = 42, CIRC = 2 * Math.PI * R;
+
+  useEffect(() => {
+    let cancelled = false;
+    setData(null); setErr("");
+    store.getStudentTermAttendance(student.id)
+      .then(d => { if (!cancelled) setData(d); })
+      .catch(e => { if (!cancelled) setErr(e.message || "Could not load attendance"); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [student.id]);
+
+  const header = (
+    <div className="flex items-center gap-3">
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm" style={{ background: student.colour }}>{student.initials}</span>
+      <div className="min-w-0">
+        <p className="truncate text-base font-extrabold" style={{ color: NAVY_DARK }}>{student.name}</p>
+        <p className="truncate text-xs text-slate-400">{student.studentRef} · {student.email}</p>
+      </div>
+    </div>
+  );
+
+  const ModuleRow = ({ mod, stats, i }) => {
+    const t = pctTone(stats.pct ?? null);
+    return (
+      <div className={`flex items-center gap-3 px-3.5 py-2.5 ${i ? "border-t border-slate-100" : ""}`}>
+        <span className="flex h-8 w-11 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{mod.code.slice(0, 5)}</span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-bold text-slate-700" title={mod.name}>{mod.name}</p>
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${stats.pct ?? 0}%`, background: t.colour }} /></div>
+        </div>
+        <div className="shrink-0 text-right text-[10px] font-semibold tabular-nums text-slate-400">
+          <span style={{ color: ATT_STATUSES[0].colour }}>P{stats.P}</span> <span style={{ color: ATT_STATUSES[1].colour }}>L{stats.L}</span> <span style={{ color: ATT_STATUSES[2].colour }}>E{stats.E}</span> <span style={{ color: ATT_STATUSES[3].colour }}>A{stats.A}</span>
+          <span className="ml-1 text-slate-300">· {stats.marked} marked</span>
+        </div>
+        <span className={`shrink-0 rounded-lg px-2 py-1 text-xs font-extrabold tabular-nums ${t.bg} ${t.text}`}>{fmtPct(stats.pct ?? null)}</span>
+      </div>
+    );
+  };
+
+  if (err) return <div className="space-y-4">{header}<div className="rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-600 ring-1 ring-rose-200">{err}</div></div>;
+  if (!data) return <div className="space-y-4">{header}<div className="skeleton h-48 rounded-2xl" /></div>;
+
+  const current = data.groups.find(g => g.isCurrent);
+  const others = data.groups.filter(g => !g.isCurrent);
+  const oTone = pctTone(current?.overall.pct ?? null);
+  const labelOf = (g) => g.term ? g.term.name : "Unassigned units";
+  const badgeOf = (g) => g.isCurrent ? { t: "Current", cls: "bg-emerald-100 text-emerald-700" }
+    : g.status === "past" ? { t: "Ended", cls: "bg-slate-100 text-slate-500" }
+      : g.status === "future" ? { t: "Upcoming", cls: "bg-blue-50 text-blue-600" }
+        : { t: "No term", cls: "bg-amber-50 text-amber-600" };
 
   return (
     <div className="space-y-4">
-      {/* Who */}
-      <div className="flex items-center gap-3">
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm" style={{ background: student.colour }}>{student.initials}</span>
-        <div className="min-w-0">
-          <p className="truncate text-base font-extrabold" style={{ color: NAVY_DARK }}>{student.name}</p>
-          <p className="truncate text-xs text-slate-400">{student.studentRef} · {student.email}</p>
-        </div>
-      </div>
+      {header}
 
-      {/* Overall */}
-      <div className="flex items-center gap-4 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200/70">
-        <div className="relative h-28 w-28 shrink-0">
-          <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
-            <circle cx="60" cy="60" r={R} fill="none" stroke="#e2e8f0" strokeWidth="12" />
-            <circle cx="60" cy="60" r={R} fill="none" stroke={oTone.colour} strokeWidth="12" strokeLinecap="round"
-              strokeDasharray={`${CIRC}`} strokeDashoffset={`${CIRC * (1 - (overall?.pct ?? 0) / 100)}`} style={{ transition: "stroke-dashoffset 1s ease" }} />
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-2xl font-extrabold tabular-nums" style={{ color: oTone.colour }}>{fmtPct(overall?.pct ?? null)}</span>
-            <span className="text-[10px] font-medium text-slate-400">overall</span>
+      {/* Current term — the live, resetting overall */}
+      {current ? (
+        <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-emerald-200">
+          <div className="mb-3 flex items-center gap-2">
+            <p className="text-sm font-extrabold text-slate-800">{current.term ? current.term.name : "Current term"}</p>
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Current term</span>
           </div>
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Across all modules · {scopeName}</p>
-          <div className="grid grid-cols-4 gap-1.5 text-center">
-            {ATT_STATUSES.map(s => (
-              <div key={s.key} className="rounded-lg py-1.5" style={{ background: s.colour + "12" }}>
-                <p className="text-sm font-extrabold tabular-nums" style={{ color: s.colour }}>{overall?.[s.key] ?? 0}</p>
-                <p className="text-[9px] font-medium text-slate-400">{s.label}</p>
+          <div className="flex items-center gap-4">
+            <div className="relative h-24 w-24 shrink-0">
+              <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
+                <circle cx="60" cy="60" r={R} fill="none" stroke="#e2e8f0" strokeWidth="12" />
+                <circle cx="60" cy="60" r={R} fill="none" stroke={oTone.colour} strokeWidth="12" strokeLinecap="round" strokeDasharray={`${CIRC}`} strokeDashoffset={`${CIRC * (1 - (current.overall.pct ?? 0) / 100)}`} style={{ transition: "stroke-dashoffset 1s ease" }} />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-xl font-extrabold tabular-nums" style={{ color: oTone.colour }}>{fmtPct(current.overall.pct ?? null)}</span>
+                <span className="text-[10px] font-medium text-slate-400">overall</span>
               </div>
-            ))}
-          </div>
-          <p className="mt-2 text-[11px] text-slate-400">{overall?.marked ?? 0} session{(overall?.marked ?? 0) === 1 ? "" : "s"} marked in total</p>
-        </div>
-      </div>
-
-      {/* Per module */}
-      <div>
-        <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Per module</p>
-        <div className="rounded-2xl bg-white ring-1 ring-slate-200/70">
-          {entries.map(({ m, stats }, i) => {
-            const t = pctTone(stats.pct ?? null);
-            return (
-              <div key={m.id} className={`flex items-center gap-3 px-3.5 py-2.5 ${i ? "border-t border-slate-100" : ""}`}>
-                <span className="flex h-8 w-11 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{m.code.slice(0, 5)}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-1.5 truncate text-xs font-bold text-slate-700" title={m.name}>
-                    {m.name}
-                    {!stats.enrolled && <span className="rounded bg-slate-100 px-1 py-0.5 text-[8px] font-bold text-slate-400">PAST</span>}
-                  </p>
-                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                    <div className="h-full rounded-full transition-all" style={{ width: `${stats.pct ?? 0}%`, background: t.colour }} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="grid grid-cols-4 gap-1.5 text-center">
+                {ATT_STATUSES.map(s => (
+                  <div key={s.key} className="rounded-lg py-1.5" style={{ background: s.colour + "12" }}>
+                    <p className="text-sm font-extrabold tabular-nums" style={{ color: s.colour }}>{current.overall[s.key] ?? 0}</p>
+                    <p className="text-[9px] font-medium text-slate-400">{s.label}</p>
                   </div>
-                </div>
-                <div className="shrink-0 text-right text-[10px] font-semibold tabular-nums text-slate-400">
-                  <span style={{ color: ATT_STATUSES[0].colour }}>P{stats.P}</span> <span style={{ color: ATT_STATUSES[1].colour }}>L{stats.L}</span> <span style={{ color: ATT_STATUSES[2].colour }}>E{stats.E}</span> <span style={{ color: ATT_STATUSES[3].colour }}>A{stats.A}</span>
-                  <span className="ml-1 text-slate-300">· {stats.marked} marked</span>
-                </div>
-                <span className={`shrink-0 rounded-lg px-2 py-1 text-xs font-extrabold tabular-nums ${t.bg} ${t.text}`}>{fmtPct(stats.pct ?? null)}</span>
+                ))}
               </div>
-            );
-          })}
-          {entries.length === 0 && (
-            <div className="px-4 py-8"><EmptyState Icon={Percent} title="No attendance yet" msg="This student has no marks in the current scope. Take a register, or switch the semester picker on the Registers page." /></div>
-          )}
+              <p className="mt-2 text-[11px] text-slate-400">{current.overall.marked ?? 0} session{(current.overall.marked ?? 0) === 1 ? "" : "s"} marked this term</p>
+            </div>
+          </div>
+          <div className="mt-3 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200/70">
+            {current.modules.map((mr, i) => <ModuleRow key={mr.module.id} mod={mr.module} stats={mr.summary} i={i} />)}
+            {current.modules.length === 0 && <div className="px-4 py-6"><EmptyState Icon={Percent} title="No modules assigned yet" msg="Assign this term's modules to the student (Edit student → Modules)." /></div>}
+          </div>
         </div>
-        <p className="mt-2 text-[11px] text-slate-400">P = Present (2 pts) · L = Late (1) · E = Excused (1) · A = Absent (0). Only marked sessions count.</p>
-      </div>
+      ) : (
+        <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700 ring-1 ring-amber-200">No active term for this student's cohort right now — assign a cohort and set its term dates.</div>
+      )}
+
+      {/* Previous / other terms */}
+      {others.length > 0 && (
+        <div>
+          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Previous assigned modules</p>
+          <div className="space-y-2">
+            {others.map(g => {
+              const key = g.termId || "unassigned";
+              const open = !!openTerms[key];
+              const sb = badgeOf(g);
+              const tone = pctTone(g.overall.pct ?? null);
+              return (
+                <div key={key} className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200/70">
+                  <button onClick={() => setOpenTerms(o => ({ ...o, [key]: !o[key] }))} className="flex w-full items-center gap-2 px-3.5 py-3 text-left transition hover:bg-slate-50">
+                    <ChevronDown size={15} className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+                    <span className="flex-1 truncate text-sm font-bold text-slate-700">{labelOf(g)} <span className="text-[11px] font-medium text-slate-400">· {g.modules.length} module{g.modules.length === 1 ? "" : "s"}</span></span>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${sb.cls}`}>{sb.t}</span>
+                    <span className={`rounded-lg px-2 py-1 text-xs font-extrabold tabular-nums ${tone.bg} ${tone.text}`}>{fmtPct(g.overall.pct ?? null)}</span>
+                  </button>
+                  {open && <div className="border-t border-slate-100">{g.modules.map((mr, i) => <ModuleRow key={mr.module.id} mod={mr.module} stats={mr.summary} i={i} />)}{g.modules.length === 0 && <p className="px-4 py-4 text-center text-xs text-slate-400">No modules.</p>}</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <p className="text-[11px] text-slate-400">The overall counts only the current term (it resets each term). P = Present (2) · L = Late (1) · E = Excused (1) · A = Absent (0). Only marked sessions count.</p>
     </div>
   );
 }
