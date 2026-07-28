@@ -519,12 +519,12 @@ function LeaveLegend({ types = LEAVE_TYPES, className = "" }) {
 }
 
 /* ----- Check-In ----- */
-// Where a check-in can happen — includes Online (remote working). Kept in sync
+// How a check-in happened: Onsite (in a campus) or Online (remote). Kept in sync
 // with the server's validate.js SITES.
-const SITES = ["HND", "FE", "Online"];
-// A staff member's HOME site — physical campuses only, chosen at sign-up. Used by
-// the Staff-tab filter and the Add/Edit Staff form. Matches validate.js HOME_SITES.
-const HOME_SITES = ["HND", "FE"];
+const SITES = ["Onsite", "Online"];
+// A staff member's HOME site — HND, FE or SL, chosen at sign-up. Used by the
+// Staff-tab filter and the Add/Edit Staff form. Matches validate.js HOME_SITES.
+const HOME_SITES = ["HND", "FE", "SL"];
 
 function CheckInScreen({ store, me }) {
   const today = todayISO();
@@ -567,7 +567,7 @@ function CheckInScreen({ store, me }) {
         {!checkedIn && (
           <div className="mt-5 text-left">
             <p className="mb-2 text-center text-xs font-bold uppercase tracking-wide text-slate-400">Where are you working today?</p>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {SITES.map(s => {
                 const active = site === s;
                 return (
@@ -585,7 +585,7 @@ function CheckInScreen({ store, me }) {
           </div>
         )}
         <div className="mt-5">
-          {!checkedIn && <PrimaryBtn onClick={checkIn} disabled={!site} className="w-full !py-3.5 text-base"><LogIn size={20} /> {site ? `Check In at ${site}` : "Choose a site to check in"}</PrimaryBtn>}
+          {!checkedIn && <PrimaryBtn onClick={checkIn} disabled={!site} className="w-full !py-3.5 text-base"><LogIn size={20} /> {site ? `Check In · ${site}` : "Choose onsite or online"}</PrimaryBtn>}
           {checkedIn && !rec.out && <PrimaryBtn onClick={checkOut} colour={MAROON} className="w-full !py-3.5 text-base"><LogOut size={20} /> Check Out</PrimaryBtn>}
           {checkedIn && rec.out && <div className="rounded-xl bg-emerald-50 py-3 text-sm font-semibold text-emerald-700">✓ Your day is complete. Have a great evening!</div>}
         </div>

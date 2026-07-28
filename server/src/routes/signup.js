@@ -35,7 +35,7 @@ router.post("/", async (req, res) => {
   if (!EMAIL_REGEX.test(email)) return res.status(400).json({ error: "Enter a valid email address" });
   if (!jobTitle) return res.status(400).json({ error: "Position is required" });
   if (!dept) return res.status(400).json({ error: "Department is required" });
-  if (!isHomeSite(site)) return res.status(400).json({ error: "Site must be HND or FE" });
+  if (!isHomeSite(site)) return res.status(400).json({ error: "Site must be HND, FE or SL" });
   if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
   // The client checks this too, but the API must not trust the client.
   if (confirmPassword && password !== confirmPassword) return res.status(400).json({ error: "Passwords do not match" });

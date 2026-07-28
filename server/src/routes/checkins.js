@@ -27,7 +27,7 @@ router.get("/", requireAuth, async (req, res) => {
 router.post("/check-in", requireAuth, async (req, res) => {
   const date = today();
   const site = req.body?.site;
-  if (!isSite(site)) return res.status(400).json({ error: "site must be one of HND, FE or Online" });
+  if (!isSite(site)) return res.status(400).json({ error: "site must be Onsite or Online" });
   const existing = await prisma.checkIn.findUnique({ where: { staffId_date: { staffId: req.user.id, date } } });
   if (existing) {
     // A row created by a summary-first save has timeIn === "" — fill in the
@@ -72,7 +72,7 @@ router.put("/", requireAuth, requirePage("checkin"), async (req, res) => {
   if (!isString(staffId)) return res.status(400).json({ error: "staffId must be text" });
   if (!isTime(tIn)) return res.status(400).json({ error: "in must be a time in HH:MM format" });
   if (out != null && out !== "" && !isTime(out)) return res.status(400).json({ error: "out must be a time in HH:MM format" });
-  if (!isSite(site)) return res.status(400).json({ error: "site must be one of HND, FE or Online" });
+  if (!isSite(site)) return res.status(400).json({ error: "site must be Onsite or Online" });
   // Calendar validity, matching PUT /summary. Without it an admin could file a record
   // on 2026-02-30: the staff app rolls it to 2 March while the dashboard filters on
   // the exact string, so nobody can ever find the row to correct it.

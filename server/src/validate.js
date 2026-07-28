@@ -45,12 +45,12 @@ const MAX_TEXT = 2000;
 
 // --- Sites ---
 // Two closed sets, deliberately different:
-//   SITES      — where a CHECK-IN happened. Online is allowed (remote working).
-//   HOME_SITES — a staff member's home site, chosen at sign-up. Physical campuses
-//                only (HND / FE) — a person's base is not "Online".
-// Both fields are optional, so null/undefined always passes.
-const SITES = ["HND", "FE", "Online"];
-const HOME_SITES = ["HND", "FE"];
+//   SITES      — how a CHECK-IN happened: Onsite (in a campus) or Online (remote).
+//   HOME_SITES — a staff member's home site, chosen at sign-up: HND, FE or SL.
+// Both fields are optional, so null/undefined always passes. Older check-ins may
+// carry a legacy value (HND/FE/Online); those aren't re-validated unless re-saved.
+const SITES = ["Onsite", "Online"];
+const HOME_SITES = ["HND", "FE", "SL"];
 const isSite = (v) => v == null || (isString(v) && SITES.includes(v));
 const isHomeSite = (v) => v == null || (isString(v) && HOME_SITES.includes(v));
 

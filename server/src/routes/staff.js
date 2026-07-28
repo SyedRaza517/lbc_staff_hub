@@ -47,7 +47,7 @@ router.post("/", requireAuth, requireAnyPage(["staff", "settings"]), async (req,
   if (!isString(email)) return res.status(400).json({ error: "Email must be text" });
   if (role != null && !isString(role)) return res.status(400).json({ error: "Role must be text" });
   if (dept != null && !isString(dept)) return res.status(400).json({ error: "Department must be text" });
-  if (!isHomeSite(site)) return res.status(400).json({ error: "Site must be HND or FE" });
+  if (!isHomeSite(site)) return res.status(400).json({ error: "Site must be HND, FE or SL" });
   if (!EMAIL_REGEX.test(String(email))) return res.status(400).json({ error: "Invalid email format" });
   // Reject a bad allowance instead of silently substituting 28 — an admin who typed
   // 27.5 or 280 was told the staff member was added and never learned the value was
@@ -94,7 +94,7 @@ router.put("/:id", requireAuth, requireAnyPage(["staff", "settings"]), async (re
   if (role != null && !isString(role)) return res.status(400).json({ error: "Role must be text" });
   if (dept != null && !isString(dept)) return res.status(400).json({ error: "Department must be text" });
   if (email != null && !isString(email)) return res.status(400).json({ error: "Email must be text" });
-  if (!isHomeSite(site)) return res.status(400).json({ error: "Site must be HND or FE" });
+  if (!isHomeSite(site)) return res.status(400).json({ error: "Site must be HND, FE or SL" });
   if (role) data.jobTitle = role;
   if (dept) data.dept = dept;
   // site is a closed set incl. null — allow explicitly clearing it back to "unset".
