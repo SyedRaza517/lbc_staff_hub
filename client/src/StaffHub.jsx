@@ -438,7 +438,7 @@ function HomeGrid({ setScreen, store, me }) {
   const today = todayISO();
   const myToday = store.checkins.find(c => c.staffId === me.id && c.date === today && c.in);
   const pending = store.leave.filter(l => l.staffId === me.id && l.status === "pending").length;
-  const left = store.effectiveAllowance(me.id) - store.usedDays(me.id);
+  const left = store.remaining(me.id);
   // Read-only display values for the hero band.
   const heroStatus = myToday ? (myToday.out ? "Day complete — see you tomorrow" : "You're checked in") : "Not checked in yet";
   const heroIcon = myToday ? (myToday.out ? CheckCircle2 : UserCheck) : Clock;
@@ -603,7 +603,8 @@ function CheckInScreen({ store, me }) {
 function BalanceScreen({ store, me }) {
   const allowance = store.effectiveAllowance(me.id);
   const used = store.usedDays(me.id);
-  const left = allowance - used;
+  const bankUsed = store.bankHolidayDaysUsed();
+  const left = allowance - used - bankUsed;
   const myLeave = store.leave.filter(l => l.staffId === me.id);
   const myAdj = store.adjustments.filter(a => a.staffId === me.id);
   const animLeft = useCountUp(left);
@@ -613,7 +614,7 @@ function BalanceScreen({ store, me }) {
     const days = rows.reduce((sum, l) => sum + daysBetween(l.start, l.end), 0);
     return { ...t, count: rows.length, days };
   }).filter(x => x.count > 0);
-  const usedPct = allowance > 0 ? Math.round((used / allowance) * 100) : 0;
+  const usedPct = allowance > 0 ? Math.round(((used + bankUsed) / allowance) * 100) : 0;
   return (
     <Screen>
       <Card>
@@ -627,9 +628,10 @@ function BalanceScreen({ store, me }) {
           </div>
         </div>
         <p className="mt-2 text-center text-[11px] font-semibold text-slate-400">{usedPct}% of your allowance used</p>
-        <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+        <div className="mt-4 grid grid-cols-2 gap-2 text-center">
           <div className="rounded-xl bg-slate-50 py-2"><p className="text-lg font-extrabold text-slate-700">{allowance}</p><p className="text-[11px] text-slate-400">Allowance</p></div>
-          <div className="rounded-xl py-2" style={{ background: MAROON + "0d" }}><p className="text-lg font-extrabold" style={{ color: MAROON }}>{used}</p><p className="text-[11px] text-slate-400">Used</p></div>
+          <div className="rounded-xl py-2" style={{ background: MAROON + "0d" }}><p className="text-lg font-extrabold" style={{ color: MAROON }}>{used}</p><p className="text-[11px] text-slate-400">Leave used</p></div>
+          <div className="rounded-xl py-2" style={{ background: NAVY + "0d" }}><p className="text-lg font-extrabold" style={{ color: NAVY }}>{bankUsed}</p><p className="text-[11px] text-slate-400">Bank holidays</p></div>
           <div className="rounded-xl bg-emerald-50 py-2"><p className="text-lg font-extrabold text-emerald-600">{left}</p><p className="text-[11px] text-slate-400">Remaining</p></div>
         </div>
         {myAdj.length > 0 && <p className="mt-3 text-center text-[11px] text-slate-400">Includes {store.adjDays(me.id) >= 0 ? "+" : ""}{store.adjDays(me.id)}d HR adjustment</p>}
@@ -692,15 +694,17 @@ function MonthGrid({ store, big }) {
         {Array.from({ length: days }).map((_, i) => {
           const d = i + 1; const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
           const isToday = iso === todayISO(); const evts = approved.filter(l => iso >= l.start && iso <= l.end);
+          const bh = store.bankHolidaySet.get(iso); // bank holiday name, or undefined
           if (big) return (
-            <div key={d} className={`min-h-[78px] rounded-xl border p-1.5 transition-all duration-200 hover:border-blue-200 hover:bg-blue-50/30 hover:shadow-sm ${isToday ? "border-blue-300 bg-blue-50/40 glow-pulse" : "border-slate-100"}`}>
-              <p className={`text-xs font-bold ${isToday ? "text-blue-700" : "text-slate-400"}`}>{d}</p>
+            <div key={d} title={bh || undefined} className={`min-h-[78px] rounded-xl border p-1.5 transition-all duration-200 hover:shadow-sm ${bh ? "border-amber-300 bg-amber-50" : isToday ? "border-blue-300 bg-blue-50/40 glow-pulse" : "border-slate-100 hover:border-blue-200 hover:bg-blue-50/30"}`}>
+              <p className={`text-xs font-bold ${isToday ? "text-blue-700" : bh ? "text-amber-700" : "text-slate-400"}`}>{d}</p>
+              {bh && <div className="mt-0.5 truncate rounded bg-amber-400 px-1 py-0.5 text-[8px] font-bold text-white">🏛 {bh}</div>}
               <div className="mt-1 space-y-0.5">{evts.slice(0, 3).map(e => { const p = store.staff.find(s => s.id === e.staffId); const t = LEAVE_TYPES.find(x => x.key === e.type); return <div key={e.id} className="truncate rounded px-1 py-0.5 text-[9px] font-bold text-white" style={{ background: t.colour }}>{p?.initials} {t.label.split(" ")[0]}</div>; })}{evts.length > 3 && <p className="text-[9px] text-slate-400">+{evts.length - 3}</p>}</div>
             </div>
           );
           return (
-            <div key={d} className={`relative flex h-9 flex-col items-center justify-center rounded-lg text-[13px] transition-all duration-200 ${isToday ? "font-bold text-white glow-pulse" : "text-slate-600 hover:bg-slate-100"}`} style={isToday ? { background: NAVY } : {}}>
-              {d}{evts.length > 0 && <div className="absolute bottom-1 flex gap-0.5">{evts.slice(0, 3).map((e, k) => <span key={k} className="h-1 w-1 rounded-full" style={{ background: LEAVE_TYPES.find(t => t.key === e.type).colour }} />)}</div>}
+            <div key={d} title={bh || undefined} className={`relative flex h-9 flex-col items-center justify-center rounded-lg text-[13px] transition-all duration-200 ${isToday ? "font-bold text-white glow-pulse" : bh ? "bg-amber-100 font-semibold text-amber-700" : "text-slate-600 hover:bg-slate-100"}`} style={isToday ? { background: NAVY } : {}}>
+              {d}{(evts.length > 0 || bh) && <div className="absolute bottom-1 flex gap-0.5">{bh && <span className="h-1 w-1 rounded-full bg-amber-500" />}{evts.slice(0, 2).map((e, k) => <span key={k} className="h-1 w-1 rounded-full" style={{ background: LEAVE_TYPES.find(t => t.key === e.type).colour }} />)}</div>}
             </div>
           );
         })}
@@ -708,6 +712,30 @@ function MonthGrid({ store, big }) {
     </div>
   );
 }
+// A compact list of the current calendar year's bank holidays, flagging which have
+// already passed (and so have been counted against everyone's 28-day allowance).
+function BankHolidayList({ store }) {
+  const year = new Date().getFullYear();
+  const today = todayISO();
+  const list = store.bankHolidays.filter(h => h.date.slice(0, 4) === String(year));
+  if (list.length === 0) return null;
+  const passed = list.filter(h => h.date <= today).length;
+  return (
+    <div className="mt-5">
+      <p className="mb-2 px-1 text-xs font-bold uppercase tracking-wide text-slate-400">Bank holidays {year} · {passed}/{list.length} counted so far</p>
+      <Card className="p-0">
+        {list.map((h, i, a) => { const done = h.date <= today; return (
+          <div key={h.date} className={`flex items-center gap-3 px-4 py-2.5 ${i < a.length - 1 ? "border-b border-slate-100" : ""}`}>
+            <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm ${done ? "bg-amber-100" : "bg-slate-100"}`}>🏛</span>
+            <div className="flex-1"><p className="text-sm font-semibold text-slate-700">{h.name}</p><p className="text-[11px] text-slate-400">{fmtDate(h.date)}</p></div>
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${done ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-400"}`}>{done ? "Counted" : "Upcoming"}</span>
+          </div>
+        ); })}
+      </Card>
+    </div>
+  );
+}
+
 function CalendarScreen({ store }) {
   const approved = store.leave.filter(l => l.status === "approved");
   return (
@@ -717,8 +745,10 @@ function CalendarScreen({ store }) {
         <div className="mt-3 border-t border-slate-100 pt-3">
           <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">Leave types</p>
           <LeaveLegend />
+          <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-400" /> Bank holiday — counts toward your 28 days automatically</div>
         </div>
       </Card>
+      <BankHolidayList store={store} />
       <p className="mb-2 mt-5 px-1 text-xs font-bold uppercase tracking-wide text-slate-400">Who's off (approved)</p>
       <div className="space-y-2">
         {approved.length === 0 && <Card><EmptyState Icon={CalendarCheck} title="No approved leave" msg="Approved absences across the college will appear here." /></Card>}
@@ -743,7 +773,7 @@ function RequestLeaveScreen({ store, me, setScreen }) {
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const days = daysBetween(start, end);
-  const left = store.effectiveAllowance(me.id) - store.usedDays(me.id);
+  const left = store.remaining(me.id);
   // A ref, not just state: two taps in the same tick would both read the old
   // state value, but both see the ref. The whole round trip is a window in which
   // the button is otherwise still live, and a double-tap booked the leave twice.
@@ -1162,7 +1192,7 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
   // Read-only profile stats, all safe.
   const myLeaveCount = store.leave.filter(l => l.staffId === me.id).length;
   const myCheckins = store.checkins.filter(c => c.staffId === me.id && c.in).length;
-  const left = store.effectiveAllowance(me.id) - store.usedDays(me.id);
+  const left = store.remaining(me.id);
   return (
     <Screen>
       <Card className="mb-3 overflow-hidden !p-0">
@@ -1792,9 +1822,10 @@ function AdminBalances({ store }) {
   const filteredStaff = store.staff.filter(s => !ql || s.name.toLowerCase().includes(ql) || (s.dept || "").toLowerCase().includes(ql));
   const paged = usePaged(filteredStaff, 12, ql);
   const exportBalances = () => {
-    const rows = store.staff.map(s => { const base = s.allowance; const adjv = store.adjDays(s.id); const used = store.usedDays(s.id); const remaining = store.effectiveAllowance(s.id) - used; return { staff: s.name, dept: s.dept, base, adj: adjv, used, remaining }; });
+    const bank = store.bankHolidayDaysUsed();
+    const rows = store.staff.map(s => { const base = s.allowance; const adjv = store.adjDays(s.id); const used = store.usedDays(s.id); const remaining = store.remaining(s.id); return { staff: s.name, dept: s.dept, base, adj: adjv, used, bank, remaining }; });
     downloadCSV("holiday-balances.csv", [
-      { key: "staff", label: "Staff" }, { key: "dept", label: "Dept" }, { key: "base", label: "Base allowance" }, { key: "adj", label: "Adjustments" }, { key: "used", label: "Used" }, { key: "remaining", label: "Remaining" },
+      { key: "staff", label: "Staff" }, { key: "dept", label: "Dept" }, { key: "base", label: "Base allowance" }, { key: "adj", label: "Adjustments" }, { key: "used", label: "Leave used" }, { key: "bank", label: "Bank holidays" }, { key: "remaining", label: "Remaining" },
     ], rows);
     store.notify("Exported holiday balances CSV");
   };
@@ -1803,29 +1834,30 @@ function AdminBalances({ store }) {
       <AdminHeader title="Holiday Balances" subtitle="Set allowances and apply adjustments — staff see changes instantly" Icon={Check} action={(() => {
         // Read-only org-wide totals, safe-guarded.
         const totalAllow = store.staff.reduce((a, s) => a + store.effectiveAllowance(s.id), 0);
-        const totalUsed = store.staff.reduce((a, s) => a + store.usedDays(s.id), 0);
-        const pct = totalAllow > 0 ? Math.round((totalUsed / totalAllow) * 100) : 0;
-        return <div className="flex flex-wrap items-center gap-2"><span className="flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 ring-1 ring-blue-200"><Layers size={13} /> {totalUsed}/{totalAllow}d used</span><span className="flex items-center gap-1.5 rounded-full bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600 ring-1 ring-slate-200"><Activity size={13} /> {pct}% org</span><ExportBtn onClick={exportBalances} /></div>;
+        const totalConsumed = store.staff.reduce((a, s) => a + store.usedDays(s.id) + store.bankHolidayDaysUsed(), 0);
+        const pct = totalAllow > 0 ? Math.round((totalConsumed / totalAllow) * 100) : 0;
+        return <div className="flex flex-wrap items-center gap-2"><span className="flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 ring-1 ring-blue-200"><Layers size={13} /> {totalConsumed}/{totalAllow}d used</span><span className="flex items-center gap-1.5 rounded-full bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600 ring-1 ring-slate-200"><Activity size={13} /> {pct}% org</span><ExportBtn onClick={exportBalances} /></div>;
       })()} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200"><Search size={15} className="text-slate-400" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name or dept…" className="bg-transparent text-sm outline-none" /></div>
       </div>
       <div className="overflow-x-auto overflow-y-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 fade-up [-webkit-overflow-scrolling:touch] md:overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400"><tr><th className="px-5 py-3">Staff</th><th className="px-5 py-3">Base</th><th className="px-5 py-3">Adj</th><th className="px-5 py-3">Used</th><th className="px-5 py-3">Remaining</th><th className="px-5 py-3 w-40">Usage</th><th className="px-5 py-3">Actions</th></tr></thead>
+          <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400"><tr><th className="px-5 py-3">Staff</th><th className="px-5 py-3">Base</th><th className="px-5 py-3">Adj</th><th className="px-5 py-3">Used</th><th className="px-5 py-3">Bank</th><th className="px-5 py-3">Remaining</th><th className="px-5 py-3 w-40">Usage</th><th className="px-5 py-3">Actions</th></tr></thead>
           <tbody>
-            {paged.slice.map(s => { const eff = store.effectiveAllowance(s.id); const used = store.usedDays(s.id); const left = eff - used; const adjv = store.adjDays(s.id); const pct = eff > 0 ? Math.round(used / eff * 100) : 0; return (
+            {paged.slice.map(s => { const eff = store.effectiveAllowance(s.id); const used = store.usedDays(s.id); const bank = store.bankHolidayDaysUsed(); const left = eff - used - bank; const adjv = store.adjDays(s.id); const pct = eff > 0 ? Math.round((used + bank) / eff * 100) : 0; return (
               <tr key={s.id} className="border-t border-slate-100 transition-colors duration-150 hover:bg-blue-50/40">
                 <td className="px-5 py-3"><div className="flex items-center gap-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-sm" style={{ background: s.colour }}>{s.initials}</span><div><p className="font-semibold text-slate-700">{s.name}</p><p className="text-[11px] text-slate-400">{s.dept}</p></div></div></td>
                 <td className="px-5 py-3 font-medium text-slate-600">{s.allowance}d</td>
                 <td className="px-5 py-3 font-medium" style={{ color: adjv > 0 ? "#059669" : adjv < 0 ? MAROON : "#94a3b8" }}>{adjv > 0 ? "+" : ""}{adjv}d</td>
                 <td className="px-5 py-3 font-medium" style={{ color: MAROON }}>{used}d</td>
+                <td className="px-5 py-3 font-medium" style={{ color: NAVY }}>{bank}d</td>
                 <td className="px-5 py-3 font-bold text-emerald-600">{left}d</td>
                 <td className="px-5 py-3"><div className="h-2 overflow-hidden rounded-full bg-slate-100 shadow-inner"><div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct > 80 ? `linear-gradient(90deg, ${MAROON}, #c2334d)` : `linear-gradient(90deg, ${NAVY}, #2c54b8)`, transition: "width .8s cubic-bezier(.4,0,.2,1)" }} /></div></td>
                 <td className="px-5 py-3"><div className="flex gap-1"><button onClick={() => { setEditModal(s); setAlw(s.allowance); }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="Edit allowance"><Edit3 size={15} /></button><button onClick={() => setAdjModal(s)} className="rounded-lg p-1.5 text-blue-500 hover:bg-blue-50" title="Adjust days"><SlidersHorizontal size={15} /></button></div></td>
               </tr>
             ); })}
-            {paged.slice.length === 0 && <tr><td colSpan={7} className="px-5 py-10"><EmptyState Icon={Search} title="No staff match" msg="Try a different name or department." /></td></tr>}
+            {paged.slice.length === 0 && <tr><td colSpan={8} className="px-5 py-10"><EmptyState Icon={Search} title="No staff match" msg="Try a different name or department." /></td></tr>}
           </tbody>
         </table>
       </div>
@@ -1854,7 +1886,7 @@ function AdminCalendar({ store }) {
   const openAdd = () => { setForm({ staffId: store.staff[0]?.id || "", type: "annual", start: todayISO(), end: todayISO(), reason: "" }); setModal(true); };
   const days = daysBetween(form.start, form.end);
   const staff = store.staff.find(s => s.id === form.staffId);
-  const remaining = form.staffId ? store.effectiveAllowance(form.staffId) - store.usedDays(form.staffId) : 0;
+  const remaining = form.staffId ? store.remaining(form.staffId) : 0;
   // Paid types draw down the allowance; unpaid does not. Block over-allowance before
   // creating anything, so a rejected approval never leaves a dangling pending request.
   const overAllowance = form.type !== "unpaid" && form.staffId && days > remaining;
@@ -1875,8 +1907,11 @@ function AdminCalendar({ store }) {
         action={<PrimaryBtn onClick={openAdd}><Plus size={16} /> Add holiday</PrimaryBtn>} />
       <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 fade-up">
         <MonthGrid store={store} big />
-        <div className="mt-4 border-t border-slate-100 pt-4"><p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">Leave types</p><LeaveLegend /></div>
+        <div className="mt-4 border-t border-slate-100 pt-4"><p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">Leave types</p><LeaveLegend />
+          <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-400" /> Bank holiday — auto-applied to all staff, counts toward the 28-day allowance</div>
+        </div>
       </div>
+      <BankHolidayList store={store} />
 
       <Modal open={modal} onClose={() => setModal(false)} title="Add holiday">
         <div className="space-y-3">

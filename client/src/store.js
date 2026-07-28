@@ -2,10 +2,12 @@
 // (staff, leave, checkins, docs, adjustments) plus async action methods.
 // After each mutation we refetch the affected collection so both the
 // staff app and the admin dashboard always reflect the live database.
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { api } from "./api";
+import { ukBankHolidaysRange } from "./bankHolidays";
 
 const daysBetween = (a, b) => { const d1 = new Date(a), d2 = new Date(b); if (isNaN(d1) || isNaN(d2)) { console.error("Invalid dates:", a, b); return 0; } return Math.max(1, Math.round((d2 - d1) / 86400000) + 1); };
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export function useApiStore(notify, user) {
   const [staff, setStaff] = useState([]);
@@ -87,6 +89,22 @@ export function useApiStore(notify, user) {
   const usedDays = useCallback((id) => leave.filter((l) => l.staffId === id && l.status === "approved" && l.type !== "unpaid").reduce((s, l) => s + (l.days ?? daysBetween(l.start, l.end)), 0), [leave]);
   const adjDays = useCallback((id) => adjustments.filter((a) => a.staffId === id).reduce((s, a) => s + a.days, 0), [adjustments]);
   const effectiveAllowance = useCallback((id) => { const s = staff.find((x) => x.id === id); return (s?.allowance || 0) + adjDays(id); }, [staff, adjDays]);
+
+  // --- Bank holidays ---
+  // The standard UK (England & Wales) bank holidays, computed for a span of years so
+  // the calendar can page around. These are part of the 28-day allowance: each one
+  // reduces every staff member's balance automatically as its date passes.
+  const thisYear = new Date().getFullYear();
+  const bankHolidays = useMemo(() => ukBankHolidaysRange(thisYear - 1, thisYear + 2), [thisYear]);
+  const bankHolidaySet = useMemo(() => new Map(bankHolidays.map((h) => [h.date, h.name])), [bankHolidays]);
+  const isBankHoliday = useCallback((iso) => bankHolidaySet.has(iso), [bankHolidaySet]);
+  // "As each occurs": bank holidays in THIS calendar year whose date has arrived.
+  const bankHolidayDaysUsed = useCallback(() => {
+    const today = todayISO(); const y = String(thisYear);
+    return bankHolidays.filter((h) => h.date.slice(0, 4) === y && h.date <= today).length;
+  }, [bankHolidays, thisYear]);
+  // Days a staff member has left: allowance − their approved leave − bank holidays so far.
+  const remaining = useCallback((id) => effectiveAllowance(id) - usedDays(id) - bankHolidayDaysUsed(), [effectiveAllowance, usedDays, bankHolidayDaysUsed]);
 
   const refreshInteractions = useCallback(async () => {
     try { setInteractions(await api.listInteractions()); }
@@ -272,7 +290,8 @@ export function useApiStore(notify, user) {
     modules, students, sessions, semesters, programmes, cohorts, terms, unassignedSessions, semesterId, attendance, hndLoaded,
     interactions, interactionsLoaded,
     assessments, assessmentOverview, assessmentsLoaded,
-    usedDays, adjDays, effectiveAllowance,
+    usedDays, adjDays, effectiveAllowance, remaining,
+    bankHolidays, bankHolidaySet, isBankHoliday, bankHolidayDaysUsed,
     notify, currentUser: user, isAdmin,
     ...actions,
   };
