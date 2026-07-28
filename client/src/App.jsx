@@ -302,7 +302,6 @@ function Shell({ user, logout, entry }) {
     : (isAdmin && !handset) ? "admin"
     : "app";
   const [view, setView] = useState(initialView);
-  const [currentStaffId, setCurrentStaffId] = useState(user.id);
   const [toasts, setToasts] = useState([]);
   const [notes, setNotes] = useState([]);
   const [showChangePw, setShowChangePw] = useState(false);
@@ -387,7 +386,7 @@ function Shell({ user, logout, entry }) {
 
       <div key={view} className={handset ? "min-h-0 flex-1" : "fade-up"}>
         {view === "app"
-          ? <StaffApp store={store} currentStaffId={isAdmin ? currentStaffId : user.id} setCurrentStaffId={setCurrentStaffId} logout={logout} onChangePassword={() => setShowChangePw(true)} onSwitchToAdmin={isAdmin ? () => setView("admin") : undefined} />
+          ? <StaffApp store={store} currentStaffId={user.id} logout={logout} onChangePassword={() => setShowChangePw(true)} onSwitchToAdmin={isAdmin ? () => setView("admin") : undefined} />
           : <AdminDashboard store={store} onExitToStaffApp={handset ? () => setView("app") : undefined} />}
       </div>
 

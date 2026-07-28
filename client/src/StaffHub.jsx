@@ -386,9 +386,6 @@ function AppHeader({ me, staff, setCurrentStaffId, screen, setScreen, store, sho
               <p className="text-[15px] font-bold text-white">{me.name}</p>
               <p className="text-[11px] text-white/60">{me.role}</p>
             </div>
-            {store?.isAdmin && <select value={me.id} onChange={e => setCurrentStaffId(e.target.value)} className="rounded-lg border-0 bg-white/15 px-2 py-1 text-[11px] font-semibold text-white outline-none">
-              {staff.map(s => <option key={s.id} value={s.id} className="text-slate-800">{s.name.split(" ")[0]}</option>)}
-            </select>}
           </div>
         </div>
       )}
