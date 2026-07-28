@@ -29,7 +29,7 @@ workflows:
         # Numeric Apple ID of the app from App Store Connect (step 3). Until you
         # have it, the "increment build number" step below will fail — set it first.
         APP_STORE_APPLE_ID: 0000000000
-      node: 20
+      node: 22
       xcode: latest
       cocoapods: default
     scripts:
