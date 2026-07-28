@@ -15,7 +15,7 @@ import { useBackHandler } from "./backButton";
 import { BrandMark } from "./Brand";
 import {
   GraduationCap, LogIn, UserPlus, Mail, Lock, User, Briefcase, Building2,
-  Loader2, XCircle, CheckCircle2, ArrowLeft, ShieldCheck, Wifi, BatteryFull, Clock, MapPin,
+  Loader2, XCircle, CheckCircle2, ArrowLeft, ShieldCheck, Wifi, BatteryFull, Clock, MapPin, Hash,
 } from "lucide-react";
 
 const NAVY = "#1a3a8f", NAVY_DARK = "#14306f", MAROON = "#9e1b32";
@@ -170,7 +170,7 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
 
 function SignUp({ goSignIn }) {
   const [role, setRole] = useState("staff"); // "staff" | "student"
-  const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "", position: "", dept: DEPARTMENTS[0], site: SITES[0] });
+  const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "", position: "", dept: DEPARTMENTS[0], site: SITES[0], collegeId: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -182,13 +182,14 @@ function SignUp({ goSignIn }) {
     setError("");
     if (!form.name.trim()) { setError("Enter your full name."); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) { setError("Enter a valid email address."); return; }
+    if (role === "student" && !form.collegeId.trim()) { setError("Enter your college ID."); return; }
     if (role === "staff" && !form.position.trim()) { setError("Enter your position."); return; }
     if (form.password.length < 8) { setError("Password must be at least 8 characters."); return; }
     if (form.password !== form.confirmPassword) { setError("Passwords do not match."); return; }
     setBusy(true);
     try {
       const payload = role === "student"
-        ? { kind: "student", name: form.name.trim(), email: form.email.trim(), password: form.password, confirmPassword: form.confirmPassword }
+        ? { kind: "student", name: form.name.trim(), email: form.email.trim(), collegeId: form.collegeId.trim(), password: form.password, confirmPassword: form.confirmPassword }
         : { kind: "staff", ...form, name: form.name.trim(), email: form.email.trim() };
       await api.signUp(payload);
       setDone(true);
@@ -215,7 +216,7 @@ function SignUp({ goSignIn }) {
         <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Submitted</p>
         <p className="mt-1 text-xs font-bold text-slate-700">{form.name}</p>
         <p className="text-[11px] text-slate-500">{form.email}</p>
-        <p className="text-[11px] text-slate-500">{role === "student" ? "Student" : `${form.position} · ${form.dept} · ${form.site}`}</p>
+        <p className="text-[11px] text-slate-500">{role === "student" ? `Student · ID ${form.collegeId}` : `${form.position} · ${form.dept} · ${form.site}`}</p>
       </div>
       <button onClick={goSignIn} className="press w-full rounded-xl py-2.5 text-sm font-bold text-white shadow-lg" style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}>
         Back to sign in
@@ -254,6 +255,12 @@ function SignUp({ goSignIn }) {
       <Labelled label="Email" Icon={Mail}>
         <input type="email" value={form.email} onChange={set("email")} disabled={busy} placeholder={role === "student" ? "your college email" : "name@lbc.ac.uk"} autoComplete="email" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
       </Labelled>
+
+      {role === "student" && (
+        <Labelled label="College ID" Icon={Hash}>
+          <input value={form.collegeId} onChange={set("collegeId")} disabled={busy} placeholder="e.g. 100039" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+        </Labelled>
+      )}
 
       {role === "staff" && (<>
       <Labelled label="Position" Icon={Briefcase}>

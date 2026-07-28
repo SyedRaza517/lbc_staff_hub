@@ -132,9 +132,12 @@ model SignupRequest {
   // to / creates a Student account). Student requests only carry name/email/password;
   // the jobTitle/dept/site fields are left blank for them.
   kind         String   @default("staff")
-  // For a student request: the existing Student row this email matched, if any.
-  // Null means no match — the admin decides on approval.
+  // For a student request: the existing Student row it matched, if any (by college
+  // ID first, then email). Null means no match — the admin decides on approval.
   studentId    String?
+  // The student's college ID (their student number). Used to match/verify the
+  // existing student record; blank for staff requests.
+  collegeId    String?
   name         String
   email        String   @unique
   passwordHash String

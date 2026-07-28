@@ -42,19 +42,25 @@ router.post("/", async (req, res) => {
 
   // ---- Student sign-up ----
   if (kind === "student") {
-    const [staffClash, student, existingRequest] = await Promise.all([
+    const collegeId = str(req.body?.collegeId);
+    if (!collegeId) return res.status(400).json({ error: "Your college ID is required" });
+
+    const [staffClash, byRef, byEmail, existingRequest] = await Promise.all([
       prisma.staff.findUnique({ where: { email } }),
+      prisma.student.findUnique({ where: { studentRef: collegeId } }),
       prisma.student.findUnique({ where: { email } }),
       prisma.signupRequest.findUnique({ where: { email } }),
     ]);
+    // Match by college ID first (the stronger identifier), then email.
+    const student = byRef || byEmail;
     // Same generic reply if the email is a staff account, an already-claimed student
     // account, or already has a live request — never reveal which.
     if (staffClash || (student && student.passwordHash) || (existingRequest && existingRequest.status !== "rejected")) return genericOk();
 
-    const data = { kind: "student", studentId: student?.id || null, name, email, passwordHash: hashPassword(password), jobTitle: "", dept: "", site: null, status: "pending", note: null, decidedBy: null, decidedAt: null };
+    const data = { kind: "student", studentId: student?.id || null, collegeId, name, email, passwordHash: hashPassword(password), jobTitle: "", dept: "", site: null, status: "pending", note: null, decidedBy: null, decidedAt: null };
     if (existingRequest) await prisma.signupRequest.update({ where: { id: existingRequest.id }, data });
     else await prisma.signupRequest.create({ data });
-    notifyAdmins({ type: "info", message: `New STUDENT sign-up from ${name}${student ? " (matches an existing student record)" : " (no matching record)"} — awaiting approval`, link: "signups" });
+    notifyAdmins({ type: "info", message: `New STUDENT sign-up from ${name} (ID ${collegeId})${student ? " — matches an existing student record" : " — no matching record"} — awaiting approval`, link: "signups" });
     return genericOk();
   }
 
@@ -129,7 +135,7 @@ router.put("/:id/decision", requireAuth, requirePage("signups"), async (req, res
         ? [prisma.student.update({ where: { id: student.id }, data: { passwordHash: reqRow.passwordHash, active: true, tokenVersion: { increment: 1 } } }),
            prisma.signupRequest.update({ where: { id: reqRow.id }, data: decided })]
         : (() => { const parts = reqRow.name.trim().split(/\s+/); return [
-            prisma.student.create({ data: { firstName: parts[0] || reqRow.name, lastName: parts.slice(1).join(" ") || "", studentRef: "S" + Date.now(), email: reqRow.email, initials: initialsOf(reqRow.name), colour: colourFor(reqRow.email), active: true, passwordHash: reqRow.passwordHash } }),
+            prisma.student.create({ data: { firstName: parts[0] || reqRow.name, lastName: parts.slice(1).join(" ") || "", studentRef: reqRow.collegeId || ("S" + Date.now()), email: reqRow.email, initials: initialsOf(reqRow.name), colour: colourFor(reqRow.email), active: true, passwordHash: reqRow.passwordHash } }),
             prisma.signupRequest.update({ where: { id: reqRow.id }, data: decided })]; })();
       const [savedStudent, updatedReq] = await prisma.$transaction(ops);
       return res.status(201).json({ request: sSignup(updatedReq), student: sStudent(savedStudent) });

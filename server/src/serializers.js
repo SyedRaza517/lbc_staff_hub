@@ -27,7 +27,7 @@ function parseAdminPages(raw) {
 }
 
 const sSignup = (r) => ({
-  id: r.id, kind: r.kind || "staff", studentId: r.studentId ?? null,
+  id: r.id, kind: r.kind || "staff", studentId: r.studentId ?? null, collegeId: r.collegeId ?? null,
   name: r.name, email: r.email, role: r.jobTitle, dept: r.dept, site: r.site ?? null,
   status: r.status, note: r.note, decidedBy: r.decidedBy, decidedAt: r.decidedAt,
   requestedAt: r.createdAt,

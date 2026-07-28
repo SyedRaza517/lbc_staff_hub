@@ -2162,7 +2162,10 @@ function AdminSignups({ store }) {
                 <div className="mt-3 space-y-1 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
                   <p className="flex items-center gap-1.5"><Mail size={12} className="text-slate-400" /> {r.email}</p>
                   {r.kind === "student"
-                    ? <p className="flex items-center gap-1.5"><GraduationCap size={12} className="text-slate-400" /> Student — {r.studentId ? "matches an existing student record" : "no matching record (a new one will be created on approval)"}</p>
+                    ? <>
+                        <p className="flex items-center gap-1.5"><GraduationCap size={12} className="text-slate-400" /> Student{r.collegeId ? ` · College ID ${r.collegeId}` : ""}</p>
+                        <p className="flex items-center gap-1.5 text-slate-400">{r.studentId ? "Matches an existing student record" : "No matching record — a new one will be created on approval"}</p>
+                      </>
                     : <>
                         <p className="flex items-center gap-1.5"><Briefcase size={12} className="text-slate-400" /> {r.role}</p>
                         <p className="flex items-center gap-1.5"><Building2 size={12} className="text-slate-400" /> {r.dept}</p>
@@ -2217,7 +2220,7 @@ function AdminSignups({ store }) {
           <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600 ring-1 ring-slate-200">
             <p className="text-sm font-bold text-slate-700">{modal?.req.name}</p>
             <p>{modal?.req.email}</p>
-            <p>{modal?.req.kind === "student" ? "Student" : `${modal?.req.role} · ${modal?.req.dept}`}</p>
+            <p>{modal?.req.kind === "student" ? `Student${modal?.req.collegeId ? ` · College ID ${modal.req.collegeId}` : ""}` : `${modal?.req.role} · ${modal?.req.dept}`}</p>
           </div>
 
           {modal?.action === "approved" ? (
