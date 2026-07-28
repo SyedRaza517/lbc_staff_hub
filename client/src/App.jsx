@@ -8,6 +8,7 @@ import MobileAuth from "./MobileAuth";
 import ResetPasswordPage from "./ResetPassword";
 import AcceptInvite from "./AcceptInvite";
 import { useIsHandset, isNativeApp } from "./PhoneShell";
+import { BrandMark } from "./Brand";
 import BiometricGate, { useAppLock, BiometricSetupPrompt } from "./BiometricGate";
 import { StaffApp, AdminDashboard } from "./StaffHub";
 import { LogOut, CheckCircle2, XCircle, Sparkles, Loader2, GraduationCap, Clock, KeyRound, Lock, ShieldCheck, X, WifiOff } from "lucide-react";
@@ -363,7 +364,7 @@ function Shell({ user, logout, entry }) {
       {!(handset && view === "app") && (
       <div className={`animated-gradient slide-down z-50 flex shrink-0 items-center gap-2 px-3 py-2 text-xs text-white shadow-lg ${handset ? "" : "sticky top-0"}`} style={{ background: "linear-gradient(90deg, #0f172a 0%, #14306f 50%, #0f172a 100%)", backgroundSize: "220% 220%", ...(handset ? { paddingTop: "max(env(safe-area-inset-top), 8px)" } : {}) }}>
         <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/15"><GraduationCap size={15} className="text-white" /></div>
+          <div className="flex h-7 w-8 items-center justify-center rounded-lg bg-white/95 ring-1 ring-white/15"><BrandMark size={20} /></div>
           <span className="hidden font-extrabold tracking-tight text-white sm:inline" style={{ fontFamily: "'Lora', serif" }}>LBC</span>
         </div>
         <div className="flex flex-1 items-center justify-center gap-2">
@@ -371,8 +372,6 @@ function Shell({ user, logout, entry }) {
               gone now: the front-door Landing screen already asks which one to
               open, so switching again from the header was redundant. */}
           <span className="font-semibold tracking-wide text-slate-200">London Brookes College · Staff Hub</span>
-          <span className="hidden text-slate-400 md:inline">·</span>
-          <span className="hidden text-[11px] text-slate-400 md:inline">© 2026 Syed Muhammad Raza</span>
         </div>
         <div className="flex items-center gap-2.5">
           <LiveClock />
@@ -391,6 +390,14 @@ function Shell({ user, logout, entry }) {
           ? <StaffApp store={store} currentStaffId={user.id} logout={logout} onChangePassword={() => setShowChangePw(true)} onSwitchToAdmin={isAdmin ? () => setView("admin") : undefined} />
           : <AdminDashboard store={store} onExitToStaffApp={handset ? () => setView("app") : undefined} />}
       </div>
+
+      {/* App footer — carries the copyright. Hidden on the mobile staff app, which
+          has its own footer on the "More" screen. */}
+      {!(handset && view === "app") && (
+        <footer className="shrink-0 border-t border-slate-200 bg-white/70 px-4 py-3 text-center text-[11px] text-slate-400">
+          © {new Date().getFullYear()} Syed Muhammad Raza · London Brookes College · Staff Hub
+        </footer>
+      )}
 
       {/* The overlay below is scrollable and top-aligned: on a landscape iPhone
           (320px tall) a centred, non-scrolling overlay pushed the close button —

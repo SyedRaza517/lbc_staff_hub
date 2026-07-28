@@ -1244,7 +1244,8 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
         </button>
       )}
 
-      <p className="mt-4 text-center text-[11px] text-slate-400">© {new Date().getFullYear()} London Brookes College · Staff Hub</p>
+      <p className="mt-4 text-center text-[11px] text-slate-400">London Brookes College · Staff Hub</p>
+      <p className="text-center text-[11px] text-slate-400">© {new Date().getFullYear()} Syed Muhammad Raza</p>
 
       <Modal open={showDelete} onClose={() => setShowDelete(false)} title="Delete my account">
         <DeleteAccount user={me} onCancel={() => setShowDelete(false)} />
