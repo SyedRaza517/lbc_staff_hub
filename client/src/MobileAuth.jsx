@@ -168,6 +168,7 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
 /* ============================== sign up ============================== */
 
 function SignUp({ goSignIn }) {
+  const [role, setRole] = useState("staff"); // "staff" | "student"
   const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "", position: "", dept: DEPARTMENTS[0], site: SITES[0] });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -180,12 +181,15 @@ function SignUp({ goSignIn }) {
     setError("");
     if (!form.name.trim()) { setError("Enter your full name."); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) { setError("Enter a valid email address."); return; }
-    if (!form.position.trim()) { setError("Enter your position."); return; }
+    if (role === "staff" && !form.position.trim()) { setError("Enter your position."); return; }
     if (form.password.length < 8) { setError("Password must be at least 8 characters."); return; }
     if (form.password !== form.confirmPassword) { setError("Passwords do not match."); return; }
     setBusy(true);
     try {
-      await api.signUp({ ...form, name: form.name.trim(), email: form.email.trim() });
+      const payload = role === "student"
+        ? { kind: "student", name: form.name.trim(), email: form.email.trim(), password: form.password, confirmPassword: form.confirmPassword }
+        : { kind: "staff", ...form, name: form.name.trim(), email: form.email.trim() };
+      await api.signUp(payload);
       setDone(true);
     } catch (err) {
       setError(err.message || "Could not send your request.");
@@ -210,7 +214,7 @@ function SignUp({ goSignIn }) {
         <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Submitted</p>
         <p className="mt-1 text-xs font-bold text-slate-700">{form.name}</p>
         <p className="text-[11px] text-slate-500">{form.email}</p>
-        <p className="text-[11px] text-slate-500">{form.position} · {form.dept} · {form.site}</p>
+        <p className="text-[11px] text-slate-500">{role === "student" ? "Student" : `${form.position} · ${form.dept} · ${form.site}`}</p>
       </div>
       <button onClick={goSignIn} className="press w-full rounded-xl py-2.5 text-sm font-bold text-white shadow-lg" style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}>
         Back to sign in
@@ -225,14 +229,32 @@ function SignUp({ goSignIn }) {
         <p className="text-xs text-slate-500">An administrator approves new accounts before you can sign in.</p>
       </div>
 
+      {/* First choose who's signing up — this decides what we ask for. */}
+      <div>
+        <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">I am a…</p>
+        <div className="grid grid-cols-2 gap-2">
+          {[{ k: "staff", label: "Staff", Icon: Briefcase }, { k: "student", label: "Student", Icon: GraduationCap }].map(({ k, label, Icon }) => {
+            const on = role === k;
+            return (
+              <button key={k} type="button" onClick={() => setRole(k)} disabled={busy}
+                className={`press flex items-center justify-center gap-2 rounded-xl border-2 py-2.5 text-sm font-bold transition ${on ? "text-white shadow-md" : "border-slate-200 bg-white text-slate-600"}`}
+                style={on ? { background: `linear-gradient(135deg, ${NAVY}, ${MAROON})`, borderColor: "transparent" } : {}}>
+                <Icon size={16} /> {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <Labelled label="Full name" Icon={User}>
-        <input value={form.name} onChange={set("name")} disabled={busy} placeholder="Jane Whitfield" autoComplete="name" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+        <input value={form.name} onChange={set("name")} disabled={busy} placeholder={role === "student" ? "Aditi Adeyemi" : "Jane Whitfield"} autoComplete="name" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
       </Labelled>
 
       <Labelled label="Email" Icon={Mail}>
-        <input type="email" value={form.email} onChange={set("email")} disabled={busy} placeholder="name@lbc.ac.uk" autoComplete="email" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+        <input type="email" value={form.email} onChange={set("email")} disabled={busy} placeholder={role === "student" ? "your college email" : "name@lbc.ac.uk"} autoComplete="email" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
       </Labelled>
 
+      {role === "staff" && (<>
       <Labelled label="Position" Icon={Briefcase}>
         <input value={form.position} onChange={set("position")} disabled={busy} placeholder="Lecturer" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
       </Labelled>
@@ -248,6 +270,9 @@ function SignUp({ goSignIn }) {
           {SITES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </Labelled>
+      </>)}
+
+      {role === "student" && <p className="rounded-xl bg-blue-50 px-3 py-2 text-[11px] leading-relaxed text-blue-700 ring-1 ring-blue-100">Use the email the college has on file for you, so your attendance and results link to your account.</p>}
 
       <Labelled label="Password" Icon={Lock}>
         <input type="password" value={form.password} onChange={set("password")} disabled={busy} autoComplete="new-password" className={inputClass} style={{ "--tw-ring-color": NAVY }} />

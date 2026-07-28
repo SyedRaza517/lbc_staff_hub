@@ -1,0 +1,222 @@
+import React, { useState, useEffect } from "react";
+import PhoneShell from "./PhoneShell";
+import { BrandMark } from "./Brand";
+import { api } from "./api";
+import {
+  GraduationCap, Percent, Award, MessageSquare, LogOut, ChevronLeft,
+  Loader2, Send, CheckCircle2, ClipboardList, Info, BookOpen, ArrowRight,
+} from "lucide-react";
+
+const NAVY = "#1a3a8f";
+const NAVY_DARK = "#14306f";
+const MAROON = "#9e1b32";
+const fmtPct = (p) => (p == null ? "—" : `${p}%`);
+const pctTone = (p) => p == null ? { bg: "bg-slate-100", text: "text-slate-400", colour: "#94a3b8" }
+  : p >= 85 ? { bg: "bg-emerald-100", text: "text-emerald-700", colour: "#059669" }
+    : p >= 70 ? { bg: "bg-amber-100", text: "text-amber-700", colour: "#d97706" }
+      : { bg: "bg-rose-100", text: "text-rose-700", colour: "#e11d48" };
+const fmtDate = (iso) => { if (!iso) return null; const [y, m, d] = iso.split("-"); const mm = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1] || m; return `${Number(d)} ${mm} ${y}`; };
+const ATT = [{ key: "P", label: "Present", colour: "#059669" }, { key: "L", label: "Late", colour: "#d97706" }, { key: "E", label: "Excused", colour: "#7c3aed" }, { key: "A", label: "Absent", colour: "#e11d48" }];
+
+const Screen = ({ children }) => <div className="space-y-3 p-4">{children}</div>;
+const Card = ({ children, className = "" }) => <div className={`rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 ${className}`}>{children}</div>;
+const Loading = () => <div className="flex justify-center p-10"><Loader2 className="animate-spin text-slate-300" size={28} /></div>;
+const ErrBox = ({ children }) => <Card className="!bg-rose-50 !ring-rose-200 text-sm font-semibold text-rose-600">{children}</Card>;
+
+export default function StudentApp({ user, logout }) {
+  const [screen, setScreen] = useState("home");
+  const title = { home: "Student Hub", attendance: "My Attendance", assessments: "My Results", query: "Ask the College" }[screen];
+  return (
+    <PhoneShell header={<Header title={title} screen={screen} setScreen={setScreen} user={user} logout={logout} />}>
+      {screen === "home" && <Home setScreen={setScreen} user={user} />}
+      {screen === "attendance" && <AttendanceScreen />}
+      {screen === "assessments" && <AssessmentsScreen />}
+      {screen === "query" && <QueryScreen />}
+    </PhoneShell>
+  );
+}
+
+function Header({ title, screen, setScreen, user, logout }) {
+  return (
+    <div className="relative z-20 pt-2" style={{ background: `linear-gradient(160deg, ${NAVY} 0%, ${NAVY_DARK} 100%)` }}>
+      <div className="flex items-center gap-2 px-3 pb-2 pt-1">
+        {screen !== "home"
+          ? <button onClick={() => setScreen("home")} aria-label="Back" className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"><ChevronLeft size={22} /></button>
+          : <div className="flex h-11 w-12 shrink-0 items-center justify-center rounded-md bg-white px-1"><BrandMark size={26} /></div>}
+        <div className="min-w-0 flex-1 text-center"><h1 className="truncate text-lg font-extrabold tracking-wide text-white">{title}</h1></div>
+        <button onClick={logout} aria-label="Sign out" className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"><LogOut size={18} /></button>
+      </div>
+      {screen === "home" && (
+        <div className="px-4 pb-5">
+          <div className="flex items-center gap-3 rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl text-base font-bold text-white shadow-lg ring-2 ring-white/20" style={{ background: user.colour || MAROON }}>{user.initials || "S"}</div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-white/70">Welcome</p>
+              <p className="truncate text-[15px] font-bold text-white">{user.name}</p>
+              <p className="truncate text-[11px] text-white/60">{user.studentRef ? `Student · ${user.studentRef}` : "Student"}</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Home({ setScreen, user }) {
+  const tiles = [
+    { key: "attendance", label: "My Attendance", sub: "Your attendance by module", Icon: Percent, c: NAVY },
+    { key: "assessments", label: "My Results", sub: "Assessments & grades", Icon: Award, c: "#0d7a5f" },
+    { key: "query", label: "Ask the College", sub: "Send a query to admin", Icon: MessageSquare, c: MAROON },
+  ];
+  return (
+    <Screen>
+      <p className="px-1 text-xs font-bold uppercase tracking-wide text-slate-400">What would you like to do?</p>
+      <div className="space-y-2.5">
+        {tiles.map(({ key, label, sub, Icon, c }) => (
+          <button key={key} onClick={() => setScreen(key)} className="press flex w-full items-center gap-3.5 rounded-2xl bg-white p-4 text-left shadow-sm ring-1 ring-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-md">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-white shadow-sm" style={{ background: c }}><Icon size={22} /></span>
+            <div className="flex-1"><p className="text-sm font-extrabold text-slate-700">{label}</p><p className="text-[11px] text-slate-400">{sub}</p></div>
+            <ArrowRight size={18} className="text-slate-300" />
+          </button>
+        ))}
+      </div>
+    </Screen>
+  );
+}
+
+/* -------- Attendance -------- */
+function ModuleAtt({ mr, ended }) {
+  const s = mr.summary; const t = pctTone(s.pct);
+  return (
+    <div className="flex items-center gap-3 border-t border-slate-100 px-3.5 py-2.5 first:border-t-0">
+      <span className="flex h-8 w-11 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{(mr.module.code || "?").slice(0, 5)}</span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-bold text-slate-700" title={mr.module.name}>{mr.module.name}</p>
+        {ended
+          ? <p className="mt-0.5 text-[10px] font-medium text-slate-400">Ended {fmtDate(mr.endDate)}</p>
+          : <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${s.pct ?? 0}%`, background: t.colour }} /></div>}
+      </div>
+      <span className="shrink-0 text-right text-[10px] font-semibold tabular-nums text-slate-400">{s.marked} marked</span>
+      <span className={`shrink-0 rounded-lg px-2 py-1 text-xs font-extrabold tabular-nums ${t.bg} ${t.text}`}>{fmtPct(s.pct)}</span>
+    </div>
+  );
+}
+function AttendanceScreen() {
+  const [data, setData] = useState(null); const [err, setErr] = useState("");
+  useEffect(() => { let off = false; api.studentAttendance().then(d => !off && setData(d)).catch(e => !off && setErr(e.message || "Could not load attendance")); return () => { off = true; }; }, []);
+  if (err) return <Screen><ErrBox>{err}</ErrBox></Screen>;
+  if (!data) return <Loading />;
+  const cur = data.current || { modules: [], overall: {} };
+  const o = cur.overall || {}; const tone = pctTone(o.pct);
+  const R = 42, C = 2 * Math.PI * R;
+  return (
+    <Screen>
+      <Card className="!bg-slate-50 ring-emerald-200">
+        <p className="mb-3 text-sm font-extrabold text-slate-800">Current modules · overall</p>
+        <div className="flex items-center gap-4">
+          <div className="relative h-24 w-24 shrink-0">
+            <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90"><circle cx="60" cy="60" r={R} fill="none" stroke="#e2e8f0" strokeWidth="12" /><circle cx="60" cy="60" r={R} fill="none" stroke={tone.colour} strokeWidth="12" strokeLinecap="round" strokeDasharray={`${C}`} strokeDashoffset={`${C * (1 - (o.pct ?? 0) / 100)}`} style={{ transition: "stroke-dashoffset 1s ease" }} /></svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center"><span className="text-xl font-extrabold tabular-nums" style={{ color: tone.colour }}>{fmtPct(o.pct)}</span><span className="text-[10px] text-slate-400">overall</span></div>
+          </div>
+          <div className="grid flex-1 grid-cols-4 gap-1.5 text-center">
+            {ATT.map(a => <div key={a.key} className="rounded-lg py-1.5" style={{ background: a.colour + "12" }}><p className="text-sm font-extrabold tabular-nums" style={{ color: a.colour }}>{o[a.key] ?? 0}</p><p className="text-[9px] text-slate-400">{a.label}</p></div>)}
+          </div>
+        </div>
+        <div className="mt-3 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200/70">
+          {cur.modules.map(mr => <ModuleAtt key={mr.module.id} mr={mr} />)}
+          {cur.modules.length === 0 && <p className="px-4 py-6 text-center text-xs text-slate-400">No current modules yet.</p>}
+        </div>
+      </Card>
+      {data.previous && data.previous.length > 0 && (
+        <div>
+          <p className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">Previous modules · {data.previous.length}</p>
+          <Card className="!p-0 overflow-hidden">{data.previous.map(mr => <ModuleAtt key={mr.module.id} mr={mr} ended />)}</Card>
+        </div>
+      )}
+      <p className="px-1 text-[11px] text-slate-400">P = Present (2) · L = Late (1) · E = Excused (1) · A = Absent (0). Only marked sessions count.</p>
+    </Screen>
+  );
+}
+
+/* -------- Assessments -------- */
+function AssessmentsScreen() {
+  const [data, setData] = useState(null); const [err, setErr] = useState("");
+  useEffect(() => { let off = false; api.studentAssessments().then(d => !off && setData(d)).catch(e => !off && setErr(e.message || "Could not load results")); return () => { off = true; }; }, []);
+  if (err) return <Screen><ErrBox>{err}</ErrBox></Screen>;
+  if (!data) return <Loading />;
+  const tone = pctTone(data.averagePct);
+  return (
+    <Screen>
+      <Card className="text-center">
+        <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Overall average</p>
+        <p className="mt-1 text-4xl font-extrabold tabular-nums" style={{ color: tone.colour }}>{fmtPct(data.averagePct)}</p>
+        <p className="text-sm font-bold" style={{ color: tone.colour }}>{data.averageGrade || "Not graded yet"}</p>
+        <p className="mt-1 text-[11px] text-slate-400">{data.graded} of {data.count} assessment{data.count === 1 ? "" : "s"} graded</p>
+      </Card>
+      <div className="space-y-2">
+        {data.assessments.map(a => { const t = pctTone(a.pct); return (
+          <Card key={a.id} className="!p-3.5">
+            <div className="flex items-start gap-2">
+              <span className="mt-0.5 flex h-7 w-11 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{(a.moduleCode || "?").slice(0, 5)}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-slate-700">{a.title}</p>
+                <p className="truncate text-[11px] text-slate-400">{a.moduleName} · {a.type}{a.dueDate ? ` · due ${fmtDate(a.dueDate)}` : ""}</p>
+              </div>
+              {a.marks == null
+                ? <span className="shrink-0 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-400">Pending</span>
+                : <span className={`shrink-0 rounded-lg px-2 py-1 text-xs font-extrabold tabular-nums ${t.bg} ${t.text}`}>{a.marks}/{a.maxMarks} · {a.grade}</span>}
+            </div>
+            {a.feedback ? <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500">{a.feedback}</p> : null}
+          </Card>
+        ); })}
+        {data.assessments.length === 0 && <Card className="text-center"><p className="py-6 text-xs text-slate-400">No assessments assigned yet.</p></Card>}
+      </div>
+    </Screen>
+  );
+}
+
+/* -------- Query to admin -------- */
+function QueryScreen() {
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState("");
+  const submit = async () => {
+    setErr("");
+    if (message.trim().length < 3) { setErr("Please write your query."); return; }
+    setBusy(true);
+    try { await api.submitStudentQuery(subject.trim() || "Student query", message.trim()); setDone(true); }
+    catch (e) { setErr(e.message || "Could not send your query."); }
+    finally { setBusy(false); }
+  };
+  if (done) return (
+    <Screen>
+      <Card className="text-center">
+        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 ring-4 ring-emerald-50"><CheckCircle2 size={34} className="text-emerald-600" /></div>
+        <p className="text-lg font-extrabold" style={{ color: NAVY }}>Query sent</p>
+        <p className="mt-1 text-sm text-slate-500">The college team has received your message and will follow up.</p>
+        <button onClick={() => { setDone(false); setSubject(""); setMessage(""); }} className="press mt-4 w-full rounded-xl border-2 border-slate-200 py-2.5 text-sm font-bold text-slate-600">Send another</button>
+      </Card>
+    </Screen>
+  );
+  return (
+    <Screen>
+      <Card>
+        <p className="flex items-center gap-1.5 text-[11px] leading-relaxed text-slate-500"><Info size={13} className="shrink-0 text-blue-500" /> Send a question or request to the college administrators. They'll see it and follow up with you.</p>
+        <div className="mt-3">
+          <label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Subject</label>
+          <input value={subject} onChange={e => setSubject(e.target.value)} disabled={busy} placeholder="e.g. Attendance query" className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2" style={{ "--tw-ring-color": NAVY }} />
+        </div>
+        <div className="mt-3">
+          <label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Your query</label>
+          <textarea value={message} onChange={e => setMessage(e.target.value)} disabled={busy} rows={6} placeholder="Write your question or request here…" className="mt-1 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2" style={{ "--tw-ring-color": NAVY }} />
+        </div>
+        {err && <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">{err}</p>}
+        <button onClick={submit} disabled={busy} className="press mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white shadow-lg disabled:opacity-60" style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}>
+          {busy ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Send to college</>}
+        </button>
+      </Card>
+    </Screen>
+  );
+}

@@ -9,6 +9,7 @@ import ResetPasswordPage from "./ResetPassword";
 import AcceptInvite from "./AcceptInvite";
 import { useIsHandset, isNativeApp } from "./PhoneShell";
 import { BrandMark } from "./Brand";
+import StudentApp from "./StudentApp";
 import BiometricGate, { useAppLock, BiometricSetupPrompt } from "./BiometricGate";
 import { StaffApp, AdminDashboard } from "./StaffHub";
 import { LogOut, CheckCircle2, XCircle, Sparkles, Loader2, GraduationCap, Clock, KeyRound, Lock, ShieldCheck, X, WifiOff } from "lucide-react";
@@ -279,6 +280,10 @@ export default function App() {
       logout={logout}
     />
   );
+  // Students get their own app — attendance, results, and a query form. It's a
+  // separate world from the staff/admin Shell below.
+  if (user.kind === "student") return (<><style>{GLOBAL_STYLE}</style><StudentApp user={user} logout={logout} /></>);
+
   // Someone who came in through the staff app lands in the staff app, even if
   // they're an admin — otherwise picking "Staff App" would drop them on the dashboard.
   return (

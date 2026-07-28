@@ -80,6 +80,12 @@ export const api = {
   signUp: (data) => request("/signup", { method: "POST", body: data }),
   listSignups: (status) => request(`/signup${status ? `?status=${status}` : ""}`),
   decideSignup: (id, status, note, allowance) => request(`/signup/${id}/decision`, { method: "PUT", body: { status, note, allowance } }),
+
+  // student app (each is scoped to the signed-in student on the server)
+  studentMe: () => request("/student/me"),
+  studentAttendance: () => request("/student/me/attendance"),
+  studentAssessments: () => request("/student/me/assessments"),
+  submitStudentQuery: (subject, message) => request("/student/me/query", { method: "POST", body: { subject, message } }),
   // notifications
   listNotifications: () => request("/notifications"),
   markNotificationsRead: () => request("/notifications/read", { method: "PUT" }),
