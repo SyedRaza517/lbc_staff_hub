@@ -4,6 +4,7 @@ const { sLeave } = require("../serializers");
 const { requireAuth, requireAnyPage } = require("../auth");
 const { notifyStaff, notifyAdmins } = require("../notify");
 const { localDate } = require("../clock");
+const { allDatesAreBankHolidays } = require("../bankHolidays");
 
 // Local (London) date, not the server's UTC date — so a request made just after
 // midnight BST is filed under the correct day, not the previous one.
@@ -69,12 +70,22 @@ router.post("/", requireAuth, async (req, res) => {
     where: { staffId: targetStaff, type, start, end, status: "pending" },
   });
   if (duplicate) return res.status(200).json(sLeave(duplicate));
+  // A request that falls ENTIRELY on bank holiday(s) needs no manager decision —
+  // those days are already off for everyone — so it's created pre-approved and no
+  // approval notification is raised. Bank-holiday days aren't charged either (the
+  // client excludes them from the allowance), so this is effectively a free record.
+  const autoApprove = allDatesAreBankHolidays(start, end);
   try {
     const rec = await prisma.leave.create({
-      data: { staffId: targetStaff, type, start, end, days: daysBetween(start, end), reason: reason || "—", status: "pending", requestedAt: today() },
+      data: {
+        staffId: targetStaff, type, start, end, days: daysBetween(start, end), reason: reason || "—",
+        requestedAt: today(),
+        status: autoApprove ? "approved" : "pending",
+        ...(autoApprove ? { decidedBy: "Bank holiday (automatic)", decidedAt: today() } : {}),
+      },
     });
-    // Let admins know there's a new request to review (best-effort, non-blocking).
-    notifyAdmins({ type: "info", message: `New ${type} leave request from ${exists.name}`, link: "approvals" });
+    // Only a genuine pending request needs a manager's attention.
+    if (!autoApprove) notifyAdmins({ type: "info", message: `New ${type} leave request from ${exists.name}`, link: "approvals" });
     res.status(201).json(sLeave(rec));
   } catch (e) {
     res.status(400).json({ error: "Could not create leave request" });

@@ -771,9 +771,15 @@ function RequestLeaveScreen({ store, me, setScreen }) {
   const [end, setEnd] = useState(todayISO());
   const [reason, setReason] = useState("");
   const [done, setDone] = useState(false);
+  const [autoOk, setAutoOk] = useState(false);
   const [busy, setBusy] = useState(false);
   const days = daysBetween(start, end);
   const left = store.remaining(me.id);
+  // Bank holidays inside the range are already days off for everyone: they aren't
+  // charged, and a request made up ENTIRELY of them is approved automatically.
+  const bankInRange = store.bankHolidays.filter(h => h.date >= start && h.date <= end).length;
+  const allBank = days > 0 && bankInRange >= days;
+  const chargedDays = Math.max(0, days - bankInRange);
   // A ref, not just state: two taps in the same tick would both read the old
   // state value, but both see the ref. The whole round trip is a window in which
   // the button is otherwise still live, and a double-tap booked the leave twice.
@@ -782,7 +788,7 @@ function RequestLeaveScreen({ store, me, setScreen }) {
     if (sending.current) return;
     sending.current = true;
     setBusy(true);
-    try { await store.requestLeave({ type, start, end, reason }); setDone(true); }
+    try { await store.requestLeave({ type, start, end, reason }); setAutoOk(allBank); setDone(true); }
     catch (e) {}
     finally { sending.current = false; setBusy(false); }
   };
@@ -790,8 +796,8 @@ function RequestLeaveScreen({ store, me, setScreen }) {
     <Screen>
       <Card className="text-center">
         <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 ring-4 ring-emerald-50 bounce-in"><CheckCircle2 size={36} className="text-emerald-600" /></div>
-        <p className="text-xl font-extrabold" style={{ color: NAVY }}>Request Submitted</p>
-        <p className="mt-1 text-sm text-slate-500">Your manager has been notified. Track it under Holiday Balance.</p>
+        <p className="text-xl font-extrabold" style={{ color: NAVY }}>{autoOk ? "Approved Automatically" : "Request Submitted"}</p>
+        <p className="mt-1 text-sm text-slate-500">{autoOk ? "That's a bank holiday — approved automatically, no manager needed. See it under Holiday Balance." : "Your manager has been notified. Track it under Holiday Balance."}</p>
         <div className="mt-5 flex gap-2"><PrimaryBtn onClick={() => setScreen("home")} className="flex-1">Back to Hub</PrimaryBtn><button onClick={() => { setDone(false); setReason(""); }} className="flex-1 rounded-xl border-2 border-slate-200 py-2.5 text-sm font-bold text-slate-600">New request</button></div>
       </Card>
     </Screen>
@@ -812,10 +818,12 @@ function RequestLeaveScreen({ store, me, setScreen }) {
           <Field label="To"><input type="date" value={end} min={start} onChange={e => setEnd(e.target.value)} className={inputCls} /></Field>
         </div>
         <div className="mt-4"><Field label="Reason (optional)"><textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Add a short note for your manager…" className={inputCls + " resize-none"} /></Field></div>
-        <div className="mt-4 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5 text-sm"><span className="text-slate-500">Duration</span><span className="font-bold" style={{ color: NAVY }}>{days} day{days > 1 ? "s" : ""}</span></div>
-        {days > left && <div className="mt-2 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600"><AlertCircle size={15} /> Exceeds your {left} remaining days</div>}
-        <PrimaryBtn onClick={submit} disabled={busy || days > left} className="mt-5 w-full !py-3.5">
-          {busy ? <><Loader2 size={18} className="animate-spin" /> Submitting…</> : <><Plus size={18} /> Submit Request</>}
+        <div className="mt-4 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5 text-sm"><span className="text-slate-500">Duration</span><span className="font-bold" style={{ color: NAVY }}>{days} day{days > 1 ? "s" : ""}{bankInRange > 0 && !allBank ? ` · ${chargedDays} charged` : ""}</span></div>
+        {allBank
+          ? <div className="mt-2 flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700"><Info size={15} /> Bank holiday — approved automatically, no manager approval needed.</div>
+          : chargedDays > left && <div className="mt-2 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600"><AlertCircle size={15} /> Exceeds your {left} remaining days</div>}
+        <PrimaryBtn onClick={submit} disabled={busy || (!allBank && chargedDays > left)} className="mt-5 w-full !py-3.5">
+          {busy ? <><Loader2 size={18} className="animate-spin" /> Submitting…</> : allBank ? <><CheckCircle2 size={18} /> Confirm (auto-approved)</> : <><Plus size={18} /> Submit Request</>}
         </PrimaryBtn>
       </Card>
     </Screen>
