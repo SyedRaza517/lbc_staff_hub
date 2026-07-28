@@ -28,6 +28,11 @@ workflows:
         BUNDLE_ID: "uk.ac.lbc.staffhub"
         # Numeric Apple ID of the app from App Store Connect (step 3). Until you
         # have it, the "increment build number" step below will fail — set it first.
+                # The packaged app has no usable host (capacitor://), so the API URL MUST be
+        # baked in at build time. .env.production is gitignored and never reaches
+        # this cloud build, so set it here explicitly — otherwise the app falls back
+        # to http://localhost and every request dies with "Load failed" on the phone.
+        VITE_API_URL: "https://lbc-staff-hub-api.onrender.com/api"
         APP_STORE_APPLE_ID: 0000000000
       node: 22
       xcode: latest
