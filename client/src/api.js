@@ -26,8 +26,23 @@ const BASE = resolveBase();
 // consider moving the JWT to secure storage — see MOBILE.md.
 const TOKEN_KEY = "lbc_token";
 
-export const getToken = () => localStorage.getItem(TOKEN_KEY);
-export const setToken = (t) => (t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY));
+// Session persistence, by platform:
+//   Native app  → sessionStorage. It survives backgrounding (the WebView stays
+//                 alive), but a fresh app process after the user closes/kills the
+//                 app starts EMPTY — so reopening requires signing in again.
+//   Web / PWA   → localStorage (persistent), so a browser reload keeps you in.
+const NATIVE = typeof window !== "undefined" && window.Capacitor?.isNativePlatform?.() === true;
+const tokenStore = () => (NATIVE ? window.sessionStorage : window.localStorage);
+
+// On the native app, discard any token left over from an older (persistent) build
+// or a previous run so it can never keep a killed session alive.
+if (NATIVE) { try { window.localStorage.removeItem(TOKEN_KEY); } catch (_) { /* ignore */ } }
+
+export const getToken = () => { try { return tokenStore().getItem(TOKEN_KEY); } catch (_) { return null; } };
+export const setToken = (t) => {
+  try { if (t) tokenStore().setItem(TOKEN_KEY, t); else tokenStore().removeItem(TOKEN_KEY); } catch (_) { /* ignore */ }
+  if (!t) { try { window.localStorage.removeItem(TOKEN_KEY); } catch (_) { /* ignore */ } } // belt-and-braces on logout
+};
 
 async function request(path, { method = "GET", body } = {}) {
   const headers = { "Content-Type": "application/json" };
