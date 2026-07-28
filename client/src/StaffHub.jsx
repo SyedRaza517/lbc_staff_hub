@@ -3479,6 +3479,8 @@ function StudentAttendanceDetail({ student, store }) {
   const previous = moduleRows.filter(r => r.finished).sort((a, b) => (b.endDate || "").localeCompare(a.endDate || ""));
   const overall = aggregateStats(currentModules.map(r => r.summary));
   const current = { modules: currentModules, overall };
+  // Lifetime attendance across every module the student has studied (current + previous).
+  const allOverall = aggregateStats(moduleRows.map(r => r.summary));
 
   const header = (
     <div className="flex items-center gap-3">
@@ -3516,9 +3518,25 @@ function StudentAttendanceDetail({ student, store }) {
 
   const oTone = pctTone(current.overall.pct ?? null);
 
+  const allTone = pctTone(allOverall.pct ?? null);
+
   return (
     <div className="space-y-4">
       {header}
+
+      {/* Two headline figures: current modules only, and lifetime across all modules. */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-2xl bg-white p-4 text-center shadow-sm ring-1 ring-slate-200/70">
+          <p className="text-3xl font-extrabold tabular-nums" style={{ color: oTone.colour }}>{fmtPct(current.overall.pct ?? null)}</p>
+          <p className="mt-0.5 text-xs font-bold text-slate-600">Current modules</p>
+          <p className="text-[10px] text-slate-400">{current.overall.marked} marked · {current.modules.length} running</p>
+        </div>
+        <div className="rounded-2xl bg-white p-4 text-center shadow-sm ring-1 ring-slate-200/70">
+          <p className="text-3xl font-extrabold tabular-nums" style={{ color: allTone.colour }}>{fmtPct(allOverall.pct ?? null)}</p>
+          <p className="mt-0.5 text-xs font-bold text-slate-600">All modules</p>
+          <p className="text-[10px] text-slate-400">{allOverall.marked} marked · {moduleRows.length} total</p>
+        </div>
+      </div>
 
       {/* Current modules — the live overall that rolls over as modules finish */}
       <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-emerald-200">
@@ -3565,7 +3583,7 @@ function StudentAttendanceDetail({ student, store }) {
         </div>
       )}
 
-      <p className="text-[11px] text-slate-400">A module moves to “previous” automatically once its last session date has passed. The overall counts only current modules. P = Present (2) · L = Late (1) · E = Excused (1) · A = Absent (0). Only marked sessions count.</p>
+      <p className="text-[11px] text-slate-400">A module moves to “previous” automatically once its last session date has passed. “Current modules” counts only running modules; “All modules” is across everything the student has studied. P = Present (2) · L = Late (1) · E = Excused (1) · A = Absent (0). Only marked sessions count.</p>
     </div>
   );
 }
