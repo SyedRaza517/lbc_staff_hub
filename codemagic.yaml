@@ -31,7 +31,7 @@ workflows:
         BUNDLE_ID: "uk.ac.lbc.staffhub"
         # Numeric Apple ID of the app from App Store Connect (step 3). Until you
         # have it, the "increment build number" step below will fail — set it first.
-        APP_STORE_APPLE_ID: 0000000000
+        APP_STORE_APPLE_ID: 6795300712
       node: 20
       xcode: latest
       cocoapods: default
