@@ -2,7 +2,7 @@
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const prisma = require("./db");
-const { sStaff } = require("./serializers");
+const { sStaff, sStudent } = require("./serializers");
 
 // In production a real secret MUST be provided — never silently fall back to a
 // publicly-known string (that would let anyone forge an admin token).
@@ -24,7 +24,9 @@ const verifyPassword = (pw, hash) => bcrypt.compareSync(pw, hash);
 // Session lifetime, configurable via JWT_EXPIRES (e.g. "8h", "1d", "7d").
 // Shorter = tighter security, more frequent re-authentication. Default 1 day.
 const EXPIRES = process.env.JWT_EXPIRES || "1d";
-const signToken = (staff) => jwt.sign({ sub: staff.id, role: staff.accountRole, purpose: "session", ver: staff.tokenVersion ?? 0 }, SECRET, { expiresIn: EXPIRES });
+const signToken = (staff) => jwt.sign({ sub: staff.id, kind: "staff", role: staff.accountRole, purpose: "session", ver: staff.tokenVersion ?? 0 }, SECRET, { expiresIn: EXPIRES });
+// A student session token. kind:"student" routes requireAuth down the student path.
+const signStudentToken = (student) => jwt.sign({ sub: student.id, kind: "student", purpose: "session", ver: student.tokenVersion ?? 0 }, SECRET, { expiresIn: EXPIRES });
 
 // Attaches req.user = { id, accountRole, ...publicStaff } when a valid Bearer token is present.
 async function requireAuth(req, res, next) {
@@ -38,13 +40,31 @@ async function requireAuth(req, res, next) {
     // before this field existed have no purpose at all, so treat only an explicit
     // non-session purpose as a rejection.
     if (payload.purpose && payload.purpose !== "session") return res.status(401).json({ error: "Invalid token" });
+
+    // Student session — a fully isolated path. The staff branch below is unchanged,
+    // so nothing about existing staff/admin auth is affected.
+    if (payload.kind === "student") {
+      // A student token may ONLY reach the student router and the shared auth router
+      // (for /auth/me). Every other router (staff, HND, leave, assessments, …) is
+      // off-limits — this one check keeps students out of all staff/admin data,
+      // regardless of each route's own guards.
+      if (req.baseUrl !== "/api/student" && req.baseUrl !== "/api/auth") {
+        return res.status(403).json({ error: "Not available for student accounts" });
+      }
+      const student = await prisma.student.findUnique({ where: { id: payload.sub } });
+      if (!student || !student.passwordHash || student.active === false) return res.status(401).json({ error: "Invalid token" });
+      if ((payload.ver ?? 0) !== (student.tokenVersion ?? 0)) return res.status(401).json({ error: "Session expired — please sign in again" });
+      req.user = { id: student.id, kind: "student", isStudent: true, ...sStudent(student) };
+      return next();
+    }
+
     const staff = await prisma.staff.findUnique({ where: { id: payload.sub } });
     if (!staff) return res.status(401).json({ error: "Invalid token" });
     // Tokens issued before the last password reset/change are dead. Tokens minted
     // before this field existed carry no `ver`, which reads as 0 and still matches
     // an account that has never bumped it.
     if ((payload.ver ?? 0) !== (staff.tokenVersion ?? 0)) return res.status(401).json({ error: "Session expired — please sign in again" });
-    req.user = { id: staff.id, accountRole: staff.accountRole, ...sStaff(staff) };
+    req.user = { id: staff.id, kind: "staff", accountRole: staff.accountRole, ...sStaff(staff) };
     next();
   } catch (e) {
     res.status(401).json({ error: "Invalid or expired token" });
@@ -53,6 +73,14 @@ async function requireAuth(req, res, next) {
 
 function requireAdmin(req, res, next) {
   if (req.user?.accountRole !== "ADMIN") return res.status(403).json({ error: "Admin access required" });
+  next();
+}
+
+// Guard a student-only endpoint. Staff/admin tokens are rejected here, just as a
+// student token is rejected by requireAdmin/requireAnyPage — the two worlds don't
+// cross.
+function requireStudent(req, res, next) {
+  if (req.user?.kind !== "student") return res.status(403).json({ error: "Student access required" });
   next();
 }
 
@@ -80,4 +108,4 @@ function requireAnyPage(pages) {
 }
 const requirePage = (page) => requireAnyPage([page]);
 
-module.exports = { hashPassword, verifyPassword, signToken, requireAuth, requireAdmin, requireSuperAdmin, requirePage, requireAnyPage, SECRET };
+module.exports = { hashPassword, verifyPassword, signToken, signStudentToken, requireAuth, requireAdmin, requireStudent, requireSuperAdmin, requirePage, requireAnyPage, SECRET };

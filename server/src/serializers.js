@@ -27,7 +27,8 @@ function parseAdminPages(raw) {
 }
 
 const sSignup = (r) => ({
-  id: r.id, name: r.name, email: r.email, role: r.jobTitle, dept: r.dept, site: r.site ?? null,
+  id: r.id, kind: r.kind || "staff", studentId: r.studentId ?? null,
+  name: r.name, email: r.email, role: r.jobTitle, dept: r.dept, site: r.site ?? null,
   status: r.status, note: r.note, decidedBy: r.decidedBy, decidedAt: r.decidedAt,
   requestedAt: r.createdAt,
 });

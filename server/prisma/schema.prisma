@@ -128,6 +128,13 @@ model PasswordReset {
 // so the applicant keeps the password they chose) and marked approved.
 model SignupRequest {
   id           String   @id @default(cuid())
+  // "staff" (the default — creates a Staff account on approval) or "student" (links
+  // to / creates a Student account). Student requests only carry name/email/password;
+  // the jobTitle/dept/site fields are left blank for them.
+  kind         String   @default("staff")
+  // For a student request: the existing Student row this email matched, if any.
+  // Null means no match — the admin decides on approval.
+  studentId    String?
   name         String
   email        String   @unique
   passwordHash String
@@ -352,6 +359,12 @@ model Student {
   // set-null on delete keeps the student if their cohort is removed.
   cohort     Cohort?  @relation(fields: [cohortId], references: [id], onDelete: SetNull)
   cohortId   String?
+  // --- Student login (the student app) ---
+  // NULL until the student has claimed an account (via sign-up + admin approval).
+  // A student with no passwordHash cannot sign in. tokenVersion mirrors Staff's:
+  // bumping it invalidates their existing sessions.
+  passwordHash String?
+  tokenVersion Int     @default(0)
   createdAt  DateTime @default(now())
 
   enrolments   Enrolment[]

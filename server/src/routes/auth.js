@@ -2,8 +2,8 @@ const router = require("express").Router();
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const prisma = require("../db");
-const { sStaff } = require("../serializers");
-const { verifyPassword, hashPassword, signToken, requireAuth, SECRET } = require("../auth");
+const { sStaff, sStudent } = require("../serializers");
+const { verifyPassword, hashPassword, signToken, signStudentToken, requireAuth, SECRET } = require("../auth");
 const { sendEmail } = require("../email");
 const { notifyStaff, notifyAdmins } = require("../notify");
 const totp = require("../totp");
@@ -131,37 +131,40 @@ router.post("/login", async (req, res) => {
     return res.status(429).json({ error: `Too many failed attempts. Try again in ${mins} minute${mins === 1 ? "" : "s"}.` });
   }
 
-  const staff = await prisma.staff.findUnique({ where: { email: String(email).toLowerCase() } });
-  if (!staff || !verifyPassword(password, staff.passwordHash)) {
-    s.count += 1;
-    if (s.count >= MAX_ATTEMPTS) s.lockedUntil = now + LOCK_MS;
-    const left = Math.max(0, MAX_ATTEMPTS - s.count);
-    return res.status(401).json({ error: s.lockedUntil ? "Too many failed attempts. Account locked for 15 minutes." : `Invalid email or password${left <= 3 ? ` (${left} attempt${left === 1 ? "" : "s"} left)` : ""}` });
+  const emailLc = String(email).toLowerCase();
+  const staff = await prisma.staff.findUnique({ where: { email: emailLc } });
+  // A pending-activation staff account cannot be signed into (its password is random
+  // and unknown); treat it as a non-match so the generic error message applies.
+  const staffOk = staff && !staff.pendingActivation && verifyPassword(password, staff.passwordHash);
+
+  if (staffOk) {
+    ATTEMPTS.delete(key); // successful login clears the counter
+    // Second factor. The password was right, but for accounts with an authenticator
+    // (or one that still owes us an enrolment) we hand back a challenge token, not a
+    // session. Accounts with neither flag sign in exactly as before.
+    if (staff.totpEnabled) {
+      return res.json({ mfaRequired: true, challengeToken: signChallenge(staff, "verify"), email: staff.email, name: staff.name });
+    }
+    if (staff.mustSetupTotp) {
+      return res.json({ totpSetupRequired: true, challengeToken: signChallenge(staff, "setup"), email: staff.email, name: staff.name });
+    }
+    return res.json({ token: signToken(staff), user: sStaff(staff) });
   }
 
-  // An account awaiting activation cannot be signed into at all. Its password is
-  // random and unknown, so this branch is unreachable in practice — it exists so
-  // that the rule holds even if a password were somehow set another way. The
-  // message stays generic: saying "this account exists but isn't activated" would
-  // turn the login form into a way to check who works here.
-  if (staff.pendingActivation) {
-    return res.status(401).json({ error: "Invalid email or password" });
+  // Not a valid staff login — try a student account. This isolated branch is the
+  // only place a student session is issued; a student with no passwordHash (never
+  // approved) or a deactivated one cannot sign in.
+  const student = await prisma.student.findUnique({ where: { email: emailLc } });
+  if (student && student.passwordHash && student.active !== false && verifyPassword(password, student.passwordHash)) {
+    ATTEMPTS.delete(key);
+    return res.json({ token: signStudentToken(student), user: { ...sStudent(student), kind: "student" } });
   }
 
-  ATTEMPTS.delete(key); // successful login clears the counter
-
-  // Second factor. The password was right, but for accounts with an authenticator
-  // (or one that still owes us an enrolment) we hand back a challenge token, not a
-  // session. Accounts with neither flag — the seeded staff and admins — sign in
-  // exactly as before, so the dashboard login is unchanged.
-  if (staff.totpEnabled) {
-    return res.json({ mfaRequired: true, challengeToken: signChallenge(staff, "verify"), email: staff.email, name: staff.name });
-  }
-  if (staff.mustSetupTotp) {
-    return res.json({ totpSetupRequired: true, challengeToken: signChallenge(staff, "setup"), email: staff.email, name: staff.name });
-  }
-
-  res.json({ token: signToken(staff), user: sStaff(staff) });
+  // Neither a staff nor a student match — count the failure and return generically.
+  s.count += 1;
+  if (s.count >= MAX_ATTEMPTS) s.lockedUntil = now + LOCK_MS;
+  const left = Math.max(0, MAX_ATTEMPTS - s.count);
+  return res.status(401).json({ error: s.lockedUntil ? "Too many failed attempts. Account locked for 15 minutes." : `Invalid email or password${left <= 3 ? ` (${left} attempt${left === 1 ? "" : "s"} left)` : ""}` });
 });
 
 // POST /api/auth/totp/setup — start enrolment. Returns the secret + otpauth URL so
