@@ -2131,15 +2131,22 @@ function AdminSignups({ store }) {
                   </span>
                   <div className="flex-1">
                     <p className="text-sm font-bold text-slate-700">{r.name}</p>
-                    <p className="text-xs text-slate-400">{r.role} · {r.dept}</p>
+                    <p className="text-xs text-slate-400">{r.kind === "student" ? "Student" : `${r.role} · ${r.dept}`}</p>
                   </div>
-                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">Pending</span>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${r.kind === "student" ? "bg-violet-100 text-violet-700" : "bg-blue-100 text-blue-700"}`}>{r.kind === "student" ? <><GraduationCap size={10} /> Student</> : <><Briefcase size={10} /> Staff</>}</span>
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">Pending</span>
+                  </div>
                 </div>
                 <div className="mt-3 space-y-1 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
                   <p className="flex items-center gap-1.5"><Mail size={12} className="text-slate-400" /> {r.email}</p>
-                  <p className="flex items-center gap-1.5"><Briefcase size={12} className="text-slate-400" /> {r.role}</p>
-                  <p className="flex items-center gap-1.5"><Building2 size={12} className="text-slate-400" /> {r.dept}</p>
-                  {r.site && <p className="flex items-center gap-1.5"><MapPin size={12} className="text-slate-400" /> {r.site}</p>}
+                  {r.kind === "student"
+                    ? <p className="flex items-center gap-1.5"><GraduationCap size={12} className="text-slate-400" /> Student — {r.studentId ? "matches an existing student record" : "no matching record (a new one will be created on approval)"}</p>
+                    : <>
+                        <p className="flex items-center gap-1.5"><Briefcase size={12} className="text-slate-400" /> {r.role}</p>
+                        <p className="flex items-center gap-1.5"><Building2 size={12} className="text-slate-400" /> {r.dept}</p>
+                        {r.site && <p className="flex items-center gap-1.5"><MapPin size={12} className="text-slate-400" /> {r.site}</p>}
+                      </>}
                   <p className="flex items-center gap-1.5 text-slate-400"><Clock3 size={12} /> Requested {fmtDate(String(r.requestedAt).slice(0, 10))}</p>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2">
@@ -2173,7 +2180,7 @@ function AdminSignups({ store }) {
                   <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${r.status === "approved" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>{r.status}</span>
                 </div>
                 <p className="mt-1.5 text-xs text-slate-500">
-                  {r.role} · {r.dept}
+                  {r.kind === "student" ? "Student" : `${r.role} · ${r.dept}`}
                   {r.decidedBy && <> · by {r.decidedBy}</>}
                   {r.decidedAt && <> on {fmtDate(r.decidedAt)}</>}
                   {r.note && <> · <span className="italic">"{r.note}"</span></>}
@@ -2189,19 +2196,29 @@ function AdminSignups({ store }) {
           <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600 ring-1 ring-slate-200">
             <p className="text-sm font-bold text-slate-700">{modal?.req.name}</p>
             <p>{modal?.req.email}</p>
-            <p>{modal?.req.role} · {modal?.req.dept}</p>
+            <p>{modal?.req.kind === "student" ? "Student" : `${modal?.req.role} · ${modal?.req.dept}`}</p>
           </div>
 
           {modal?.action === "approved" ? (
+            modal?.req.kind === "student" ? (
+              <p className="flex items-start gap-1.5 rounded-xl bg-violet-50 px-3 py-2 text-[11px] text-violet-700 ring-1 ring-violet-100">
+                <GraduationCap size={13} className="mt-px shrink-0" />
+                {modal?.req.studentId
+                  ? "This links their existing student record and lets them sign in with the password they chose."
+                  : "No matching student record was found — approving saves a new student in the Students table."}
+                {" "}No holiday allowance is needed for a student.
+              </p>
+            ) : (
             <>
               <Field label="Holiday allowance (days per year)">
                 <input type="number" min={0} value={allowance} onChange={e => setAllowance(e.target.value)} className={inputCls} />
               </Field>
               <p className="flex items-start gap-1.5 rounded-xl bg-blue-50 px-3 py-2 text-[11px] text-blue-700 ring-1 ring-blue-100">
                 <ShieldCheck size={13} className="mt-px shrink-0" />
-                This creates their staff account. They sign in with the password they chose, then set up an authenticator app before they can use the hub.
+                This creates their staff account. They sign in with the password they chose.
               </p>
             </>
+            )
           ) : (
             <Field label="Reason (optional, kept for your records)">
               <textarea value={note} onChange={e => setNote(e.target.value)} rows={3} placeholder="e.g. Not a current member of staff." className={inputCls + " resize-none"} />
@@ -2209,7 +2226,7 @@ function AdminSignups({ store }) {
           )}
 
           <PrimaryBtn colour={modal?.action === "approved" ? "#059669" : MAROON} onClick={confirm} disabled={busy} className="w-full">
-            {modal?.action === "approved" ? <><CheckCircle2 size={16} /> Approve & create account</> : <><XCircle size={16} /> Confirm decline</>}
+            {modal?.action === "approved" ? <><CheckCircle2 size={16} /> {modal?.req.kind === "student" ? "Approve & activate student" : "Approve & create account"}</> : <><XCircle size={16} /> Confirm decline</>}
           </PrimaryBtn>
         </div>
       </Modal>
