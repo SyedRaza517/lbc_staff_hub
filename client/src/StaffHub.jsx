@@ -19,6 +19,7 @@ import {
 import { downloadCSV } from "./csv";
 import { BrandMark, BrandLockup } from "./Brand";
 import ConfirmDialog from "./ConfirmDialog";
+import { useBackHandler } from "./backButton";
 import PhoneShell, { useIsHandset } from "./PhoneShell";
 import DeleteAccount from "./DeleteAccount";
 import { biometricStatus, biometryLabel, isBiometricEnabled, enableBiometric, disableBiometric } from "./biometric";
@@ -196,6 +197,8 @@ function PrimaryBtn({ children, onClick, disabled, colour = NAVY, className = ""
   return <button onClick={onClick} disabled={disabled} className={`shine press flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-slate-900/10 transition-all duration-200 hover:opacity-95 hover:shadow-lg hover:shadow-slate-900/15 active:scale-95 disabled:opacity-40 disabled:shadow-none ${className}`} style={{ background: `linear-gradient(135deg, ${colour} 0%, ${colour}e6 100%)` }}>{children}</button>;
 }
 function Modal({ open, onClose, title, children, width = 460 }) {
+  // Android back closes an open modal instead of leaving the screen.
+  useBackHandler(open, () => { onClose?.(); return true; });
   if (!open) return null;
   const dialog = (
     // 100dvh, and centred by the flex parent rather than by translate, so a tall
@@ -288,6 +291,10 @@ export function StaffApp({ store, currentStaffId, setCurrentStaffId, logout, onC
   const { staff } = store;
   const [screen, setScreen] = useState("home");
   const [showNotes, setShowNotes] = useState(false);
+
+  // Android back: close the notifications panel first, else a sub-screen returns home.
+  useBackHandler(showNotes, () => { setShowNotes(false); return true; });
+  useBackHandler(!showNotes && screen !== "home", () => { setScreen("home"); return true; });
 
   // Tapping a push notification opens the screen it refers to — the `link` the
   // server attached (e.g. "balance" for a leave decision, "approvals" for admins).
@@ -1344,6 +1351,13 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
   // If the current tab isn't in the allowed set (e.g. access was changed mid-session),
   // fall back to the first one they can see, so no forbidden page ever renders.
   const activeKey = nav.some(n => n.key === tab) ? tab : (nav[0]?.key || null);
+  const handset = useIsHandset();
+  // Android back (mobile dashboard): return to the first tab, then out to the staff app.
+  useBackHandler(handset, () => {
+    if (activeKey !== nav[0]?.key) { setTab(nav[0].key); return true; }
+    if (onExitToStaffApp) { onExitToStaffApp(); return true; }
+    return false;
+  });
   const pendingCount = store.leave.filter(l => l.status === "pending").length;
   const pendingSignups = (store.signups || []).filter(s => s.status === "pending").length;
   const openQueries = (store.studentQueries || []).filter(q => q.status === "open").length;

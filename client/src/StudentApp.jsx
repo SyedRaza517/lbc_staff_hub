@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import PhoneShell from "./PhoneShell";
 import { BrandMark } from "./Brand";
 import ConfirmDialog from "./ConfirmDialog";
+import { useBackHandler } from "./backButton";
 import { api } from "./api";
 import {
   GraduationCap, Percent, Award, MessageSquare, LogOut, ChevronLeft,
@@ -26,6 +27,8 @@ const ErrBox = ({ children }) => <Card className="!bg-rose-50 !ring-rose-200 tex
 
 export default function StudentApp({ user, logout }) {
   const [screen, setScreen] = useState("home");
+  // Android back returns to the home screen from any sub-screen.
+  useBackHandler(screen !== "home", () => { setScreen("home"); return true; });
   const title = { home: "Student Hub", attendance: "My Attendance", assessments: "My Results", query: "Ask the College" }[screen];
   return (
     <PhoneShell header={<Header title={title} screen={screen} setScreen={setScreen} user={user} logout={logout} />}>

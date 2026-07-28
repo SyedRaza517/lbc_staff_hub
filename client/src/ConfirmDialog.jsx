@@ -1,8 +1,11 @@
 import React from "react";
+import { useBackHandler } from "./backButton";
 
 // A small centred confirmation dialog — used to guard actions like signing out so
 // an accidental tap doesn't do something disruptive. Renders nothing when closed.
 export default function ConfirmDialog({ open, title, message, confirmLabel = "Confirm", cancelLabel = "Cancel", danger = false, onConfirm, onCancel }) {
+  // Android back cancels the dialog (never the confirm — no accidental sign-out).
+  useBackHandler(open, () => { onCancel?.(); return true; });
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.45)", backdropFilter: "blur(2px)" }} onClick={onCancel}>

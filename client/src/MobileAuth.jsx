@@ -11,6 +11,7 @@ import { api } from "./api";
 import { TotpSetup, TotpVerify } from "./TwoFactor";
 import { ForgotPasswordForm } from "./ResetPassword";
 import PhoneShell, { useIsHandset } from "./PhoneShell";
+import { useBackHandler } from "./backButton";
 import { BrandMark } from "./Brand";
 import {
   GraduationCap, LogIn, UserPlus, Mail, Lock, User, Briefcase, Building2,
@@ -314,6 +315,8 @@ export default function MobileAuth({ onExit }) {
   };
 
   const backToSignIn = () => { setChallenge(null); setMode("signin"); };
+  // Android back returns to the sign-in screen from sign-up / verify / forgot.
+  useBackHandler(mode !== "signin", () => { backToSignIn(); return true; });
   const goForgot = (email) => { setForgotEmail(email || ""); setMode("forgot"); };
 
   // The TOTP endpoints return exactly what login would have: { token, user }.
