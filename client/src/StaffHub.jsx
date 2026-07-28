@@ -18,6 +18,7 @@ import {
 } from "recharts";
 import { downloadCSV } from "./csv";
 import { BrandMark, BrandLockup } from "./Brand";
+import ConfirmDialog from "./ConfirmDialog";
 import PhoneShell, { useIsHandset } from "./PhoneShell";
 import DeleteAccount from "./DeleteAccount";
 import { biometricStatus, biometryLabel, isBiometricEnabled, enableBiometric, disableBiometric } from "./biometric";
@@ -1196,6 +1197,7 @@ function TimesheetScreen({ store, me }) {
 function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
   const [toggles, setToggles] = useState({ notif: true, reminders: true, biometric: false });
   const [showDelete, setShowDelete] = useState(false);
+  const [confirmOut, setConfirmOut] = useState(false);
   const items = [{ I: Users, label: "My Profile" }, { I: MapPin, label: "Campus Map" }, { I: Coffee, label: "Staff Room Booking" }, { I: Mail, label: "Contact HR" }];
   // Read-only profile stats, all safe.
   const myLeaveCount = store.leave.filter(l => l.staffId === me.id).length;
@@ -1277,10 +1279,11 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
 
       {/* Sign out — moved here from the top bar; full-width and clearly separated. */}
       {logout && (
-        <button onClick={logout} className="press mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-slate-200 bg-white py-3 text-sm font-bold text-slate-600 transition hover:border-slate-300 hover:text-slate-800">
+        <button onClick={() => setConfirmOut(true)} className="press mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-slate-200 bg-white py-3 text-sm font-bold text-slate-600 transition hover:border-slate-300 hover:text-slate-800">
           <LogOut size={16} /> Sign out
         </button>
       )}
+      <ConfirmDialog open={confirmOut} title="Sign out?" message="You'll need to sign in again to get back in." confirmLabel="Sign out" cancelLabel="Stay" danger onConfirm={logout} onCancel={() => setConfirmOut(false)} />
 
       <p className="mt-4 text-center text-[11px] text-slate-400">London Brookes College · Staff Hub</p>
       <p className="text-center text-[11px] text-slate-400">© {new Date().getFullYear()} Syed Muhammad Raza</p>

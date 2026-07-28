@@ -10,6 +10,7 @@ import AcceptInvite from "./AcceptInvite";
 import { useIsHandset, isNativeApp } from "./PhoneShell";
 import { BrandMark } from "./Brand";
 import StudentApp from "./StudentApp";
+import ConfirmDialog from "./ConfirmDialog";
 import BiometricGate, { useAppLock, BiometricSetupPrompt } from "./BiometricGate";
 import { StaffApp, AdminDashboard } from "./StaffHub";
 import { LogOut, CheckCircle2, XCircle, Sparkles, Loader2, GraduationCap, Clock, KeyRound, Lock, ShieldCheck, X, WifiOff } from "lucide-react";
@@ -308,6 +309,7 @@ function Shell({ user, logout, entry }) {
     : (isAdmin && !handset) ? "admin"
     : "app";
   const [view, setView] = useState(initialView);
+  const [confirmOut, setConfirmOut] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [notes, setNotes] = useState([]);
   const [showChangePw, setShowChangePw] = useState(false);
@@ -361,6 +363,7 @@ function Shell({ user, logout, entry }) {
       className={handset ? "flex w-full flex-col overflow-hidden text-slate-800" : "min-h-screen w-full text-slate-800"}
     >
       <style>{GLOBAL_STYLE}</style>
+      <ConfirmDialog open={confirmOut} title="Sign out?" message="You'll need to sign in again to get back in." confirmLabel="Sign out" cancelLabel="Stay" danger onConfirm={logout} onCancel={() => setConfirmOut(false)} />
 
       {/* Top chrome (view toggle · change password · sign out). Hidden on the mobile
           staff app — those actions now live in the app's "More" screen instead, so
@@ -385,7 +388,7 @@ function Shell({ user, logout, entry }) {
             <span className="text-slate-300">{user.name}</span>
           </div>
           <button onClick={() => setShowChangePw(true)} title="Change password" className="press flex items-center gap-1 rounded-full px-2.5 py-1.5 font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"><KeyRound size={13} /> <span className="hidden md:inline">Change password</span></button>
-          <button onClick={logout} className="press flex items-center gap-1 rounded-full px-2.5 py-1.5 font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"><LogOut size={13} /> Sign out</button>
+          <button onClick={() => setConfirmOut(true)} className="press flex items-center gap-1 rounded-full px-2.5 py-1.5 font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"><LogOut size={13} /> Sign out</button>
         </div>
       </div>
       )}

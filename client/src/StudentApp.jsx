@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import PhoneShell from "./PhoneShell";
 import { BrandMark } from "./Brand";
+import ConfirmDialog from "./ConfirmDialog";
 import { api } from "./api";
 import {
   GraduationCap, Percent, Award, MessageSquare, LogOut, ChevronLeft,
@@ -37,14 +38,16 @@ export default function StudentApp({ user, logout }) {
 }
 
 function Header({ title, screen, setScreen, user, logout }) {
+  const [confirmOut, setConfirmOut] = useState(false);
   return (
     <div className="relative z-20 pt-2" style={{ background: `linear-gradient(160deg, ${NAVY} 0%, ${NAVY_DARK} 100%)` }}>
+      <ConfirmDialog open={confirmOut} title="Log out?" message="You'll need to sign in again to get back in." confirmLabel="Log out" cancelLabel="Stay" danger onConfirm={logout} onCancel={() => setConfirmOut(false)} />
       <div className="flex items-center gap-2 px-3 pb-2 pt-1">
         {screen !== "home"
           ? <button onClick={() => setScreen("home")} aria-label="Back" className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"><ChevronLeft size={22} /></button>
           : <div className="flex h-11 w-12 shrink-0 items-center justify-center rounded-md bg-white px-1"><BrandMark size={26} /></div>}
         <div className="min-w-0 flex-1 text-center"><h1 className="truncate text-lg font-extrabold tracking-wide text-white">{title}</h1></div>
-        <button onClick={logout} aria-label="Sign out" className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"><LogOut size={18} /></button>
+        <button onClick={() => setConfirmOut(true)} aria-label="Sign out" className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"><LogOut size={18} /></button>
       </div>
       {screen === "home" && (
         <div className="px-4 pb-5">
