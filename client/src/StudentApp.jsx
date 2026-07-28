@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import PhoneShell from "./PhoneShell";
 import { BrandMark } from "./Brand";
 import ConfirmDialog from "./ConfirmDialog";
@@ -27,15 +27,37 @@ const ErrBox = ({ children }) => <Card className="!bg-rose-50 !ring-rose-200 tex
 
 export default function StudentApp({ user, logout }) {
   const [screen, setScreen] = useState("home");
+  const [queries, setQueries] = useState([]);
   // Android back returns to the home screen from any sub-screen.
   useBackHandler(screen !== "home", () => { setScreen("home"); return true; });
+
+  // This student's own queries (the server scopes /me/queries to them). Used both by
+  // the query screen and to badge the home tile when the college has replied.
+  const loadQueries = useCallback(() => { api.studentQueries().then(setQueries).catch(() => {}); }, []);
+  useEffect(() => { loadQueries(); }, [loadQueries]);
+  useEffect(() => { if (screen === "home") loadQueries(); }, [screen, loadQueries]);
+
+  // "New reply" badge: answered queries this student hasn't opened yet. Seen-state is
+  // kept per student in localStorage, so it's entirely personal to them.
+  const seenKey = `lbc_seen_replies_${user.id}`;
+  const answered = queries.filter(q => q.status === "answered");
+  let seen = new Set();
+  try { seen = new Set(JSON.parse(localStorage.getItem(seenKey) || "[]")); } catch (_) { /* ignore */ }
+  const newReplies = answered.filter(q => !seen.has(q.id)).length;
+  useEffect(() => {
+    if (screen === "query" && answered.length) {
+      try { localStorage.setItem(seenKey, JSON.stringify(answered.map(q => q.id))); } catch (_) { /* ignore */ }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, queries]);
+
   const title = { home: "Student Hub", attendance: "My Attendance", assessments: "My Results", query: "Ask the College" }[screen];
   return (
     <PhoneShell header={<Header title={title} screen={screen} setScreen={setScreen} user={user} logout={logout} />}>
-      {screen === "home" && <Home setScreen={setScreen} user={user} />}
+      {screen === "home" && <Home setScreen={setScreen} user={user} newReplies={newReplies} />}
       {screen === "attendance" && <AttendanceScreen />}
       {screen === "assessments" && <AssessmentsScreen />}
-      {screen === "query" && <QueryScreen />}
+      {screen === "query" && <QueryScreen queries={queries} reload={loadQueries} />}
     </PhoneShell>
   );
 }
@@ -68,20 +90,23 @@ function Header({ title, screen, setScreen, user, logout }) {
   );
 }
 
-function Home({ setScreen, user }) {
+function Home({ setScreen, user, newReplies = 0 }) {
   const tiles = [
     { key: "attendance", label: "My Attendance", sub: "Your attendance by module", Icon: Percent, c: NAVY },
     { key: "assessments", label: "My Results", sub: "Assessments & grades", Icon: Award, c: "#0d7a5f" },
-    { key: "query", label: "Ask the College", sub: "Send a query to admin", Icon: MessageSquare, c: MAROON },
+    { key: "query", label: "Ask the College", sub: newReplies > 0 ? `${newReplies} new repl${newReplies === 1 ? "y" : "ies"}` : "Send a query to admin", Icon: MessageSquare, c: MAROON, badge: newReplies },
   ];
   return (
     <Screen>
       <p className="px-1 text-xs font-bold uppercase tracking-wide text-slate-400">What would you like to do?</p>
       <div className="space-y-2.5">
-        {tiles.map(({ key, label, sub, Icon, c }) => (
+        {tiles.map(({ key, label, sub, Icon, c, badge }) => (
           <button key={key} onClick={() => setScreen(key)} className="press flex w-full items-center gap-3.5 rounded-2xl bg-white p-4 text-left shadow-sm ring-1 ring-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-md">
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-white shadow-sm" style={{ background: c }}><Icon size={22} /></span>
-            <div className="flex-1"><p className="text-sm font-extrabold text-slate-700">{label}</p><p className="text-[11px] text-slate-400">{sub}</p></div>
+            <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-white shadow-sm" style={{ background: c }}>
+              <Icon size={22} />
+              {badge > 0 && <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-bold text-slate-900 ring-2 ring-white">{badge}</span>}
+            </span>
+            <div className="flex-1"><p className="text-sm font-extrabold text-slate-700">{label}</p><p className={`text-[11px] ${badge > 0 ? "font-bold text-amber-600" : "text-slate-400"}`}>{sub}</p></div>
             <ArrowRight size={18} className="text-slate-300" />
           </button>
         ))}
@@ -182,20 +207,17 @@ function AssessmentsScreen() {
 }
 
 /* -------- Query to admin (two-way) -------- */
-function QueryScreen() {
+function QueryScreen({ queries = [], reload }) {
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [ok, setOk] = useState(false);
   const [err, setErr] = useState("");
-  const [list, setList] = useState(null);
-  const load = () => api.studentQueries().then(setList).catch(() => setList([]));
-  useEffect(() => { load(); }, []);
   const submit = async () => {
     setErr(""); setOk(false);
     if (message.trim().length < 3) { setErr("Please write your query."); return; }
     setBusy(true);
-    try { await api.submitStudentQuery(subject.trim() || "Student query", message.trim()); setSubject(""); setMessage(""); setOk(true); load(); }
+    try { await api.submitStudentQuery(subject.trim() || "Student query", message.trim()); setSubject(""); setMessage(""); setOk(true); reload && reload(); }
     catch (e) { setErr(e.message || "Could not send your query."); }
     finally { setBusy(false); }
   };
@@ -219,9 +241,8 @@ function QueryScreen() {
       </Card>
 
       <p className="px-1 pt-1 text-xs font-bold uppercase tracking-wide text-slate-400">Your queries</p>
-      {list === null && <Loading />}
-      {list && list.length === 0 && <Card className="text-center"><p className="py-6 text-xs text-slate-400">You haven't sent any queries yet.</p></Card>}
-      {list && list.map(q => (
+      {queries.length === 0 && <Card className="text-center"><p className="py-6 text-xs text-slate-400">You haven't sent any queries yet.</p></Card>}
+      {queries.map(q => (
         <Card key={q.id} className="!p-3.5">
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-700">{q.subject}</p><p className="text-[10px] text-slate-400">{fmtDate(String(q.createdAt).slice(0, 10))}</p></div>
