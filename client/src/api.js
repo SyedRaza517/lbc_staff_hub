@@ -198,6 +198,7 @@ export const api = {
   studentAssessments: (studentId) => request(`/assessments/student/${studentId}`),
   // timesheets
   listTimesheets: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/timesheets${q ? `?${q}` : ""}`); },
+  timesheetPendingCount: () => request("/timesheets/pending-count"),
   addTimesheet: (data) => request("/timesheets", { method: "POST", body: data }),
   updateTimesheet: (id, data) => request(`/timesheets/${id}`, { method: "PUT", body: data }),
   removeTimesheet: (id) => request(`/timesheets/${id}`, { method: "DELETE" }),

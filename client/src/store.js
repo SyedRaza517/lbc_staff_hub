@@ -17,6 +17,7 @@ export function useApiStore(notify, user) {
   const [adjustments, setAdjustments] = useState([]);
   const [signups, setSignups] = useState([]);
   const [studentQueries, setStudentQueries] = useState([]);
+  const [timesheetsPending, setTimesheetsPending] = useState(0);
   const [loaded, setLoaded] = useState(false);
   // HND registers. Loaded lazily by the admin page rather than on login —
   // staff users never open it, so there's no reason to fetch it for them.
@@ -58,6 +59,9 @@ export function useApiStore(notify, user) {
         // Student queries — tolerant like sign-ups (page-gated + needs the new API).
         try { setStudentQueries(await api.listStudentQueries()); }
         catch (_) { setStudentQueries([]); }
+        // Timesheets awaiting review — a count for the nav badge (tolerant).
+        try { setTimesheetsPending((await api.timesheetPendingCount())?.count || 0); }
+        catch (_) { setTimesheetsPending(0); }
       }
     } catch (e) { notify?.(e.message || "Failed to load data", "error"); }
     setLoaded(true);
@@ -297,7 +301,7 @@ export function useApiStore(notify, user) {
   };
 
   return {
-    staff, leave, checkins, docs, adjustments, signups, studentQueries, loaded,
+    staff, leave, checkins, docs, adjustments, signups, studentQueries, timesheetsPending, loaded,
     modules, students, sessions, semesters, programmes, cohorts, terms, unassignedSessions, semesterId, attendance, hndLoaded,
     interactions, interactionsLoaded,
     assessments, assessmentOverview, assessmentsLoaded,

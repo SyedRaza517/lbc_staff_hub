@@ -1361,6 +1361,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
   const pendingCount = store.leave.filter(l => l.status === "pending").length;
   const pendingSignups = (store.signups || []).filter(s => s.status === "pending").length;
   const openQueries = (store.studentQueries || []).filter(q => q.status === "open").length;
+  const timesheetsPending = store.timesheetsPending || 0;
   return (
     <div className="flex min-h-[calc(100vh-40px)]">
       <aside className="hidden w-60 flex-col bg-white px-4 py-5 ring-1 ring-slate-200 md:flex">
@@ -1375,6 +1376,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
               {(n.key === "requests" || n.key === "approvals") && pendingCount > 0 && <span className="pop rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-900 shadow-sm">{pendingCount}</span>}
               {n.key === "signups" && pendingSignups > 0 && <span className="pop rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-900 shadow-sm">{pendingSignups}</span>}
               {n.key === "studentqueries" && openQueries > 0 && <span className="pop rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-900 shadow-sm">{openQueries}</span>}
+              {n.key === "timesheets" && timesheetsPending > 0 && <span className="pop rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-900 shadow-sm">{timesheetsPending}</span>}
             </button>
           ))}
         </nav>

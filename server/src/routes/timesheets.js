@@ -77,6 +77,13 @@ router.get("/", requireAuth, async (req, res) => {
   res.json(rows.map(sTimesheet));
 });
 
+// GET /api/timesheets/pending-count — how many staff have a timesheet awaiting review
+// (any "submitted" entries). Powers the amber badge on the admin Timesheets tab.
+router.get("/pending-count", requireAuth, requirePage("timesheets"), async (req, res) => {
+  const groups = await prisma.timesheetEntry.groupBy({ by: ["staffId"], where: { status: "submitted" } });
+  res.json({ count: groups.length });
+});
+
 // POST /api/timesheets — staff adds an entry for themselves (admin may pass staffId)
 router.post("/", requireAuth, async (req, res) => {
   const parsed = parseBody(req.body);
