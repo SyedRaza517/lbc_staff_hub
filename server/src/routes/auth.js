@@ -139,15 +139,16 @@ router.post("/login", async (req, res) => {
 
   if (staffOk) {
     ATTEMPTS.delete(key); // successful login clears the counter
-    // Second factor. The password was right, but for accounts with an authenticator
-    // (or one that still owes us an enrolment) we hand back a challenge token, not a
-    // session. Accounts with neither flag sign in exactly as before.
-    if (staff.totpEnabled) {
-      return res.json({ mfaRequired: true, challengeToken: signChallenge(staff, "verify"), email: staff.email, name: staff.name });
-    }
-    if (staff.mustSetupTotp) {
-      return res.json({ totpSetupRequired: true, challengeToken: signChallenge(staff, "setup"), email: staff.email, name: staff.name });
-    }
+    // --- Authenticator (2FA / TOTP) temporarily DISABLED ---
+    // The second-factor step is switched off for now so no one is sent to the
+    // authenticator setup/verify screen. To re-enable, uncomment the two branches
+    // below (and restore `mustSetupTotp: true` on sign-up approval in signup.js).
+    // if (staff.totpEnabled) {
+    //   return res.json({ mfaRequired: true, challengeToken: signChallenge(staff, "verify"), email: staff.email, name: staff.name });
+    // }
+    // if (staff.mustSetupTotp) {
+    //   return res.json({ totpSetupRequired: true, challengeToken: signChallenge(staff, "setup"), email: staff.email, name: staff.name });
+    // }
     return res.json({ token: signToken(staff), user: sStaff(staff) });
   }
 

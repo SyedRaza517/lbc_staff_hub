@@ -165,7 +165,9 @@ router.put("/:id/decision", requireAuth, requirePage("signups"), async (req, res
           accountRole: "STAFF", allowance: days,
           initials: initialsOf(reqRow.name), colour: colourFor(reqRow.email),
           mustChangePassword: false,
-          mustSetupTotp: true, // authenticator enrolment is compulsory on first sign-in
+          // Authenticator (2FA) temporarily DISABLED — new staff are NOT required to
+          // enrol on first sign-in. Restore `true` to make it compulsory again.
+          mustSetupTotp: false,
         },
       }),
       prisma.signupRequest.update({ where: { id: reqRow.id }, data: decided }),
