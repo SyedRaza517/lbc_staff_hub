@@ -3,10 +3,11 @@ import PhoneShell from "./PhoneShell";
 import { BrandMark } from "./Brand";
 import ConfirmDialog from "./ConfirmDialog";
 import { useBackHandler } from "./backButton";
-import { api } from "./api";
+import { api, setToken } from "./api";
 import {
   GraduationCap, Percent, Award, MessageSquare, LogOut, ChevronLeft,
   Loader2, Send, CheckCircle2, ClipboardList, Info, BookOpen, ArrowRight,
+  Settings, KeyRound, Lock, Trash2, AlertTriangle,
 } from "lucide-react";
 
 const NAVY = "#1a3a8f";
@@ -51,28 +52,29 @@ export default function StudentApp({ user, logout }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, queries]);
 
-  const title = { home: "Student Hub", attendance: "My Attendance", assessments: "My Results", query: "Ask the College" }[screen];
+  const title = { home: "Student Hub", attendance: "My Attendance", assessments: "My Results", query: "Ask the College", more: "More" }[screen];
   return (
-    <PhoneShell header={<Header title={title} screen={screen} setScreen={setScreen} user={user} logout={logout} />}>
+    <PhoneShell header={<Header title={title} screen={screen} setScreen={setScreen} user={user} />}>
       {screen === "home" && <Home setScreen={setScreen} user={user} newReplies={newReplies} />}
       {screen === "attendance" && <AttendanceScreen />}
       {screen === "assessments" && <AssessmentsScreen />}
       {screen === "query" && <QueryScreen queries={queries} reload={loadQueries} />}
+      {screen === "more" && <MoreScreen user={user} logout={logout} />}
     </PhoneShell>
   );
 }
 
-function Header({ title, screen, setScreen, user, logout }) {
-  const [confirmOut, setConfirmOut] = useState(false);
+function Header({ title, screen, setScreen, user }) {
   return (
     <div className="relative z-20 pt-2" style={{ background: `linear-gradient(160deg, ${NAVY} 0%, ${NAVY_DARK} 100%)` }}>
-      <ConfirmDialog open={confirmOut} title="Log out?" message="You'll need to sign in again to get back in." confirmLabel="Log out" cancelLabel="Stay" danger onConfirm={logout} onCancel={() => setConfirmOut(false)} />
       <div className="flex items-center gap-2 px-3 pb-2 pt-1">
         {screen !== "home"
           ? <button onClick={() => setScreen("home")} aria-label="Back" className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"><ChevronLeft size={22} /></button>
           : <div className="flex h-11 w-12 shrink-0 items-center justify-center rounded-md bg-white px-1"><BrandMark size={26} /></div>}
         <div className="min-w-0 flex-1 text-center"><h1 className="truncate text-lg font-extrabold tracking-wide text-white">{title}</h1></div>
-        <button onClick={() => setConfirmOut(true)} aria-label="Sign out" className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"><LogOut size={18} /></button>
+        {screen === "home"
+          ? <button onClick={() => setScreen("more")} aria-label="More" className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"><Settings size={18} /></button>
+          : <div className="h-11 w-11 shrink-0" />}
       </div>
       {screen === "home" && (
         <div className="px-4 pb-5">
@@ -95,6 +97,7 @@ function Home({ setScreen, user, newReplies = 0 }) {
     { key: "attendance", label: "My Attendance", sub: "Your attendance by module", Icon: Percent, c: NAVY },
     { key: "assessments", label: "My Results", sub: "Assessments & grades", Icon: Award, c: "#0d7a5f" },
     { key: "query", label: "Ask the College", sub: newReplies > 0 ? `${newReplies} new repl${newReplies === 1 ? "y" : "ies"}` : "Send a query to admin", Icon: MessageSquare, c: MAROON, badge: newReplies },
+    { key: "more", label: "More", sub: "Password, account & sign out", Icon: Settings, c: "#5b6472" },
   ];
   return (
     <Screen>
@@ -254,6 +257,82 @@ function QueryScreen({ queries = [], reload }) {
             : <p className="mt-2 text-[11px] text-slate-400">Awaiting a reply from the college.</p>}
         </Card>
       ))}
+    </Screen>
+  );
+}
+
+/* -------- More: profile · change password · sign out · delete account -------- */
+function MoreScreen({ user, logout }) {
+  const [confirmOut, setConfirmOut] = useState(false);
+  // change password
+  const [cur, setCur] = useState(""); const [nw, setNw] = useState(""); const [cf, setCf] = useState("");
+  const [pwBusy, setPwBusy] = useState(false); const [pwOk, setPwOk] = useState(false); const [pwErr, setPwErr] = useState("");
+  const changePw = async () => {
+    setPwErr(""); setPwOk(false);
+    if (nw.length < 8) { setPwErr("New password must be at least 8 characters."); return; }
+    if (nw !== cf) { setPwErr("New passwords do not match."); return; }
+    setPwBusy(true);
+    try { const res = await api.changePassword(cur, nw); if (res?.token) setToken(res.token); setCur(""); setNw(""); setCf(""); setPwOk(true); }
+    catch (e) { setPwErr(e.message || "Could not change password."); }
+    finally { setPwBusy(false); }
+  };
+  // delete account
+  const [showDel, setShowDel] = useState(false);
+  const [delPw, setDelPw] = useState(""); const [delConfirm, setDelConfirm] = useState("");
+  const [delBusy, setDelBusy] = useState(false); const [delErr, setDelErr] = useState("");
+  const del = async () => {
+    setDelErr("");
+    if (delConfirm.trim().toUpperCase() !== "DELETE") { setDelErr("Type DELETE to confirm."); return; }
+    setDelBusy(true);
+    try { await api.deleteAccount(delPw, delConfirm.trim().toUpperCase()); logout(); }
+    catch (e) { setDelErr(e.message || "Could not delete account."); setDelBusy(false); }
+  };
+
+  const input = "mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2";
+  return (
+    <Screen>
+      <ConfirmDialog open={confirmOut} title="Sign out?" message="You'll need to sign in again to get back in." confirmLabel="Sign out" cancelLabel="Stay" danger onConfirm={logout} onCancel={() => setConfirmOut(false)} />
+
+      <Card className="flex items-center gap-3">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl text-base font-bold text-white shadow-sm" style={{ background: user.colour || MAROON }}>{user.initials || "S"}</div>
+        <div className="min-w-0"><p className="truncate text-sm font-extrabold text-slate-700">{user.name}</p><p className="truncate text-[11px] text-slate-400">{user.studentRef ? `${user.studentRef} \u00b7 ` : ""}{user.email}</p></div>
+      </Card>
+
+      <Card>
+        <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-400"><KeyRound size={13} /> Change password</p>
+        <div className="mt-2 space-y-2">
+          <input type="password" value={cur} onChange={e => setCur(e.target.value)} placeholder="Current password" className={input} style={{ "--tw-ring-color": NAVY }} />
+          <input type="password" value={nw} onChange={e => setNw(e.target.value)} placeholder="New password (min 8)" className={input} style={{ "--tw-ring-color": NAVY }} />
+          <input type="password" value={cf} onChange={e => setCf(e.target.value)} placeholder="Confirm new password" className={input} style={{ "--tw-ring-color": NAVY }} />
+        </div>
+        {pwOk && <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">Password updated.</p>}
+        {pwErr && <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">{pwErr}</p>}
+        <button onClick={changePw} disabled={pwBusy || !cur || !nw || !cf} className="press mt-3 flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold text-white shadow disabled:opacity-60" style={{ background: NAVY }}>
+          {pwBusy ? <><Loader2 size={15} className="animate-spin" /> Saving…</> : <><Lock size={15} /> Update password</>}
+        </button>
+      </Card>
+
+      <button onClick={() => setConfirmOut(true)} className="press flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-slate-200 bg-white py-3 text-sm font-bold text-slate-600 transition hover:border-slate-300">
+        <LogOut size={16} /> Sign out
+      </button>
+
+      <Card className="!ring-rose-200">
+        <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-rose-500"><AlertTriangle size={13} /> Delete account</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">Removes your app login only. Your college records (attendance, results) are kept — this just stops you signing in.</p>
+        {!showDel
+          ? <button onClick={() => setShowDel(true)} className="press mt-3 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-rose-200 py-2.5 text-sm font-bold text-rose-600 transition hover:bg-rose-50"><Trash2 size={15} /> Delete my account</button>
+          : <div className="mt-3 space-y-2">
+              <input type="password" value={delPw} onChange={e => setDelPw(e.target.value)} placeholder="Your password" className={input} style={{ "--tw-ring-color": "#e11d48" }} />
+              <input value={delConfirm} onChange={e => setDelConfirm(e.target.value)} placeholder="Type DELETE to confirm" className={input} style={{ "--tw-ring-color": "#e11d48" }} />
+              {delErr && <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">{delErr}</p>}
+              <div className="flex gap-2">
+                <button onClick={() => { setShowDel(false); setDelErr(""); }} disabled={delBusy} className="press flex-1 rounded-xl border-2 border-slate-200 py-2.5 text-sm font-bold text-slate-600">Cancel</button>
+                <button onClick={del} disabled={delBusy || !delPw} className="press flex-1 rounded-xl py-2.5 text-sm font-bold text-white shadow disabled:opacity-60" style={{ background: MAROON }}>{delBusy ? <Loader2 size={15} className="mx-auto animate-spin" /> : "Delete"}</button>
+              </div>
+            </div>}
+      </Card>
+
+      <p className="px-1 pt-1 text-center text-[11px] text-slate-300">London Brookes College · Student Hub</p>
     </Screen>
   );
 }

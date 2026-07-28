@@ -279,6 +279,16 @@ router.put("/change-password", requireAuth, async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
   if (!currentPassword || !newPassword) return res.status(400).json({ error: "Current and new password are required" });
   if (String(newPassword).length < 8) return res.status(400).json({ error: "New password must be at least 8 characters" });
+
+  // Student accounts change their own password too (the student app "More" screen).
+  if (req.user.kind === "student") {
+    const student = await prisma.student.findUnique({ where: { id: req.user.id } });
+    if (!student || !student.passwordHash || !verifyPassword(currentPassword, student.passwordHash)) return res.status(400).json({ error: "Current password is incorrect" });
+    if (verifyPassword(newPassword, student.passwordHash)) return res.status(400).json({ error: "New password must be different from your current one" });
+    const updated = await prisma.student.update({ where: { id: student.id }, data: { passwordHash: hashPassword(newPassword), tokenVersion: { increment: 1 } } });
+    return res.json({ ok: true, user: { ...sStudent(updated), kind: "student" }, token: signStudentToken(updated) });
+  }
+
   const staff = await prisma.staff.findUnique({ where: { id: req.user.id } });
   if (!staff || !verifyPassword(currentPassword, staff.passwordHash)) return res.status(400).json({ error: "Current password is incorrect" });
   if (verifyPassword(newPassword, staff.passwordHash)) return res.status(400).json({ error: "New password must be different from your current one" });
@@ -367,6 +377,19 @@ router.post("/invite/accept", async (req, res) => {
 // must not be able to erase someone's employment record.
 router.delete("/account", requireAuth, async (req, res) => {
   const { password, code, confirm } = req.body || {};
+
+  // A student "delete account" removes their LOGIN only. Their academic record
+  // (attendance, assessments) is the college's data and is kept — clearing the
+  // password just means they can no longer sign in. Admins are told.
+  if (req.user.kind === "student") {
+    const student = await prisma.student.findUnique({ where: { id: req.user.id } });
+    if (!student) return res.status(404).json({ error: "Account not found" });
+    if (String(confirm || "").trim().toUpperCase() !== "DELETE") return res.status(400).json({ error: 'Type DELETE to confirm' });
+    if (!password || !student.passwordHash || !verifyPassword(password, student.passwordHash)) return res.status(400).json({ error: "Password is incorrect" });
+    await prisma.student.update({ where: { id: student.id }, data: { passwordHash: null, tokenVersion: { increment: 1 } } });
+    notifyAdmins({ type: "info", message: `Student ${student.firstName} ${student.lastName} (${student.studentRef}) removed their app account.` }).catch(() => {});
+    return res.json({ ok: true, message: "Your app account has been removed. Your college records are unaffected." });
+  }
 
   const staff = await prisma.staff.findUnique({ where: { id: req.user.id } });
   if (!staff) return res.status(404).json({ error: "Account not found" });
