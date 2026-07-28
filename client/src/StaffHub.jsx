@@ -3545,16 +3545,6 @@ function StudentAttendanceDetail({ student, store }) {
           <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">{current.modules.length} running</span>
         </div>
         <div className="flex items-center gap-4">
-          <div className="relative h-24 w-24 shrink-0">
-            <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
-              <circle cx="60" cy="60" r={R} fill="none" stroke="#e2e8f0" strokeWidth="12" />
-              <circle cx="60" cy="60" r={R} fill="none" stroke={oTone.colour} strokeWidth="12" strokeLinecap="round" strokeDasharray={`${CIRC}`} strokeDashoffset={`${CIRC * (1 - (current.overall.pct ?? 0) / 100)}`} style={{ transition: "stroke-dashoffset 1s ease" }} />
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-xl font-extrabold tabular-nums" style={{ color: oTone.colour }}>{fmtPct(current.overall.pct ?? null)}</span>
-              <span className="text-[10px] font-medium text-slate-400">overall</span>
-            </div>
-          </div>
           <div className="min-w-0 flex-1">
             <div className="grid grid-cols-4 gap-1.5 text-center">
               {ATT_STATUSES.map(s => (
