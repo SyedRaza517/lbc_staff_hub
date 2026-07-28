@@ -1295,8 +1295,8 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
 /* ============================================================ ADMIN DASHBOARD ============================================================ */
 // The assignable admin pages, in nav order. "access" is intentionally excluded —
 // it is Super-Admin-only and never granted. Keep in sync with server validate.js.
-const ADMIN_PAGES = ["overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staff", "timesheets", "settings"];
-const PAGE_LABELS = { overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staff: "Staff", timesheets: "Timesheets", settings: "Settings" };
+const ADMIN_PAGES = ["overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "studentqueries", "staff", "timesheets", "settings"];
+const PAGE_LABELS = { overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", settings: "Settings" };
 
 // Can this user see/use a given admin page? The Super Admin gets everything,
 // including the Super-Admin-only Access tab. A page-scoped admin gets only their
@@ -1329,6 +1329,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
     { key: "students", label: "Students", I: GraduationCap },
     { key: "assessments", label: "Assessments", I: Award },
     { key: "pat", label: "PAT", I: MessageSquare },
+    { key: "studentqueries", label: "Student Queries", I: Inbox },
     { key: "staff", label: "Staff", I: Users },
     { key: "timesheets", label: "Timesheets", I: Timer },
     { key: "settings", label: "Settings", I: Settings },
@@ -1342,6 +1343,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
   const activeKey = nav.some(n => n.key === tab) ? tab : (nav[0]?.key || null);
   const pendingCount = store.leave.filter(l => l.status === "pending").length;
   const pendingSignups = (store.signups || []).filter(s => s.status === "pending").length;
+  const openQueries = (store.studentQueries || []).filter(q => q.status === "open").length;
   return (
     <div className="flex min-h-[calc(100vh-40px)]">
       <aside className="hidden w-60 flex-col bg-white px-4 py-5 ring-1 ring-slate-200 md:flex">
@@ -1355,6 +1357,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
               <n.I size={18} className="transition-transform duration-200 group-hover:scale-110" /><span className="flex-1 text-left">{n.label}</span>
               {(n.key === "requests" || n.key === "approvals") && pendingCount > 0 && <span className="pop rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-900 shadow-sm">{pendingCount}</span>}
               {n.key === "signups" && pendingSignups > 0 && <span className="pop rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-900 shadow-sm">{pendingSignups}</span>}
+              {n.key === "studentqueries" && openQueries > 0 && <span className="pop rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-900 shadow-sm">{openQueries}</span>}
             </button>
           ))}
         </nav>
@@ -1381,6 +1384,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
         {activeKey === "students" && <AdminStudents store={store} />}
         {activeKey === "assessments" && <AdminAssessments store={store} />}
         {activeKey === "pat" && <AdminPAT store={store} />}
+        {activeKey === "studentqueries" && <AdminStudentQueries store={store} />}
         {activeKey === "staff" && <AdminStaff store={store} />}
         {activeKey === "timesheets" && <AdminTimesheets store={store} />}
         {activeKey === "settings" && <AdminSettings store={store} />}
@@ -2228,6 +2232,80 @@ function AdminSignups({ store }) {
           <PrimaryBtn colour={modal?.action === "approved" ? "#059669" : MAROON} onClick={confirm} disabled={busy} className="w-full">
             {modal?.action === "approved" ? <><CheckCircle2 size={16} /> {modal?.req.kind === "student" ? "Approve & activate student" : "Approve & create account"}</> : <><XCircle size={16} /> Confirm decline</>}
           </PrimaryBtn>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+/* ----- Dashboard: Student Queries ----- */
+function AdminStudentQueries({ store }) {
+  const [filter, setFilter] = useState("all"); // all | open | answered
+  const [modal, setModal] = useState(null);
+  const [reply, setReply] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const all = store.studentQueries || [];
+  const ql = query.trim().toLowerCase();
+  const rows = all
+    .filter(q => filter === "all" || q.status === filter)
+    .filter(q => !ql || (q.studentName || "").toLowerCase().includes(ql) || (q.subject || "").toLowerCase().includes(ql) || (q.message || "").toLowerCase().includes(ql));
+  const open = all.filter(q => q.status === "open").length;
+
+  const openReply = (q) => { setModal(q); setReply(q.response || ""); };
+  const send = async () => {
+    if (!reply.trim()) return;
+    setBusy(true);
+    try { await store.respondStudentQuery(modal.id, reply.trim()); setModal(null); setReply(""); }
+    catch (e) {} finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <AdminHeader title="Student Queries" subtitle="Questions from students — reply and they'll see it in their app" Icon={Inbox}
+        action={<span className="flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 ring-1 ring-amber-200"><MessageSquare size={13} /> {open} open</span>} />
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200"><Search size={15} className="text-slate-400" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search student, subject or text…" className="bg-transparent text-sm outline-none" /></div>
+        <div className="flex gap-1 rounded-xl bg-white p-1 ring-1 ring-slate-200">
+          {["all", "open", "answered"].map(f => <button key={f} onClick={() => setFilter(f)} className={`rounded-lg px-3 py-1.5 text-xs font-bold capitalize transition ${filter === f ? "text-white" : "text-slate-500 hover:bg-slate-100"}`} style={filter === f ? { background: NAVY } : {}}>{f}</button>)}
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {rows.length === 0 && <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200"><EmptyState Icon={Inbox} title="No queries" msg="Questions students send from their app appear here." /></div>}
+        {rows.map((q, i) => (
+          <div key={q.id} className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 fade-up" style={{ animationDelay: `${i * 40}ms` }}>
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm" style={{ background: q.studentColour || NAVY }}>{q.studentInitials || "S"}</span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-bold text-slate-700">{q.studentName || "Student"} <span className="text-[11px] font-medium text-slate-400">{q.studentRef ? `· ${q.studentRef}` : ""}</span></p>
+                <p className="truncate text-xs text-slate-400">{q.subject}</p>
+              </div>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${q.status === "open" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>{q.status === "open" ? "Open" : "Answered"}</span>
+            </div>
+            <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">{q.message}</p>
+            {q.response && <div className="mt-2 rounded-xl bg-blue-50 px-3 py-2 text-sm text-blue-800 ring-1 ring-blue-100"><p className="mb-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-500">Your reply{q.respondedBy ? ` · ${q.respondedBy}` : ""}{q.respondedAt ? ` · ${fmtDate(q.respondedAt)}` : ""}</p>{q.response}</div>}
+            <div className="mt-3 flex items-center justify-between">
+              <p className="text-[11px] text-slate-400">Sent {fmtDate(String(q.createdAt).slice(0, 10))}</p>
+              <PrimaryBtn onClick={() => openReply(q)} className="!py-2 !px-3 text-xs">{q.status === "open" ? <><Send size={14} /> Reply</> : <><Edit3 size={14} /> Edit reply</>}</PrimaryBtn>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Modal open={!!modal} onClose={() => !busy && setModal(null)} title="Reply to student">
+        <div className="space-y-3">
+          <div className="rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200">
+            <p className="text-sm font-bold text-slate-700">{modal?.studentName}</p>
+            <p className="text-[11px] text-slate-400">{modal?.subject}</p>
+            <p className="mt-1.5 text-sm text-slate-600">{modal?.message}</p>
+          </div>
+          <Field label="Your acknowledgement / feedback">
+            <textarea value={reply} onChange={e => setReply(e.target.value)} rows={4} placeholder="Write a reply the student will see in their app…" className={inputCls + " resize-none"} />
+          </Field>
+          <PrimaryBtn onClick={send} disabled={busy || !reply.trim()} className="w-full">{busy ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Send reply</>}</PrimaryBtn>
         </div>
       </Modal>
     </>

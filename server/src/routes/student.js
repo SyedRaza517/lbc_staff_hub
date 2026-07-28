@@ -3,7 +3,7 @@
 // branch already blocks student tokens from every other router.
 const router = require("express").Router();
 const prisma = require("../db");
-const { sModule, sStudent } = require("../serializers");
+const { sModule, sStudent, sStudentQuery } = require("../serializers");
 const { requireAuth, requireStudent } = require("../auth");
 const { summarise } = require("../attendance");
 const { localDate } = require("../clock");
@@ -80,26 +80,25 @@ router.get("/me/assessments", async (req, res) => {
   });
 });
 
-// POST /api/student/me/query — a simple message to the admins. Logged as a PAT
-// interaction flagged for follow-up so it shows up in the admin PAT area.
+// GET /api/student/me/queries — this student's own queries and any admin replies.
+router.get("/me/queries", async (req, res) => {
+  const rows = await prisma.studentQuery.findMany({ where: { studentId: req.user.id }, orderBy: { createdAt: "desc" } });
+  res.json(rows.map(sStudentQuery));
+});
+
+// POST /api/student/me/query — the student sends a query to the college. Admins pick
+// it up and reply in the Student Queries tab; the reply comes back here to the student.
 router.post("/me/query", async (req, res) => {
   const message = str(req.body?.message);
   const subject = str(req.body?.subject) || "Student query";
   if (message.length < 3) return res.status(400).json({ error: "Please write your query" });
   if (message.length > 4000) return res.status(400).json({ error: "Query is too long" });
 
-  const now = new Date();
-  const time = now.toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit" });
-  await prisma.interaction.create({
-    data: {
-      studentId: req.user.id, date: localDate(), time,
-      queryType: subject, summary: message,
-      followUpActions: "", followUpRequired: true,
-      tutor: "", loggedBy: `${req.user.name} (student)`,
-    },
+  const query = await prisma.studentQuery.create({
+    data: { studentId: req.user.id, subject, message, status: "open" },
   });
-  notifyAdmins({ type: "info", message: `New query from student ${req.user.name}: ${subject}`, link: "pat" });
-  res.status(201).json({ ok: true });
+  notifyAdmins({ type: "info", message: `New query from student ${req.user.name}: ${subject}`, link: "studentqueries" });
+  res.status(201).json(sStudentQuery(query));
 });
 
 module.exports = router;

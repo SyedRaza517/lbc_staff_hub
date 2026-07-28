@@ -371,8 +371,28 @@ model Student {
   marks        AttendanceMark[]
   interactions Interaction[]
   grades       AssessmentGrade[]
+  queries      StudentQuery[]
 
   @@index([cohortId])
+}
+
+// A message a student sends to the college from the student app, and the admin's
+// written reply. Two-way: the student sees the response back in their app. Kept as
+// a permanent record of every query and its answer.
+model StudentQuery {
+  id          String   @id @default(cuid())
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId   String
+  subject     String   @default("")
+  message     String
+  status      String   @default("open")   // open | answered
+  response    String   @default("")        // admin's acknowledgement / written feedback
+  respondedBy String?                       // admin name
+  respondedAt String?                       // YYYY-MM-DD
+  createdAt   DateTime @default(now())
+
+  @@index([studentId])
+  @@index([status])
 }
 
 // A PAT (Personal Academic Tutor) interaction — a logged meeting/contact with a

@@ -175,48 +175,58 @@ function AssessmentsScreen() {
   );
 }
 
-/* -------- Query to admin -------- */
+/* -------- Query to admin (two-way) -------- */
 function QueryScreen() {
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
+  const [ok, setOk] = useState(false);
   const [err, setErr] = useState("");
+  const [list, setList] = useState(null);
+  const load = () => api.studentQueries().then(setList).catch(() => setList([]));
+  useEffect(() => { load(); }, []);
   const submit = async () => {
-    setErr("");
+    setErr(""); setOk(false);
     if (message.trim().length < 3) { setErr("Please write your query."); return; }
     setBusy(true);
-    try { await api.submitStudentQuery(subject.trim() || "Student query", message.trim()); setDone(true); }
+    try { await api.submitStudentQuery(subject.trim() || "Student query", message.trim()); setSubject(""); setMessage(""); setOk(true); load(); }
     catch (e) { setErr(e.message || "Could not send your query."); }
     finally { setBusy(false); }
   };
-  if (done) return (
-    <Screen>
-      <Card className="text-center">
-        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 ring-4 ring-emerald-50"><CheckCircle2 size={34} className="text-emerald-600" /></div>
-        <p className="text-lg font-extrabold" style={{ color: NAVY }}>Query sent</p>
-        <p className="mt-1 text-sm text-slate-500">The college team has received your message and will follow up.</p>
-        <button onClick={() => { setDone(false); setSubject(""); setMessage(""); }} className="press mt-4 w-full rounded-xl border-2 border-slate-200 py-2.5 text-sm font-bold text-slate-600">Send another</button>
-      </Card>
-    </Screen>
-  );
   return (
     <Screen>
       <Card>
-        <p className="flex items-center gap-1.5 text-[11px] leading-relaxed text-slate-500"><Info size={13} className="shrink-0 text-blue-500" /> Send a question or request to the college administrators. They'll see it and follow up with you.</p>
+        <p className="flex items-center gap-1.5 text-[11px] leading-relaxed text-slate-500"><Info size={13} className="shrink-0 text-blue-500" /> Send a question to the college. They'll reply, and you'll see it here.</p>
         <div className="mt-3">
           <label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Subject</label>
           <input value={subject} onChange={e => setSubject(e.target.value)} disabled={busy} placeholder="e.g. Attendance query" className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2" style={{ "--tw-ring-color": NAVY }} />
         </div>
         <div className="mt-3">
           <label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Your query</label>
-          <textarea value={message} onChange={e => setMessage(e.target.value)} disabled={busy} rows={6} placeholder="Write your question or request here…" className="mt-1 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2" style={{ "--tw-ring-color": NAVY }} />
+          <textarea value={message} onChange={e => setMessage(e.target.value)} disabled={busy} rows={5} placeholder="Write your question or request here…" className="mt-1 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2" style={{ "--tw-ring-color": NAVY }} />
         </div>
+        {ok && <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">Sent — the college will reply below.</p>}
         {err && <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">{err}</p>}
         <button onClick={submit} disabled={busy} className="press mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white shadow-lg disabled:opacity-60" style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}>
           {busy ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Send to college</>}
         </button>
       </Card>
+
+      <p className="px-1 pt-1 text-xs font-bold uppercase tracking-wide text-slate-400">Your queries</p>
+      {list === null && <Loading />}
+      {list && list.length === 0 && <Card className="text-center"><p className="py-6 text-xs text-slate-400">You haven't sent any queries yet.</p></Card>}
+      {list && list.map(q => (
+        <Card key={q.id} className="!p-3.5">
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-700">{q.subject}</p><p className="text-[10px] text-slate-400">{fmtDate(String(q.createdAt).slice(0, 10))}</p></div>
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${q.status === "open" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>{q.status === "open" ? "Awaiting reply" : "Answered"}</span>
+          </div>
+          <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{q.message}</p>
+          {q.response
+            ? <div className="mt-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800 ring-1 ring-blue-100"><p className="mb-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-500">College reply{q.respondedAt ? ` · ${fmtDate(q.respondedAt)}` : ""}</p>{q.response}</div>
+            : <p className="mt-2 text-[11px] text-slate-400">Awaiting a reply from the college.</p>}
+        </Card>
+      ))}
     </Screen>
   );
 }

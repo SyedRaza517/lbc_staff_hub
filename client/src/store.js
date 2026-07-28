@@ -16,6 +16,7 @@ export function useApiStore(notify, user) {
   const [docs, setDocs] = useState([]);
   const [adjustments, setAdjustments] = useState([]);
   const [signups, setSignups] = useState([]);
+  const [studentQueries, setStudentQueries] = useState([]);
   const [loaded, setLoaded] = useState(false);
   // HND registers. Loaded lazily by the admin page rather than on login —
   // staff users never open it, so there's no reason to fetch it for them.
@@ -54,6 +55,9 @@ export function useApiStore(notify, user) {
       if (isAdmin) {
         try { setSignups(await api.listSignups()); }
         catch (_) { setSignups([]); }
+        // Student queries — tolerant like sign-ups (page-gated + needs the new API).
+        try { setStudentQueries(await api.listStudentQueries()); }
+        catch (_) { setStudentQueries([]); }
       }
     } catch (e) { notify?.(e.message || "Failed to load data", "error"); }
     setLoaded(true);
@@ -227,6 +231,8 @@ export function useApiStore(notify, user) {
       (id, status) => (status === "approved" ? "Account approved — they can now sign in" : "Sign-up declined"),
       "info",
     ),
+    // student queries
+    respondStudentQuery: run((id, response) => api.respondStudentQuery(id, response), "Reply sent to the student"),
     // staff
     addStaff: run((data) => api.addStaff(data), (d) => `Added ${d.name}`),
     updateStaff: run((id, data) => api.updateStaff(id, data), "Staff updated"),
@@ -291,7 +297,7 @@ export function useApiStore(notify, user) {
   };
 
   return {
-    staff, leave, checkins, docs, adjustments, signups, loaded,
+    staff, leave, checkins, docs, adjustments, signups, studentQueries, loaded,
     modules, students, sessions, semesters, programmes, cohorts, terms, unassignedSessions, semesterId, attendance, hndLoaded,
     interactions, interactionsLoaded,
     assessments, assessmentOverview, assessmentsLoaded,

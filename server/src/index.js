@@ -61,6 +61,7 @@ app.use("/api/interactions", wrapAsync(require("./routes/interactions")));
 app.use("/api/assessments", wrapAsync(require("./routes/assessments")));
 app.use("/api/timesheets", wrapAsync(require("./routes/timesheets")));
 app.use("/api/student", wrapAsync(require("./routes/student")));
+app.use("/api/student-queries", wrapAsync(require("./routes/studentQueries")));
 
 // 404 + error handlers
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));

@@ -97,4 +97,15 @@ const sTimesheet = (t) => ({
   ...(t.staff ? { staffName: t.staff.name, staffDept: t.staff.dept, staffInitials: t.staff.initials, staffColour: t.staff.colour } : {}),
 });
 
-module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sProgramme, sCohort, sTerm, sModule, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet };
+// A student query + its (optional) admin response. Includes a light student summary
+// for the admin list.
+const sStudentQuery = (q) => ({
+  id: q.id, studentId: q.studentId,
+  subject: q.subject || "", message: q.message,
+  status: q.status, response: q.response || "",
+  respondedBy: q.respondedBy ?? null, respondedAt: q.respondedAt ?? null,
+  createdAt: q.createdAt,
+  ...(q.student ? { studentName: q.student.name || `${q.student.firstName} ${q.student.lastName}`, studentRef: q.student.studentRef, studentEmail: q.student.email, studentInitials: q.student.initials, studentColour: q.student.colour } : {}),
+});
+
+module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sProgramme, sCohort, sTerm, sModule, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet, sStudentQuery };

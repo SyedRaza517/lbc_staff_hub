@@ -86,6 +86,11 @@ export const api = {
   studentAttendance: () => request("/student/me/attendance"),
   studentAssessments: () => request("/student/me/assessments"),
   submitStudentQuery: (subject, message) => request("/student/me/query", { method: "POST", body: { subject, message } }),
+  studentQueries: () => request("/student/me/queries"),
+
+  // admin: student queries tab
+  listStudentQueries: (status) => request(`/student-queries${status ? `?status=${status}` : ""}`),
+  respondStudentQuery: (id, response) => request(`/student-queries/${id}/respond`, { method: "PUT", body: { response } }),
   // notifications
   listNotifications: () => request("/notifications"),
   markNotificationsRead: () => request("/notifications/read", { method: "PUT" }),
