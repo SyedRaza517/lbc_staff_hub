@@ -82,13 +82,6 @@ export function useApiStore(notify, user) {
   }, [notify, semesterId]);
 
   // derived
-  // Every approved leave type counts against the allowance (sick included) — the
-  // total is reduced by any approved leave, regardless of type.
-  // Unpaid leave does not draw down the paid allowance, so it's excluded here (kept
-  // in sync with the server's UNPAID_TYPES and the client's NON_ALLOWANCE_TYPES).
-  const usedDays = useCallback((id) => leave.filter((l) => l.staffId === id && l.status === "approved" && l.type !== "unpaid").reduce((s, l) => s + (l.days ?? daysBetween(l.start, l.end)), 0), [leave]);
-  const adjDays = useCallback((id) => adjustments.filter((a) => a.staffId === id).reduce((s, a) => s + a.days, 0), [adjustments]);
-  const effectiveAllowance = useCallback((id) => { const s = staff.find((x) => x.id === id); return (s?.allowance || 0) + adjDays(id); }, [staff, adjDays]);
 
   // --- Bank holidays ---
   // The standard UK (England & Wales) bank holidays, computed for a span of years so
@@ -98,11 +91,23 @@ export function useApiStore(notify, user) {
   const bankHolidays = useMemo(() => ukBankHolidaysRange(thisYear - 1, thisYear + 2), [thisYear]);
   const bankHolidaySet = useMemo(() => new Map(bankHolidays.map((h) => [h.date, h.name])), [bankHolidays]);
   const isBankHoliday = useCallback((iso) => bankHolidaySet.has(iso), [bankHolidaySet]);
+  // How many bank holidays fall inside an inclusive date range.
+  const bankHolidaysBetween = useCallback((start, end) => bankHolidays.reduce((n, h) => n + (h.date >= start && h.date <= end ? 1 : 0), 0), [bankHolidays]);
   // "As each occurs": bank holidays in THIS calendar year whose date has arrived.
   const bankHolidayDaysUsed = useCallback(() => {
     const today = todayISO(); const y = String(thisYear);
     return bankHolidays.filter((h) => h.date.slice(0, 4) === y && h.date <= today).length;
   }, [bankHolidays, thisYear]);
+
+  // Every approved leave type counts against the allowance (sick included) — the
+  // total is reduced by any approved leave, regardless of type. Unpaid leave does
+  // not draw down the paid allowance, so it's excluded (kept in sync with the
+  // server's UNPAID_TYPES and the client's NON_ALLOWANCE_TYPES). Bank holidays that
+  // fall inside a leave period are subtracted here so they aren't charged twice —
+  // a bank holiday only ever counts once, via the separate bank-holiday deduction.
+  const usedDays = useCallback((id) => leave.filter((l) => l.staffId === id && l.status === "approved" && l.type !== "unpaid").reduce((s, l) => s + Math.max(0, (l.days ?? daysBetween(l.start, l.end)) - bankHolidaysBetween(l.start, l.end)), 0), [leave, bankHolidaysBetween]);
+  const adjDays = useCallback((id) => adjustments.filter((a) => a.staffId === id).reduce((s, a) => s + a.days, 0), [adjustments]);
+  const effectiveAllowance = useCallback((id) => { const s = staff.find((x) => x.id === id); return (s?.allowance || 0) + adjDays(id); }, [staff, adjDays]);
   // Days a staff member has left: allowance − their approved leave − bank holidays so far.
   const remaining = useCallback((id) => effectiveAllowance(id) - usedDays(id) - bankHolidayDaysUsed(), [effectiveAllowance, usedDays, bankHolidayDaysUsed]);
 
