@@ -11,6 +11,7 @@ import { api } from "./api";
 import { TotpSetup, TotpVerify } from "./TwoFactor";
 import { ForgotPasswordForm } from "./ResetPassword";
 import PhoneShell, { useIsHandset } from "./PhoneShell";
+import { BrandMark } from "./Brand";
 import {
   GraduationCap, LogIn, UserPlus, Mail, Lock, User, Briefcase, Building2,
   Loader2, XCircle, CheckCircle2, ArrowLeft, ShieldCheck, Wifi, BatteryFull, Clock, MapPin,
@@ -57,8 +58,8 @@ function Phone({ children, onBack }) {
           </button>
         )}
         <div className="flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/15 text-white ring-1 ring-white/20">
-            <GraduationCap size={17} />
+          <span className="flex h-8 w-9 items-center justify-center rounded-xl bg-white/95 ring-1 ring-white/20">
+            <BrandMark size={22} />
           </span>
           <div className="leading-tight">
             <p className="text-[13px] font-extrabold tracking-tight text-white" style={{ fontFamily: "'Lora', serif" }}>London Brookes</p>
@@ -320,9 +321,12 @@ export default function MobileAuth({ onExit }) {
       )}
 
       {mode === "signin" && (
-        <p className="flex items-center justify-center gap-1 pb-5 text-[10px] text-slate-300">
-          <Clock size={11} /> London Brookes College · Staff Hub
-        </p>
+        <div className="pb-5 text-center">
+          <p className="flex items-center justify-center gap-1 text-[10px] text-slate-300">
+            <Clock size={11} /> London Brookes College · Staff Hub
+          </p>
+          <p className="mt-0.5 text-[10px] text-slate-300">© 2026 Syed Muhammad Raza</p>
+        </div>
       )}
     </Phone>
   );

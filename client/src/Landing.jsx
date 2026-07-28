@@ -2,6 +2,7 @@
 // (which has its own in-app sign in / sign up) or the admin dashboard login.
 import React from "react";
 import { GraduationCap, Smartphone, Monitor, ArrowRight, ShieldCheck, UserPlus } from "lucide-react";
+import { BrandLockup } from "./Brand";
 
 const NAVY = "#1a3a8f", NAVY_DARK = "#14306f", MAROON = "#9e1b32";
 
@@ -47,13 +48,7 @@ export default function Landing({ onStaffApp, onAdmin }) {
       <div className="relative w-full max-w-3xl">
         <div className="scale-in mb-8 flex flex-col items-center text-center">
           <div className="float mb-3 flex flex-col items-center justify-center gap-1 rounded-2xl bg-white px-5 py-3 shadow-lg ring-1 ring-slate-200/80">
-            <div className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg text-white shadow-sm" style={{ background: `linear-gradient(135deg, ${NAVY} 0%, ${MAROON} 130%)` }}>
-                <GraduationCap size={16} />
-              </span>
-              <span className="font-extrabold tracking-tight" style={{ color: NAVY, fontSize: 16, fontFamily: "'Lora', serif" }}>LONDON BROOKES</span>
-            </div>
-            <span className="font-bold tracking-[0.32em]" style={{ color: MAROON, fontSize: 11, fontFamily: "'Lora', serif" }}>COLLEGE</span>
+            <BrandLockup />
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight text-white drop-shadow-sm" style={{ fontFamily: "'Lora', serif" }}>Staff Hub</h1>
           <p className="mt-1 text-sm text-white/70">Choose how you'd like to continue</p>

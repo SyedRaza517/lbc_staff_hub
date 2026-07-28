@@ -17,6 +17,7 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
 import { downloadCSV } from "./csv";
+import { BrandMark, BrandLockup } from "./Brand";
 import PhoneShell, { useIsHandset } from "./PhoneShell";
 import DeleteAccount from "./DeleteAccount";
 import { biometricStatus, biometryLabel, isBiometricEnabled, enableBiometric, disableBiometric } from "./biometric";
@@ -229,15 +230,10 @@ function Modal({ open, onClose, title, children, width = 460 }) {
   // warning above the top of the screen.
   return typeof document !== "undefined" ? createPortal(dialog, document.body) : dialog;
 }
+// The London Brookes College logo. In tight boxes (`small`) we show just the arch
+// emblem; elsewhere the full emblem + wordmark lockup. Both come from ./Brand.
 function Logo({ small }) {
-  return (
-    <div className="flex flex-col items-center justify-center leading-none">
-      {/* 8px / 6.5px was effectively unreadable on a phone — below the ~11px floor
-          iOS uses for its own smallest system style. Raised to a legible minimum. */}
-      <span className="font-extrabold tracking-tight" style={{ color: NAVY, fontSize: small ? 10 : 12, fontFamily: "'Lora', serif" }}>LONDON BROOKES</span>
-      <span className="font-bold tracking-[0.14em]" style={{ color: MAROON, fontSize: small ? 9 : 10, fontFamily: "'Lora', serif" }}>COLLEGE</span>
-    </div>
-  );
+  return small ? <BrandMark size={30} /> : <BrandLockup />;
 }
 const statusBadge = (s) => ({ pending: "bg-amber-100 text-amber-700", approved: "bg-emerald-100 text-emerald-700", rejected: "bg-rose-100 text-rose-700" }[s]);
 
@@ -5464,7 +5460,7 @@ function AdminSettings({ store }) {
               <div className="rounded-xl bg-slate-50 py-2.5"><p className="text-lg font-extrabold" style={{ color: NAVY }}>{store.docs.length}</p><p className="text-[10px] text-slate-400">Documents</p></div>
             </div>
           </div>
-          <div className="animated-gradient relative overflow-hidden rounded-2xl p-5 text-white shadow-md transition-all duration-300 hover:shadow-xl fade-up" style={{ background: `linear-gradient(135deg, ${NAVY} 0%, ${NAVY_DARK} 45%, ${MAROON} 130%)`, backgroundSize: "200% 200%" }}><Building2 size={64} className="float-slow absolute -right-3 -top-3 text-white/10" /><div className="relative mb-2 flex h-9 w-12 items-center justify-center rounded-md bg-white"><Logo small /></div><p className="relative text-sm font-bold">London Brookes College</p><p className="relative mt-1 flex items-center gap-1.5 text-xs text-white/70"><MapPin size={12} /> 42 The Burroughs, London NW4 4AP</p><p className="relative flex items-center gap-1.5 text-xs text-white/70"><Phone size={12} /> 020 8202 2007</p><p className="relative mt-3 text-[11px] text-white/50">Staff Hub Admin Console v2.0</p></div>
+          <div className="animated-gradient relative overflow-hidden rounded-2xl p-5 text-white shadow-md transition-all duration-300 hover:shadow-xl fade-up" style={{ background: `linear-gradient(135deg, ${NAVY} 0%, ${NAVY_DARK} 45%, ${MAROON} 130%)`, backgroundSize: "200% 200%" }}><Building2 size={64} className="float-slow absolute -right-3 -top-3 text-white/10" /><div className="relative mb-2 flex h-9 w-12 items-center justify-center rounded-md bg-white"><Logo small /></div><p className="relative text-sm font-bold">London Brookes College</p><p className="relative mt-1 flex items-center gap-1.5 text-xs text-white/70"><MapPin size={12} /> 42 The Burroughs, London NW4 4AP</p><p className="relative flex items-center gap-1.5 text-xs text-white/70"><Phone size={12} /> 020 8202 2007</p><p className="relative mt-3 text-[11px] text-white/50">Staff Hub Admin Console v2.0</p><p className="relative text-[11px] text-white/50">© 2026 Syed Muhammad Raza</p></div>
         </div>
       </div>
       <Modal open={!!deleteTarget} onClose={() => !deleteBusy && setDeleteTarget(null)} title="Remove staff member">

@@ -371,6 +371,8 @@ function Shell({ user, logout, entry }) {
               gone now: the front-door Landing screen already asks which one to
               open, so switching again from the header was redundant. */}
           <span className="font-semibold tracking-wide text-slate-200">London Brookes College · Staff Hub</span>
+          <span className="hidden text-slate-400 md:inline">·</span>
+          <span className="hidden text-[11px] text-slate-400 md:inline">© 2026 Syed Muhammad Raza</span>
         </div>
         <div className="flex items-center gap-2.5">
           <LiveClock />
