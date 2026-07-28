@@ -23,9 +23,10 @@ workflows:
     integrations:
       app_store_connect: CodemagicAppStoreKey   # <-- rename to YOUR integration name from step 2
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: uk.ac.lbc.staffhub
+      # NOTE: no `ios_signing:` block here on purpose. That block does AUTOMATIC
+      # signing which only FETCHES an existing profile and fails on a new app
+      # ("No matching profiles found"). Instead the "Set up code signing" script
+      # below CREATES the certificate + profile via `fetch-signing-files --create`.
       vars:
         XCODE_SCHEME: "App"
         BUNDLE_ID: "uk.ac.lbc.staffhub"
