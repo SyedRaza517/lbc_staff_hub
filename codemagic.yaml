@@ -23,9 +23,6 @@ workflows:
     integrations:
       app_store_connect: CodemagicAppStoreKey   # <-- rename to YOUR integration name from step 2
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: uk.ac.lbc.staffhub
       vars:
         XCODE_SCHEME: "App"
         BUNDLE_ID: "uk.ac.lbc.staffhub"
