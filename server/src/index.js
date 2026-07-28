@@ -29,12 +29,18 @@ app.use((_req, res, next) => {
 // site is refused. Configure via CORS_ORIGINS (falls back to CLIENT_URL).
 const allowedOrigins = (process.env.CORS_ORIGINS || process.env.CLIENT_URL || "http://localhost:5173")
   .split(",").map((s) => s.trim()).filter(Boolean);
+// The native apps ALWAYS get CORS, regardless of CORS_ORIGINS. Capacitor sends an
+// Origin header from the WebView — iOS as capacitor://localhost, Android (with
+// androidScheme:"https") as https://localhost. Without this, iOS in particular is
+// blocked from every API call while Android happens to work. These are app-scheme
+// origins, not real websites, so allowing them is safe.
+const isNativeOrigin = (o) => /^(capacitor|ionic):\/\/localhost$/.test(o) || o === "https://localhost" || o === "http://localhost";
 app.use(cors({
   origin(origin, cb) {
     // Grant CORS headers only to allowed origins. A disallowed browser origin
     // simply receives no CORS headers and is blocked by the browser — we don't
     // error the request (that would just spam 500s and log noise).
-    cb(null, !origin || allowedOrigins.includes(origin));
+    cb(null, !origin || allowedOrigins.includes(origin) || isNativeOrigin(origin));
   },
 }));
 
