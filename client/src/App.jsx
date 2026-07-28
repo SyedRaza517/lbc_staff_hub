@@ -321,10 +321,12 @@ function Shell({ user, logout, entry }) {
     setNotes((n) => [{ id, msg, type, at: new Date() }, ...n].slice(0, 30));
   }, []);
 
-  // Seed the bell with the user's UNREAD persisted notifications on mount,
-  // mapped to the exact shape the existing bell/NotePanel expects.
+  // Seed the bell with the SIGNED-IN user's own unread notifications. Keyed to
+  // user.id and cleared first, so switching accounts never carries another person's
+  // notifications over — the bell is always personal to whoever is logged in.
   useEffect(() => {
     let cancelled = false;
+    setNotes([]); // drop the previous account's notifications immediately
     (async () => {
       try {
         const list = await api.listNotifications();
@@ -332,11 +334,12 @@ function Shell({ user, logout, entry }) {
         const seed = (list || [])
           .filter((n) => n.read === false)
           .map((n) => ({ id: n.id, msg: n.message, type: n.type, at: new Date(n.at) }));
-        if (seed.length) setNotes((n) => [...seed, ...n].slice(0, 30));
+        // seed + any toasts that fired in the meantime, this user's only
+        setNotes((n) => [...seed, ...n].slice(0, 30));
       } catch (_) { /* non-fatal: bell just stays toast-only */ }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [user.id]);
 
   // When the existing "Clear" button empties the notes (setNotes([])), also
   // persist that by marking all of the caller's notifications read on the server.

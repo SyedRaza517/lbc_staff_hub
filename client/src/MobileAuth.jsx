@@ -122,7 +122,7 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
     <form onSubmit={submit} className="fade-up flex flex-col gap-4 p-5">
       <div>
         <h2 className="text-lg font-extrabold tracking-tight text-slate-800">Welcome back</h2>
-        <p className="text-xs text-slate-500">Sign in to your staff account.</p>
+        <p className="text-xs text-slate-500">Sign in to your account.</p>
       </div>
 
       <Labelled label="Email" Icon={Mail}>
@@ -155,7 +155,7 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
 
       <button type="button" onClick={goSignUp}
         className="press flex items-center justify-center gap-2 rounded-xl border-2 border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-600 transition hover:border-slate-300 hover:text-slate-800">
-        <UserPlus size={16} /> Create a staff account
+        <UserPlus size={16} /> Create an account
       </button>
 
       <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-400">
