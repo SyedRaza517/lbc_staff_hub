@@ -282,14 +282,17 @@ router.post("/units", requireAuth, requireAdmin, async (req, res) => {
   const name = str(req.body?.name);
   if (!code) return res.status(400).json({ error: "Unit code required" });
   if (!name) return res.status(400).json({ error: "Unit name required" });
-  const clash = await prisma.unit.findUnique({ where: { code } });
-  if (clash) return res.status(409).json({ error: `Unit code "${code}" already exists` });
   const prog = await resolveCourse(req.body?.courseId);
   if (prog.error) return res.status(400).json({ error: prog.error });
+  const courseId = prog.skip ? null : prog.value;
+  // Unit codes are unique WITHIN a course only — the same code may exist on another
+  // course, so we scope the clash check to this unit's course.
+  const clash = await prisma.unit.findFirst({ where: { code, courseId } });
+  if (clash) return res.status(409).json({ error: `Unit code "${code}" already exists in this course` });
   const ct = await resolveCohortTerm(req.body?.cohortId, req.body?.termId);
   if (ct.error) return res.status(400).json({ error: ct.error });
   const m = await prisma.unit.create({
-    data: { code, name, tutor: str(req.body?.tutor), courseId: prog.skip ? null : prog.value, cohortId: ct.cohortId, termId: ct.termId },
+    data: { code, name, tutor: str(req.body?.tutor), courseId, cohortId: ct.cohortId, termId: ct.termId },
   });
   res.status(201).json(sUnit(m));
 });
@@ -298,22 +301,27 @@ router.put("/units/:id", requireAuth, requireAdmin, async (req, res) => {
   const existing = await prisma.unit.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Unit not found" });
   const data = {};
-  if (req.body?.code !== undefined) {
-    const code = str(req.body.code).toUpperCase();
-    if (!code) return res.status(400).json({ error: "Unit code required" });
-    const clash = await prisma.unit.findUnique({ where: { code } });
-    if (clash && clash.id !== existing.id) return res.status(409).json({ error: `Unit code "${code}" already exists` });
-    data.code = code;
+  // Resolve the target course first — the code-uniqueness check is scoped to it.
+  const prog = await resolveCourse(req.body?.courseId);
+  if (prog.error) return res.status(400).json({ error: prog.error });
+  const courseChanging = !prog.skip;
+  const targetCourseId = courseChanging ? prog.value : existing.courseId;
+  if (courseChanging) data.courseId = prog.value;
+  const codeChanging = req.body?.code !== undefined;
+  const effectiveCode = codeChanging ? str(req.body.code).toUpperCase() : existing.code;
+  if (codeChanging && !effectiveCode) return res.status(400).json({ error: "Unit code required" });
+  // Re-check uniqueness within the (possibly new) course whenever code OR course moves.
+  if (codeChanging || courseChanging) {
+    const clash = await prisma.unit.findFirst({ where: { code: effectiveCode, courseId: targetCourseId, id: { not: existing.id } } });
+    if (clash) return res.status(409).json({ error: `Unit code "${effectiveCode}" already exists in this course` });
   }
+  if (codeChanging) data.code = effectiveCode;
   if (req.body?.name !== undefined) {
     const name = str(req.body.name);
     if (!name) return res.status(400).json({ error: "Unit name required" });
     data.name = name;
   }
   if (req.body?.tutor !== undefined) data.tutor = str(req.body.tutor);
-  const prog = await resolveCourse(req.body?.courseId);
-  if (prog.error) return res.status(400).json({ error: prog.error });
-  if (!prog.skip) data.courseId = prog.value;
   // cohort/term are set together (the UI picks a cohort then its term).
   if (req.body?.cohortId !== undefined || req.body?.termId !== undefined) {
     const ct = await resolveCohortTerm(req.body?.cohortId, req.body?.termId);

@@ -290,7 +290,9 @@ model Term {
 // A taught HND unit, e.g. code "OBM" / name "Organisational Behaviour Management".
 model Unit {
   id          String     @id @default(cuid())
-  code        String     @unique
+  // Unit codes are unique WITHIN a course, not globally — the same code (e.g. "UNIT 01")
+  // may be reused on a different course. Enforced by the composite unique below.
+  code        String
   name        String
   tutor       String     @default("")
   course   Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
@@ -308,6 +310,7 @@ model Unit {
   enrolments  Enrolment[]
   assessments Assessment[]
 
+  @@unique([courseId, code])
   @@index([courseId])
   @@index([cohortId])
   @@index([termId])
