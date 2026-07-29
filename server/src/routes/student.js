@@ -51,7 +51,14 @@ router.get("/me/attendance", async (req, res) => {
   const previous = rows.filter((r) => r.finished).sort((a, b) => (b.endDate || "").localeCompare(a.endDate || ""));
   const currentOverall = summarise(current.flatMap((r) => marksByUnit.get(r.unit.id) || []));
 
-  res.json({ current: { units: current, overall: currentOverall }, previous });
+  // Back-compat: the Course→Unit rename renamed `module`→`unit` and `modules`→`units`
+  // in this response. Older installed app builds still read the OLD keys, so we send
+  // BOTH — new builds use unit/units, old installed builds keep working (no reinstall).
+  const alias = (r) => ({ ...r, module: r.unit });
+  res.json({
+    current: { units: current.map(alias), modules: current.map(alias), overall: currentOverall },
+    previous: previous.map(alias),
+  });
 });
 
 // GET /api/student/me/assessments — this student's assessments, marks, grades, average.
@@ -71,7 +78,7 @@ router.get("/me/assessments", async (req, res) => {
     const g = gMap.get(a.id);
     const pct = g ? pctOf(g.marks, a.maxMarks) : null;
     if (pct != null) { sum += pct; n++; }
-    return { id: a.id, title: a.title, type: a.type, maxMarks: a.maxMarks, weight: a.weight, dueDate: a.dueDate, unitCode: a.unit.code, unitName: a.unit.name, unitId: a.unitId, marks: g ? g.marks : null, feedback: g ? g.feedback : "", pct, grade: bandOf(pct) };
+    return { id: a.id, title: a.title, type: a.type, maxMarks: a.maxMarks, weight: a.weight, dueDate: a.dueDate, unitCode: a.unit.code, unitName: a.unit.name, unitId: a.unitId, moduleCode: a.unit.code, moduleName: a.unit.name, moduleId: a.unitId, marks: g ? g.marks : null, feedback: g ? g.feedback : "", pct, grade: bandOf(pct) };
   });
   res.json({
     assessments: items, count: items.length, graded: n,
