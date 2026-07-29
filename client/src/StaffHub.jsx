@@ -3422,6 +3422,7 @@ function AdminStudents({ store }) {
   const [query, setQuery] = useState("");
   const [unitFilter, setUnitFilter] = useState("");     // "" = any unit
   const [statusFilter, setStatusFilter] = useState("all");  // all | active | inactive
+  const [riskFilter, setRiskFilter] = useState("all");  // all | High Risk | Monitor | Good | Excellent | Perfect
   const [attnFor, setAttnFor] = useState(null);             // student whose breakdown is open
 
   // The Students tab can be opened without visiting Registers first, so pull the
@@ -3474,9 +3475,10 @@ function AdminStudents({ store }) {
     if (statusFilter === "active" && s.active === false) return false;
     if (statusFilter === "inactive" && s.active !== false) return false;
     if (unitFilter && !(s.unitIds || []).includes(unitFilter)) return false;
+    if (riskFilter !== "all" && riskBand(currentPctOf(s)).label !== riskFilter) return false;
     return !ql || s.name.toLowerCase().includes(ql) || s.email.toLowerCase().includes(ql) || s.studentRef.includes(ql);
   });
-  const paged = usePaged(filtered, 12, `${ql}|${unitFilter}|${statusFilter}`);
+  const paged = usePaged(filtered, 12, `${ql}|${unitFilter}|${statusFilter}|${riskFilter}`);
   const emailPreview = form.email || (form.studentRef ? `${form.studentRef}@londonbrookescollege.co.uk` : "");
 
   // Headline figures.
@@ -3550,6 +3552,16 @@ function AdminStudents({ store }) {
             {store.units.map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}
           </select>
         )}
+        {/* Filter by attendance-risk flag (red = High Risk). */}
+        <select value={riskFilter} onChange={e => setRiskFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 outline-none">
+          <option value="all">All risk levels</option>
+          <option value="High Risk">🔴 High Risk</option>
+          <option value="Monitor">🟠 Monitor</option>
+          <option value="Good">🟡 Good</option>
+          <option value="Excellent">🟢 Excellent</option>
+          <option value="Perfect">🟣 Perfect</option>
+        </select>
+        {riskFilter === "High Risk" && <span className="rounded-full bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-600 ring-1 ring-rose-200">Showing red flags</span>}
         <span className="ml-auto text-xs font-semibold text-slate-400">{filtered.length} of {total}</span>
       </div>
 
@@ -3557,7 +3569,7 @@ function AdminStudents({ store }) {
         <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
           <table className="w-full min-w-[680px] text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
-              <tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Email address</th><th className="px-5 py-3 whitespace-nowrap">Status</th><th className="px-5 py-3">Units</th><th className="px-5 py-3 text-center whitespace-nowrap">Attendance</th><th className="px-5 py-3 text-right">Actions</th></tr>
+              <tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Email address</th><th className="px-5 py-3 whitespace-nowrap">Attendance risk</th><th className="px-5 py-3">Units</th><th className="px-5 py-3 text-center whitespace-nowrap">Attendance</th><th className="px-5 py-3 text-right">Actions</th></tr>
             </thead>
             <tbody>
               {paged.slice.map(s => {
@@ -3576,9 +3588,7 @@ function AdminStudents({ store }) {
                     </td>
                     <td className="px-5 py-3 text-slate-500"><span className="block max-w-[220px] truncate" title={s.email}>{s.email}</span></td>
                     <td className="px-5 py-3">
-                      {s.active === false
-                        ? <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-500">Inactive</span>
-                        : <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">Active</span>}
+                      {(() => { const b = riskBand(pct); return <span className="inline-block rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ background: b.bg, color: b.colour }} title={pct == null ? "No attendance data" : `${pct}% attendance`}>{b.label}</span>; })()}
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex max-w-[200px] flex-wrap gap-1">
