@@ -712,6 +712,36 @@ router.put("/sessions/:id/register", requireAuth, requireAdmin, async (req, res)
 // ?semesterId=<id>       -> only sessions dated inside that semester
 // ?semesterId=unassigned -> only sessions outside every semester
 // (omitted)              -> every session on record
+// GET /hnd/attendance/monthly?studentId= — attendance % bucketed by calendar month,
+// for the whole college (default) or a single student. Counting happens IN POSTGRES
+// (GROUP BY on left(date,7) = 'YYYY-MM') so it stays memory-safe at scale, exactly
+// like the /attendance matrix. Powers the dashboards' "Attendance % by Year & Month".
+router.get("/attendance/monthly", requireAuth, async (req, res) => {
+  const studentId = str(req.query?.studentId);
+  const moduleId = str(req.query?.moduleId);
+  const base = `
+    SELECT left(se.date, 7) ym,
+      count(*) FILTER (WHERE am.status='P')::int p,
+      count(*) FILTER (WHERE am.status='L')::int l,
+      count(*) FILTER (WHERE am.status='E')::int e,
+      count(*) FILTER (WHERE am.status='A')::int a
+    FROM "AttendanceMark" am JOIN "HndSession" se ON se.id = am."sessionId"`;
+  // Build WHERE from whichever filters are present, using parameterised values.
+  const conds = [], params = [];
+  if (studentId) { params.push(studentId); conds.push(`am."studentId" = $${params.length}`); }
+  if (moduleId) { params.push(moduleId); conds.push(`se."moduleId" = $${params.length}`); }
+  const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
+  const rows = await prisma.$queryRawUnsafe(`${base}${where} GROUP BY 1 ORDER BY 1`, ...params);
+  let P = 0, L = 0, E = 0, A = 0;
+  const months = rows.map((r) => {
+    P += r.p; L += r.l; E += r.e; A += r.a;
+    const s = summariseCounts(r.p, r.l, r.e, r.a);
+    return { month: r.ym, pct: s.pct, marked: s.marked, P: r.p, L: r.l, E: r.e, A: r.a };
+  });
+  const t = summariseCounts(P, L, E, A);
+  res.json({ months, totals: { pct: t.pct, marked: t.marked, present: P, late: L, excused: E, absent: A } });
+});
+
 router.get("/attendance", requireAuth, async (req, res) => {
   const semesterId = str(req.query?.semesterId);
   const semesters = await prisma.semester.findMany({ orderBy: { start: "asc" } });

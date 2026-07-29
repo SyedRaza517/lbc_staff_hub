@@ -257,5 +257,62 @@ router.get("/student/:id", requireAuth, async (req, res) => {
   });
 });
 
+// GET /assessments/exec-summary — college-wide pass statistics for the Executive
+// Dashboard. A student "passes" if their AVERAGE graded mark is 40%+. Results are
+// grouped by cohort (the "course"), plus per-course pass-rate. Heavy per-student
+// aggregation done here (server-side) so the client never fetches 100s of students.
+router.get("/exec-summary", requireAuth, async (req, res) => {
+  const [students, assessments, grades, cohorts, programmes] = await Promise.all([
+    prisma.student.findMany({ select: { id: true, cohortId: true } }),
+    prisma.assessment.findMany({ select: { id: true, maxMarks: true } }),
+    prisma.assessmentGrade.findMany({ select: { studentId: true, assessmentId: true, marks: true } }),
+    prisma.cohort.findMany({ select: { id: true, name: true, programmeId: true } }),
+    prisma.programme.findMany({ select: { id: true, name: true } }),
+  ]);
+  const aMax = new Map(assessments.map((a) => [a.id, a.maxMarks]));
+  // Average graded % per student.
+  const perStudent = new Map();
+  for (const g of grades) {
+    const max = aMax.get(g.assessmentId); if (!max) continue;
+    const pct = pctOf(g.marks, max); if (pct == null) continue;
+    const s = perStudent.get(g.studentId) || { sum: 0, n: 0 };
+    s.sum += pct; s.n += 1; perStudent.set(g.studentId, s);
+  }
+  const progName = new Map(programmes.map((p) => [p.id, p.name]));
+  const cohortMeta = new Map(cohorts.map((c) => [c.id, { name: c.name, prog: progName.get(c.programmeId) || "" }]));
+  const byCohort = new Map();
+  let totalPassed = 0, totalGraded = 0;
+  for (const st of students) {
+    const key = st.cohortId || "__none__";
+    const b = byCohort.get(key) || { count: 0, passed: 0, graded: 0 };
+    b.count += 1;
+    const g = perStudent.get(st.id);
+    if (g && g.n > 0) {
+      b.graded += 1; totalGraded += 1;
+      if (g.sum / g.n >= 40) { b.passed += 1; totalPassed += 1; }
+    }
+    byCohort.set(key, b);
+  }
+  const courses = [...byCohort.entries()].map(([cid, b]) => {
+    const meta = cohortMeta.get(cid) || { name: cid === "__none__" ? "Unassigned" : cid, prog: "" };
+    return {
+      cohortId: cid,
+      code: meta.prog ? `${meta.prog} — ${meta.name}` : meta.name,
+      studentCount: b.count, studentsPassed: b.passed, graded: b.graded,
+      passRate: b.count ? Math.round((b.passed / b.count) * 1000) / 10 : 0,
+    };
+  }).sort((a, b) => b.studentsPassed - a.studentsPassed);
+  res.json({
+    totals: {
+      students: students.length,
+      studentsPassed: totalPassed,
+      graded: totalGraded,
+      passRate: students.length ? Math.round((totalPassed / students.length) * 1000) / 10 : 0,
+      assessments: assessments.length,
+    },
+    courses,
+  });
+});
+
 module.exports = router;
 module.exports.TYPES = TYPES;

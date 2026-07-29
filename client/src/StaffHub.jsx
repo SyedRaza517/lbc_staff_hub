@@ -14,7 +14,8 @@ import {
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  LineChart, Line, RadialBarChart, RadialBar
 } from "recharts";
 import { downloadCSV } from "./csv";
 import { BrandMark, BrandLockup } from "./Brand";
@@ -1330,8 +1331,8 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
 /* ============================================================ ADMIN DASHBOARD ============================================================ */
 // The assignable admin pages, in nav order. "access" is intentionally excluded —
 // it is Super-Admin-only and never granted. Keep in sync with server validate.js.
-const ADMIN_PAGES = ["overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "studentqueries", "staff", "timesheets", "settings"];
-const PAGE_LABELS = { overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", settings: "Settings" };
+const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "studentqueries", "staff", "timesheets", "settings"];
+const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", settings: "Settings" };
 
 // Can this user see/use a given admin page? The Super Admin gets everything,
 // including the Super-Admin-only Access tab. A page-scoped admin gets only their
@@ -1346,10 +1347,180 @@ const canAccessPage = (user, key) => {
   return pages == null || (Array.isArray(pages) && pages.includes(key));
 };
 
+/* ============================ Dashboard shared bits ============================ */
+const fmtMonth = (ym) => { const [y, m] = String(ym || "").split("-"); if (!y || !m) return ym; return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("en-GB", { month: "short", year: "numeric" }); };
+// Traffic-light colour for a percentage: <40 red, 40–70 amber, 70+ green.
+const pctColour = (v) => v == null ? "#94a3b8" : v >= 70 ? "#0d7a5f" : v >= 40 ? "#d97706" : "#dc2626";
+const kNum = (n) => n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "")}K` : String(n);
+
+function FilterSelect({ label, value, onChange, options }) {
+  return (
+    <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs ring-1 ring-slate-200">
+      <span className="font-semibold text-slate-400">{label}</span>
+      <select value={value} onChange={e => onChange(e.target.value)} className="max-w-[180px] bg-transparent text-sm font-medium text-slate-700 outline-none">
+        {options.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+      </select>
+    </label>
+  );
+}
+function ChartCard({ title, children, className = "" }) {
+  return (
+    <div className={`rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 fade-up ${className}`}>
+      {title && <p className="mb-3 text-sm font-bold text-slate-700">{title}</p>}
+      {children}
+    </div>
+  );
+}
+function ExecKpi({ label, value, tone = NAVY, sub }) {
+  return (
+    <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 fade-up">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-1 text-3xl font-extrabold tabular-nums" style={{ color: tone }}>{value}</p>
+      {sub && <p className="text-[11px] text-slate-400">{sub}</p>}
+    </div>
+  );
+}
+function MiniKpi({ label, value, tone = NAVY }) {
+  return (
+    <div className="rounded-xl bg-white p-2.5 text-center shadow-sm ring-1 ring-slate-200/70">
+      <p className="text-lg font-extrabold tabular-nums" style={{ color: tone }}>{value}</p>
+      <p className="text-[10px] font-medium text-slate-400">{label}</p>
+    </div>
+  );
+}
+// Distinct segment colours for the donut charts.
+const DONUT_COLOURS = ["#1a3a8f", "#9e1b32", "#0d7a5f", "#d97706", "#6d28d9", "#0891b2", "#be123c", "#4d7c0f", "#7c3aed", "#0369a1", "#b45309", "#0f766e"];
+// Attendance risk band from a percentage: <40 High Risk, 40–70 At Risk, 70+ Good.
+const riskBand = (pct) => pct == null ? { label: "No data", colour: "#94a3b8", bg: "#f1f5f9" }
+  : pct < 40 ? { label: "High Risk", colour: "#dc2626", bg: "#fef2f2" }
+  : pct < 70 ? { label: "At Risk", colour: "#d97706", bg: "#fffbeb" }
+  : { label: "Good", colour: "#0d7a5f", bg: "#ecfdf5" };
+
+/* ----- Executive Dashboard (admin) ----- */
+function ExecutiveDashboard({ store }) {
+  const { refreshHnd, refreshAssessments } = store;
+  useEffect(() => { refreshHnd(); refreshAssessments(); }, [refreshHnd, refreshAssessments]);
+  const [exec, setExec] = useState(null);
+  const [monthly, setMonthly] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshed, setRefreshed] = useState(null);
+  const [year, setYear] = useState("all");
+  const [course, setCourse] = useState("all");
+  const [unit, setUnit] = useState("all");
+
+  // exec-summary loads once; monthly attendance re-loads when the Unit filter changes.
+  const load = useCallback(async (moduleId, withExec) => {
+    setLoading(true);
+    try {
+      const [e, m] = await Promise.all([
+        withExec ? api.execSummary() : Promise.resolve(null),
+        api.attendanceMonthly(moduleId && moduleId !== "all" ? { moduleId } : {}),
+      ]);
+      if (withExec) setExec(e);
+      setMonthly(m); setRefreshed(new Date());
+    } catch (_) { /* toast handled elsewhere */ } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load("all", true); }, [load]);
+  const onUnit = (u) => { setUnit(u); load(u, false); };
+
+  const months = monthly?.months || [];
+  const years = [...new Set(months.map(m => m.month.slice(0, 4)))].sort();
+  const inYear = (m) => year === "all" || m.month.slice(0, 4) === year;
+  const monthData = months.filter(inYear).map(m => ({ label: fmtMonth(m.month), pct: m.pct }));
+  // Attendance % recomputed (points-weighted) over the months the Year filter shows.
+  const win = months.filter(inYear);
+  const earned = win.reduce((a, m) => a + m.P * 2 + m.L + m.E, 0);
+  const possible = win.reduce((a, m) => a + (m.P + m.L + m.E + m.A) * 2, 0);
+  const attPct = possible ? Math.round(earned / possible * 1000) / 10 : (monthly?.totals?.pct ?? null);
+  const totalMarks = months.reduce((a, m) => a + m.P + m.L + m.E + m.A, 0);
+
+  const allCourses = exec?.courses || [];
+  const courses = allCourses.filter(c => course === "all" || c.cohortId === course);
+  const courseData = courses.map(c => ({ code: c.code, passRate: c.passRate }));
+  const shownStudents = course === "all" ? (exec?.totals?.students ?? store.students.length) : courses.reduce((a, c) => a + c.studentCount, 0);
+  const shownPassed = course === "all" ? (exec?.totals?.studentsPassed ?? 0) : courses.reduce((a, c) => a + c.studentsPassed, 0);
+  const shownPassRate = shownStudents ? Math.round(shownPassed / shownStudents * 1000) / 10 : 0;
+  const totalCourses = allCourses.filter(c => c.cohortId !== "__none__").length || store.cohorts.length;
+  const assessmentsCount = exec?.totals?.assessments ?? store.assessments.length;
+
+  return (
+    <>
+      <AdminHeader title="Executive Dashboard" subtitle="College-wide attendance & results at a glance" Icon={BarChart3}
+        action={<div className="flex items-center gap-2 text-[11px] text-slate-400">{refreshed && <span className="hidden sm:inline">Last refreshed {refreshed.toLocaleString("en-GB")}</span>}<button onClick={() => load(unit, true)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button></div>} />
+      <div className="mb-4 flex flex-wrap gap-2">
+        <FilterSelect label="Academic Year" value={year} onChange={setYear} options={[{ v: "all", l: "All years" }, ...years.map(y => ({ v: y, l: y }))]} />
+        <FilterSelect label="Course" value={course} onChange={setCourse} options={[{ v: "all", l: "All courses" }, ...allCourses.map(c => ({ v: c.cohortId, l: c.code }))]} />
+        <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...store.modules.map(m => ({ v: m.id, l: m.code }))]} />
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <ExecKpi label="Total Students" value={shownStudents} />
+        <ExecKpi label="Total Courses" value={totalCourses} />
+        <ExecKpi label="Attendance %" value={attPct == null ? "—" : `${Math.round(attPct)}%`} tone={pctColour(attPct)} />
+        <ExecKpi label="Assessments" value={assessmentsCount} />
+        <ExecKpi label="Student Pass Rate" value={`${Math.round(shownPassRate)}%`} tone={pctColour(shownPassRate)} />
+        <ExecKpi label="Students Passed" value={shownPassed} tone="#0d7a5f" />
+        <ExecKpi label="Total Sessions" value={store.sessions.length} />
+        <ExecKpi label="Total Attendance" value={kNum(totalMarks)} sub="marks recorded" />
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <ChartCard title="Attendance % by Year and Month">
+          <ResponsiveContainer width="100%" height={260}>
+            <LineChart data={monthData} margin={{ top: 10, right: 12, left: -12, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eef1f6" />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} interval="preserveStartEnd" />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "#94a3b8" }} tickFormatter={v => `${v}%`} />
+              <Tooltip formatter={v => [`${v}%`, "Attendance"]} />
+              <Line type="monotone" dataKey="pct" stroke={MAROON} strokeWidth={2.5} dot={{ r: 2.5 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+        <ChartCard title="Pass Rate % by Course Code">
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={courseData} layout="vertical" margin={{ top: 5, right: 24, left: 10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eef1f6" horizontal={false} />
+              <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: "#94a3b8" }} tickFormatter={v => `${v}%`} />
+              <YAxis type="category" dataKey="code" width={130} tick={{ fontSize: 9, fill: "#64748b" }} />
+              <Tooltip formatter={v => [`${v}%`, "Pass rate"]} />
+              <Bar dataKey="passRate" fill={MAROON} radius={[0, 6, 6, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
+      <ChartCard title="Results by Course" className="mt-3">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs font-bold uppercase tracking-wide text-slate-400"><tr><th className="py-2 pr-4">Course Code</th><th className="px-2 py-2 text-right">Students</th><th className="px-2 py-2 text-right">Passed</th><th className="py-2 pl-2 text-right">Pass Rate</th></tr></thead>
+            <tbody>
+              {courses.map(c => (
+                <tr key={c.cohortId} className="border-t border-slate-100">
+                  <td className="py-2 pr-4 font-medium text-slate-700">{c.code}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-slate-600">{c.studentCount}</td>
+                  <td className="px-2 py-2 text-right font-semibold tabular-nums text-emerald-600">{c.studentsPassed}</td>
+                  <td className="py-2 pl-2 text-right font-bold tabular-nums" style={{ color: pctColour(c.passRate) }}>{c.passRate}%</td>
+                </tr>
+              ))}
+              {courses.length > 0 && (
+                <tr className="border-t-2 border-slate-200 font-bold text-slate-800">
+                  <td className="py-2 pr-4">Total</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{shownStudents}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{shownPassed}</td>
+                  <td className="py-2 pl-2 text-right tabular-nums" style={{ color: pctColour(shownPassRate) }}>{shownPassRate}%</td>
+                </tr>
+              )}
+              {courses.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-slate-400">{loading ? "Loading…" : "No course data yet."}</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </ChartCard>
+    </>
+  );
+}
+
 export function AdminDashboard({ store, onExitToStaffApp }) {
   const me = store.currentUser;
   if (!store.isAdmin) return <div className="p-4 text-slate-400">Access denied</div>;
   const allNav = [
+    { key: "executive", label: "Executive Dashboard", I: BarChart3 },
     { key: "overview", label: "Overview", I: LayoutDashboard },
     { key: "kpi", label: "KPIs", I: Activity },
     { key: "checkin", label: "Check-In", I: Clock3 },
@@ -1414,6 +1585,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
           {onExitToStaffApp && <button onClick={onExitToStaffApp} className="flex shrink-0 items-center gap-1.5 rounded-full border-2 border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 active:scale-95"><ChevronLeft size={14} /> Staff App</button>}
           {nav.map(n => <button key={n.key} onClick={() => setTab(n.key)} className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm transition-all active:scale-95 ${activeKey === n.key ? "text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`} style={activeKey === n.key ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}><n.I size={14} /> {n.label}</button>)}
         </div>
+        {activeKey === "executive" && <ExecutiveDashboard store={store} />}
         {activeKey === "overview" && <AdminOverview store={store} setTab={setTab} />}
         {activeKey === "kpi" && <AdminKPI store={store} />}
         {activeKey === "checkin" && <AdminCheckin store={store} />}
@@ -3476,7 +3648,7 @@ function AdminStudents({ store }) {
         </div>
       </Modal>
 
-      <Modal open={!!attnFor} onClose={() => setAttnFor(null)} title="Attendance breakdown" width={560}>
+      <Modal open={!!attnFor} onClose={() => setAttnFor(null)} title="Student dashboard" width={560}>
         {attnFor && <StudentAttendanceDetail student={attnFor} store={store} />}
       </Modal>
     </>
@@ -3490,6 +3662,20 @@ function AdminStudents({ store }) {
 // scoped to the current term only, so it resets each term.
 function StudentAttendanceDetail({ student, store }) {
   const R = 42, CIRC = 2 * Math.PI * R;
+
+  // Assessment results + month-by-month attendance for this student (dashboard).
+  const [assess, setAssess] = useState(null);
+  const [monthly, setMonthly] = useState(null);
+  useEffect(() => {
+    let alive = true; setAssess(null); setMonthly(null);
+    (async () => {
+      try {
+        const [a, m] = await Promise.all([api.studentAssessments(student.id), api.attendanceMonthly({ studentId: student.id })]);
+        if (alive) { setAssess(a); setMonthly(m); }
+      } catch (_) { /* endpoints may not be deployed yet — dashboard degrades gracefully */ }
+    })();
+    return () => { alive = false; };
+  }, [student.id]);
 
   // Computed entirely from data the Students tab already loads — no extra request,
   // so it works instantly and doesn't depend on the API being redeployed. A module's
@@ -3512,6 +3698,23 @@ function StudentAttendanceDetail({ student, store }) {
   const current = { modules: currentModules, overall };
   // Lifetime attendance across every module the student has studied (current + previous).
   const allOverall = aggregateStats(moduleRows.map(r => r.summary));
+
+  // ---- Dashboard metrics (results + attendance rating + charts) ----
+  const gradedItems = (assess?.assessments || []).filter(a => a.pct != null);
+  const avgMark = assess?.averagePct ?? null;                       // average graded %
+  const passRate = gradedItems.length ? Math.round(gradedItems.filter(a => a.pct >= 40).length / gradedItems.length * 1000) / 10 : null;
+  const enrolledCount = (student.moduleIds || []).length;
+  const unitsWithMark = new Set(gradedItems.map(a => a.moduleId)).size; // "completed" = has a final mark
+  // Final mark by unit code = the student's average % per module (donut).
+  const byUnit = (() => {
+    const m = new Map();
+    for (const a of gradedItems) { const g = m.get(a.moduleCode) || { sum: 0, n: 0 }; g.sum += a.pct; g.n++; m.set(a.moduleCode, g); }
+    return [...m.entries()].map(([code, g]) => ({ code, mark: Math.round(g.sum / g.n) }));
+  })();
+  // Attendance rating uses lifetime attendance across all modules.
+  const rating = riskBand(allOverall.pct);
+  const monthData = (monthly?.months || []).map(m => ({ label: fmtMonth(m.month), pct: m.pct }));
+  const firstCourse = (() => { const c = (store.cohorts || []).find(c => c.id === student.cohortId); return c?.name || moduleRows[0]?.module.code || "—"; })();
 
   const header = (
     <div className="flex items-center gap-3">
@@ -3568,6 +3771,53 @@ function StudentAttendanceDetail({ student, store }) {
           <p className="text-[10px] text-slate-400">{allOverall.marked} marked · {moduleRows.length} total</p>
         </div>
       </div>
+
+      {/* ---- Student dashboard: course, rating, results, charts ---- */}
+      <div className="flex items-center justify-between gap-2 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200/70">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">First course</p>
+          <p className="truncate text-sm font-bold text-slate-700">{firstCourse}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Attendance rating</p>
+          <span className="mt-0.5 inline-block rounded-lg px-3 py-1 text-sm font-extrabold" style={{ background: rating.bg, color: rating.colour }}>{rating.label}</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <MiniKpi label="Avg mark" value={avgMark == null ? "—" : Math.round(avgMark)} tone={pctColour(avgMark)} />
+        <MiniKpi label="Pass rate" value={passRate == null ? "—" : `${Math.round(passRate)}%`} tone={pctColour(passRate)} />
+        <MiniKpi label="Units done" value={`${unitsWithMark}/${enrolledCount}`} tone={NAVY} />
+        <MiniKpi label="Present" value={allOverall.P} tone="#0d7a5f" />
+        <MiniKpi label="Absent" value={allOverall.A} tone={MAROON} />
+        <MiniKpi label="Attendance" value={fmtPct(allOverall.pct ?? null)} tone={pctColour(allOverall.pct)} />
+      </div>
+
+      {monthData.length > 0 && (
+        <ChartCard title="Attendance % by Year and Month">
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={monthData} margin={{ top: 6, right: 10, left: -14, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eef1f6" />
+              <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#94a3b8" }} interval="preserveStartEnd" />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: "#94a3b8" }} tickFormatter={v => `${v}%`} />
+              <Tooltip formatter={v => [`${v}%`, "Attendance"]} />
+              <Line type="monotone" dataKey="pct" stroke={MAROON} strokeWidth={2.5} dot={{ r: 2 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      )}
+      {byUnit.length > 0 && (
+        <ChartCard title="Final Mark by Unit Code">
+          <ResponsiveContainer width="100%" height={230}>
+            <PieChart>
+              <Pie data={byUnit} dataKey="mark" nameKey="code" innerRadius={45} outerRadius={82} paddingAngle={2} label={({ code, mark }) => `${code} ${mark}`} labelLine={false} style={{ fontSize: 10 }}>
+                {byUnit.map((u, i) => <Cell key={u.code} fill={DONUT_COLOURS[i % DONUT_COLOURS.length]} />)}
+              </Pie>
+              <Tooltip formatter={(v, n) => [`${v}%`, n]} />
+            </PieChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      )}
 
       {/* Current modules — the live overall that rolls over as modules finish */}
       <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-emerald-200">

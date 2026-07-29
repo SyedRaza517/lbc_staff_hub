@@ -179,6 +179,7 @@ export const api = {
   saveRegister: (sessionId, marks, override) => request(`/hnd/sessions/${sessionId}/register`, { method: "PUT", body: { marks, ...(override ? { override: true } : {}) } }),
   // semesterId: "" = all semesters, "unassigned" = sessions outside every semester
   getAttendance: (semesterId, termId) => request(`/hnd/attendance${termId ? `?termId=${encodeURIComponent(termId)}` : semesterId ? `?semesterId=${encodeURIComponent(semesterId)}` : ""}`),
+  attendanceMonthly: (opts = {}) => { const q = new URLSearchParams(); if (opts.studentId) q.set("studentId", opts.studentId); if (opts.moduleId) q.set("moduleId", opts.moduleId); const s = q.toString(); return request(`/hnd/attendance/monthly${s ? `?${s}` : ""}`); },
   // A student's attendance grouped by term (current + previous terms).
   studentTermAttendance: (id) => request(`/hnd/students/${id}/attendance-terms`),
   // PAT (Personal Academic Tutor) interactions
@@ -196,6 +197,7 @@ export const api = {
   listGrades: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/assessments/grades${q ? `?${q}` : ""}`); },
   assessmentOverview: () => request("/assessments/overview"),
   studentAssessments: (studentId) => request(`/assessments/student/${studentId}`),
+  execSummary: () => request("/assessments/exec-summary"),
   // timesheets
   listTimesheets: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/timesheets${q ? `?${q}` : ""}`); },
   timesheetPendingCount: () => request("/timesheets/pending-count"),

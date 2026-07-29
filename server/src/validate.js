@@ -59,7 +59,7 @@ const isHomeSite = (v) => v == null || (isString(v) && HOME_SITES.includes(v));
 // "access" is deliberately NOT here — it is Super-Admin-only and never assigned.
 // Must stay in sync with the client's ADMIN_PAGES.
 const ADMIN_PAGES = [
-  "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents",
+  "executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents",
   "approvals", "signups", "summaries", "registers", "students", "assessments",
   "pat", "studentqueries", "staff", "timesheets", "settings",
 ];
