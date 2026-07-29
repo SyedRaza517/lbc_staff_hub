@@ -673,18 +673,18 @@ function BalanceScreen({ store, me }) {
       <p className="mb-2 mt-5 px-1 text-xs font-bold uppercase tracking-wide text-slate-400">Leave history</p>
       <div className="space-y-2">
         {myLeave.length === 0 && <Card><EmptyState Icon={Plane} title="No leave records yet" msg="Requests you submit will show up here." /></Card>}
-        {myLeave.slice().reverse().map((l, i) => <LeaveRow key={l.id} l={l} i={i} />)}
+        {myLeave.slice().reverse().map((l, i) => <LeaveRow key={l.id} l={l} i={i} store={store} />)}
       </div>
     </Screen>
   );
 }
-function LeaveRow({ l, i = 0 }) {
+function LeaveRow({ l, i = 0, store }) {
   const t = leaveTypeMeta(l.type); const T = t.icon;
   return (
     <Card className="!p-3 fade-up" style={{ animationDelay: `${i * 50}ms` }}>
       <div className="flex items-center gap-3">
         <span className="flex h-10 w-10 items-center justify-center rounded-xl transition-transform duration-300 hover:scale-110" style={{ background: t.colour + "1a" }}><T size={18} style={{ color: t.colour }} /></span>
-        <div className="flex-1"><p className="text-sm font-semibold text-slate-700">{t.label}</p><p className="text-xs text-slate-400">{fmtDate(l.start)}{l.end !== l.start && ` → ${fmtDate(l.end)}`} · {daysBetween(l.start, l.end)}d</p></div>
+        <div className="flex-1"><p className="text-sm font-semibold text-slate-700">{t.label}</p><p className="text-xs text-slate-400">{fmtDate(l.start)}{l.end !== l.start && ` → ${fmtDate(l.end)}`} · {store.chargeableDays(l.start, l.end)}d</p></div>
         <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${statusBadge(l.status)}`}>{l.status}</span>
       </div>
       {l.note && l.status !== "pending" && <p className="mt-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] italic text-slate-500">Manager: "{l.note}"</p>}
@@ -918,7 +918,7 @@ function ApprovalScreen({ store, me }) {
               <div className="flex-1"><p className="text-sm font-bold text-slate-700">{p?.name}</p><p className="text-xs text-slate-400">{p?.role}</p></div>
               <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: t.colour + "1a", color: t.colour }}>{t.label}</span>
             </div>
-            <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600"><p><b>{fmtDate(l.start)}</b>{l.end !== l.start && <> → <b>{fmtDate(l.end)}</b></>} · {daysBetween(l.start, l.end)} day(s)</p><p className="mt-1 italic text-slate-500">"{l.reason}"</p></div>
+            <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600"><p><b>{fmtDate(l.start)}</b>{l.end !== l.start && <> → <b>{fmtDate(l.end)}</b></>} · {store.chargeableDays(l.start, l.end)} day(s)</p><p className="mt-1 italic text-slate-500">"{l.reason}"</p></div>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button onClick={() => act(l, "rejected")} className="flex items-center justify-center gap-1.5 rounded-xl border-2 border-rose-200 py-2.5 text-sm font-bold text-rose-600 transition hover:bg-rose-50 active:scale-95"><XCircle size={16} /> Decline</button>
               <PrimaryBtn onClick={() => act(l, "approved")} colour="#059669" className="!py-2.5"><CheckCircle2 size={16} /> Approve</PrimaryBtn>
@@ -1787,7 +1787,7 @@ function AdminOverview({ store, setTab }) {
             {pending.slice(0, 5).map((l, i) => { const p = store.staff.find(s => s.id === l.staffId); const t = leaveTypeMeta(l.type); return (
               <div key={l.id} className="flex items-center gap-2.5 rounded-xl bg-amber-50/60 px-3 py-2 ring-1 ring-amber-100 pop" style={{ animationDelay: `${i * 40}ms` }}>
                 <span className="flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-sm" style={{ background: p?.colour }}>{p?.initials}</span>
-                <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-700">{p?.name}</p><p className="truncate text-xs text-slate-400">{t.label} · {daysBetween(l.start, l.end)}d</p></div>
+                <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-700">{p?.name}</p><p className="truncate text-xs text-slate-400">{t.label} · {store.chargeableDays(l.start, l.end)}d</p></div>
               </div>
             ); })}
             {pending.length > 5 && <p className="text-center text-[11px] font-semibold text-slate-400">+{pending.length - 5} more</p>}
@@ -2006,7 +2006,7 @@ function AdminRequests({ store }) {
   const counts = { all: store.leave.length, pending: store.leave.filter(l => l.status === "pending").length, approved: store.leave.filter(l => l.status === "approved").length, rejected: store.leave.filter(l => l.status === "rejected").length };
   const paged = usePaged(list, 10, filter);
   const exportRequests = () => {
-    const rows = list.map(l => { const p = store.staff.find(s => s.id === l.staffId); const t = leaveTypeMeta(l.type); return { staff: p?.name || "Unknown", type: t.label, start: l.start, end: l.end, days: daysBetween(l.start, l.end), status: l.status, reason: l.reason }; });
+    const rows = list.map(l => { const p = store.staff.find(s => s.id === l.staffId); const t = leaveTypeMeta(l.type); return { staff: p?.name || "Unknown", type: t.label, start: l.start, end: l.end, days: store.chargeableDays(l.start, l.end), status: l.status, reason: l.reason }; });
     downloadCSV("leave-requests.csv", [
       { key: "staff", label: "Staff name" }, { key: "type", label: "Type" }, { key: "start", label: "Start" }, { key: "end", label: "End" }, { key: "days", label: "Days" }, { key: "status", label: "Status" }, { key: "reason", label: "Reason" },
     ], rows);
@@ -2023,7 +2023,7 @@ function AdminRequests({ store }) {
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm" style={{ background: p?.colour }}>{p?.initials}</span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2"><p className="font-bold text-slate-700">{p?.name}</p><span className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: t.colour + "1a", color: t.colour }}><T size={11} /> {t.label}</span><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${statusBadge(l.status)}`}>{l.status}</span></div>
-              <p className="mt-1 text-sm text-slate-500">{fmtDate(l.start)}{l.end !== l.start && ` → ${fmtDate(l.end)}`} · <b>{daysBetween(l.start, l.end)}d</b> · <span className="italic">"{l.reason}"</span></p>
+              <p className="mt-1 text-sm text-slate-500">{fmtDate(l.start)}{l.end !== l.start && ` → ${fmtDate(l.end)}`} · <b>{store.chargeableDays(l.start, l.end)}d</b> · <span className="italic">"{l.reason}"</span></p>
             </div>
             {l.status === "pending" && <div className="flex gap-2"><button onClick={() => store.decideLeave(l.id, "rejected")} className="flex items-center gap-1 rounded-xl border-2 border-rose-200 px-3 py-2 text-sm font-bold text-rose-600 hover:bg-rose-50"><XCircle size={15} /> Decline</button><PrimaryBtn colour="#059669" onClick={() => store.decideLeave(l.id, "approved")} className="!py-2"><CheckCircle2 size={15} /> Approve</PrimaryBtn></div>}
           </div>
@@ -2099,7 +2099,7 @@ function AdminApprovals({ store }) {
             {pending.map((l, i) => { const p = store.staff.find(s => s.id === l.staffId); const t = leaveTypeMeta(l.type); const T = t.icon; return (
               <div key={l.id} className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md hover:ring-slate-300/80 fade-up" style={{ animationDelay: `${i * 50}ms` }}>
                 <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm" style={{ background: p?.colour }}>{p?.initials}</span><div className="flex-1"><p className="text-sm font-bold text-slate-700">{p?.name}</p><p className="text-xs text-slate-400">{p?.role}</p></div><span className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: t.colour + "1a", color: t.colour }}><T size={11} /> {t.label}</span></div>
-                <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600"><p><b>{fmtDate(l.start)}</b>{l.end !== l.start && <> → <b>{fmtDate(l.end)}</b></>} · {daysBetween(l.start, l.end)}d</p><p className="mt-1 italic text-slate-500">"{l.reason}"</p></div>
+                <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600"><p><b>{fmtDate(l.start)}</b>{l.end !== l.start && <> → <b>{fmtDate(l.end)}</b></>} · {store.chargeableDays(l.start, l.end)}d</p><p className="mt-1 italic text-slate-500">"{l.reason}"</p></div>
                 <div className="mt-3 grid grid-cols-2 gap-2"><button onClick={() => { setNoteModal({ leave: l, action: "rejected" }); setNote(""); }} className="flex items-center justify-center gap-1.5 rounded-xl border-2 border-rose-200 py-2.5 text-sm font-bold text-rose-600 hover:bg-rose-50"><XCircle size={16} /> Decline</button><PrimaryBtn colour="#059669" onClick={() => { setNoteModal({ leave: l, action: "approved" }); setNote(""); }} className="!py-2.5"><CheckCircle2 size={16} /> Approve</PrimaryBtn></div>
               </div>
             ); })}
