@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sCheckin } = require("../serializers");
-const { requireAuth, requirePage } = require("../auth");
+const { requireAuth, requirePage, hasPage } = require("../auth");
 const { isString, isRealDate, MAX_TEXT, isSite } = require("../validate");
 const { localDate, localTime } = require("../clock");
 
@@ -17,7 +17,9 @@ const nowTime = () => localTime();
 router.get("/", requireAuth, async (req, res) => {
   const where = {};
   if (req.query.date) where.date = String(req.query.date);
-  if (req.user.accountRole !== "ADMIN") where.staffId = req.user.id;
+  // Only an admin granted Check-In or Daily Summaries sees everyone; any other
+  // admin is scoped to their own records like ordinary staff.
+  if (!hasPage(req.user, ["checkin", "summaries"])) where.staffId = req.user.id;
   const rows = await prisma.checkIn.findMany({ where, orderBy: { date: "desc" } });
   res.json(rows.map(sCheckin));
 });
@@ -51,7 +53,7 @@ router.post("/check-in", requireAuth, async (req, res) => {
 router.post("/:id/check-out", requireAuth, async (req, res) => {
   const rec = await prisma.checkIn.findUnique({ where: { id: req.params.id } });
   if (!rec) return res.status(404).json({ error: "Record not found" });
-  if (rec.staffId !== req.user.id && req.user.accountRole !== "ADMIN") return res.status(403).json({ error: "Forbidden" });
+  if (rec.staffId !== req.user.id && !hasPage(req.user, "checkin")) return res.status(403).json({ error: "Forbidden" });
   // A summary-first row has timeIn === "" (no real clock-in). Checking it out would
   // create a record with an out-time but no in-time — block that.
   if (!rec.timeIn) return res.status(400).json({ error: "Cannot check out — no check-in recorded for this day" });

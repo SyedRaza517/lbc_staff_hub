@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sDoc } = require("../serializers");
-const { requireAuth, requirePage } = require("../auth");
+const { requireAuth, requirePage, hasPage } = require("../auth");
 const { isString, isNonEmptyString, MAX_TEXT } = require("../validate");
 const { localDate } = require("../clock");
 
@@ -10,7 +10,9 @@ const today = () => localDate();
 // GET /api/documents — admin: all; staff: shared + personal templates + own private docs
 router.get("/", requireAuth, async (req, res) => {
   let rows;
-  if (req.user.accountRole === "ADMIN") {
+  // Only a documents admin sees every document (including ones privately
+  // assigned to an individual). Everyone else sees org-wide + their own.
+  if (hasPage(req.user, "documents")) {
     rows = await prisma.document.findMany({ orderBy: { date: "desc" } });
   } else {
     rows = await prisma.document.findMany({

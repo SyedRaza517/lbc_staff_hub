@@ -7,7 +7,11 @@ import { api } from "./api";
 import { ukBankHolidaysRange } from "./bankHolidays";
 
 const daysBetween = (a, b) => { const d1 = new Date(a), d2 = new Date(b); if (isNaN(d1) || isNaN(d2)) { console.error("Invalid dates:", a, b); return 0; } return Math.max(1, Math.round((d2 - d1) / 86400000) + 1); };
-const todayISO = () => new Date().toISOString().slice(0, 10);
+// Today as YYYY-MM-DD in the college's own timezone (Europe/London), matching the
+// server's localDate(). Using the browser's UTC date instead put the client a day
+// behind between midnight and 01:00 BST, so a register the UI showed as open was
+// rejected as out-of-term, and a same-day booking was refused as a past date.
+const todayISO = () => new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 
 export function useApiStore(notify, user) {
   const [staff, setStaff] = useState([]);
@@ -97,8 +101,13 @@ export function useApiStore(notify, user) {
   //   • 8 bank holidays  — fixed days off, NOT bookable, shown as they pass.
   //   • 20 holiday allowance — the days a staff member can actually book.
   // Bank holidays never draw down the bookable 20; they live in their own counter.
-  const thisYear = new Date().getFullYear();
-  const bankHolidays = useMemo(() => ukBankHolidaysRange(thisYear - 1, thisYear + 2), [thisYear]);
+  const thisYear = Number(todayISO().slice(0, 4));
+  // A generous span: chargeableDays consults this set, and outside the window the
+  // client would count a bank holiday as a chargeable working day while the server
+  // (which computes the exact years) would not — so the two would disagree on what a
+  // booking costs. Covering several years either side keeps backfills and far-future
+  // bookings consistent.
+  const bankHolidays = useMemo(() => ukBankHolidaysRange(thisYear - 5, thisYear + 5), [thisYear]);
   const bankHolidaySet = useMemo(() => new Map(bankHolidays.map((h) => [h.date, h.name])), [bankHolidays]);
   const isBankHoliday = useCallback((iso) => bankHolidaySet.has(iso), [bankHolidaySet]);
   // How many bank holidays fall inside an inclusive date range.
@@ -132,14 +141,23 @@ export function useApiStore(notify, user) {
     return n;
   }, [bankHolidaySet]);
 
+  // The leave year is the CALENDAR year: entitlement and usage both reset on 1 Jan,
+  // which matches how the bank-holiday pot is already counted. Without this the used
+  // total accumulated for ever, so a staff member who spent this year's allowance
+  // could never book again in any later year.
+  const leaveYearOf = (l) => String(l.start || "").slice(0, 4);
+  const inLeaveYear = useCallback((l) => leaveYearOf(l) === String(thisYear), [thisYear]);
+
   // Every approved leave type counts against the allowance (sick included) — the
   // total is reduced by any approved leave, regardless of type. Unpaid leave does
   // not draw down the paid allowance, so it's excluded (kept in sync with the
   // server's UNPAID_TYPES and the client's NON_ALLOWANCE_TYPES). We recompute the
   // cost from the dates (weekends + bank holidays removed) rather than trusting a
   // stored day count, so old records are handled correctly too.
-  const usedDays = useCallback((id) => leave.filter((l) => l.staffId === id && l.status === "approved" && l.type !== "unpaid").reduce((s, l) => s + chargeableDays(l.start, l.end), 0), [leave, chargeableDays]);
-  const adjDays = useCallback((id) => adjustments.filter((a) => a.staffId === id).reduce((s, a) => s + a.days, 0), [adjustments]);
+  const usedDays = useCallback((id) => leave.filter((l) => l.staffId === id && l.status === "approved" && l.type !== "unpaid" && inLeaveYear(l)).reduce((s, l) => s + chargeableDays(l.start, l.end), 0), [leave, chargeableDays, inLeaveYear]);
+  // Adjustments are likewise scoped to this leave year (they top up / dock the year's
+  // entitlement); an undated legacy adjustment still counts so nothing is lost.
+  const adjDays = useCallback((id) => adjustments.filter((a) => a.staffId === id && (!a.date || String(a.date).slice(0, 4) === String(thisYear))).reduce((s, a) => s + a.days, 0), [adjustments, thisYear]);
   // Total entitlement (e.g. 28) = the bookable allowance + the 8 bank holidays.
   const effectiveAllowance = useCallback((id) => { const s = staff.find((x) => x.id === id); return (s?.allowance || 0) + adjDays(id); }, [staff, adjDays]);
   // The bookable pot (e.g. 20): total entitlement minus the 8 bank holidays, which
@@ -246,9 +264,22 @@ export function useApiStore(notify, user) {
     // Admin adds an already-approved holiday: create the request, then approve it in
     // one action so it lands straight on the calendar. The allowance is still enforced
     // server-side on the approval (paid types); unpaid never draws down.
+    // Admin "add holiday" = create then immediately approve. If the approval is
+    // refused (e.g. it would exceed the allowance) the created row would otherwise be
+    // left behind as a stray PENDING request in the approvals queue, so clean it up
+    // and surface the real reason.
     addApprovedLeave: run(async (data) => {
       const rec = await api.requestLeave(data);
-      if (rec?.id && rec.status === "pending") await api.decideLeave(rec.id, "approved");
+      if (rec?.id && rec.status === "pending") {
+        try {
+          await api.decideLeave(rec.id, "approved");
+        } catch (e) {
+          // Close the row out so it doesn't sit in the approvals queue pretending to
+          // be a staff request, then report why the approval failed.
+          try { await api.decideLeave(rec.id, "rejected", "Not applied — approval failed"); } catch (_) { /* admin can reject it manually */ }
+          throw e;
+        }
+      }
       return rec;
     }, "Holiday added to the calendar"),
     decideLeave: run((id, status, note) => api.decideLeave(id, status, note), (id, status) => `Request ${status}`, "info"),
@@ -319,7 +350,7 @@ export function useApiStore(notify, user) {
     saveGrade: runAssess((id, studentId, marks) => api.saveGrades(id, [{ studentId, marks }]), (id, studentId, marks) => marks == null ? "Grade removed" : "Grade saved"),
     getGrades: (id) => api.getGrades(id),
     listGrades: (params) => api.listGrades(params),
-    studentAssessments: (id) => api.studentAssessments(id),
+    studentAssessments: (id) => api.adminStudentAssessments(id),
     // timesheets (month-scoped; screens fetch their own month and reload after writes)
     listTimesheets: (params) => api.listTimesheets(params),
     addTimesheet: runTs((data) => api.addTimesheet(data), "Timesheet entry added"),

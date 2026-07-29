@@ -12,6 +12,7 @@ import { BrandMark } from "./Brand";
 import StudentApp from "./StudentApp";
 import ConfirmDialog from "./ConfirmDialog";
 import BiometricGate, { useAppLock, BiometricSetupPrompt } from "./BiometricGate";
+import { useBackHandler } from "./backButton";
 import { StaffApp, AdminDashboard } from "./StaffHub";
 import { LogOut, CheckCircle2, XCircle, Sparkles, Loader2, GraduationCap, Clock, KeyRound, Lock, ShieldCheck, X, WifiOff } from "lucide-react";
 
@@ -313,6 +314,10 @@ function Shell({ user, logout, entry }) {
   const [toasts, setToasts] = useState([]);
   const [notes, setNotes] = useState([]);
   const [showChangePw, setShowChangePw] = useState(false);
+  // Android hardware back must close this overlay. Without its own handler the press
+  // fell through to the screen underneath (navigating home, or minimising the app)
+  // while the modal stayed on top.
+  useBackHandler(showChangePw, () => { setShowChangePw(false); return true; });
 
   const notify = useCallback((msg, type = "info") => {
     const id = Date.now() + Math.random();

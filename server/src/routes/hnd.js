@@ -4,14 +4,22 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sSemester, sCourse, sCohort, sTerm, sUnit, sStudent, sSession, sMark } = require("../serializers");
-const { requireAuth, requireAdmin, requireAnyPage } = require("../auth");
+const { requireAuth, requireAnyPage } = require("../auth");
+// Mutating registers/units/courses needs one of the sections that manages them.
+// (Previously these used requireAdmin, which only checks the ADMIN role — and being
+// granted ANY single page makes an account an ADMIN, so a read-only "executive"
+// admin would have been able to write here.)
+const requireHndWrite = requireAnyPage(["registers", "students"]);
 const { isStatus, summarise, summariseCounts } = require("../attendance");
 
 // DEF-01: HND registers are an admin-only feature (they live entirely in the admin
 // dashboard; no staff/mobile flow reads them). Guard EVERY route — reads included —
 // so a non-admin token cannot read the student directory, attendance matrix or
-// registers. Individual routes keep their own requireAdmin too (defence in depth).
-router.use(requireAuth, requireAnyPage(["registers", "students"]));
+// registers. Individual routes keep their own write guard too (defence in depth).
+// "executive" is included because the Executive Dashboard reads courses, units,
+// sessions and the monthly attendance summary from here; every WRITE route below
+// additionally requires requireHndWrite, so this only ever grants read access.
+router.use(requireAuth, requireAnyPage(["registers", "students", "executive"]));
 
 const PALETTE = ["#1a3a8f", "#9e1b32", "#0d7a5f", "#b45309", "#6d28d9", "#0e7490", "#be123c"];
 const colourFor = (seed) => PALETTE[Math.abs(String(seed).split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % PALETTE.length];
@@ -57,14 +65,14 @@ async function validateSemester(body, excludeId) {
   return { data: { name, start, end } };
 }
 
-router.post("/semesters", requireAuth, requireAdmin, async (req, res) => {
+router.post("/semesters", requireAuth, requireHndWrite, async (req, res) => {
   const v = await validateSemester(req.body, null);
   if (v.error) return res.status(400).json({ error: v.error });
   const s = await prisma.semester.create({ data: v.data });
   res.status(201).json(sSemester(s));
 });
 
-router.put("/semesters/:id", requireAuth, requireAdmin, async (req, res) => {
+router.put("/semesters/:id", requireAuth, requireHndWrite, async (req, res) => {
   const existing = await prisma.semester.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Semester not found" });
   const v = await validateSemester({ ...existing, ...req.body }, existing.id);
@@ -75,7 +83,7 @@ router.put("/semesters/:id", requireAuth, requireAdmin, async (req, res) => {
 
 // Deleting a semester never touches sessions or marks — it only changes how
 // they're grouped, so the underlying registers are always safe.
-router.delete("/semesters/:id", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/semesters/:id", requireAuth, requireHndWrite, async (req, res) => {
   try { await prisma.semester.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Semester not found" }); }
 });
@@ -119,7 +127,7 @@ router.get("/courses", requireAuth, async (_req, res) => {
   res.json(rows.map(sCourse));
 });
 
-router.post("/courses", requireAuth, requireAdmin, async (req, res) => {
+router.post("/courses", requireAuth, requireHndWrite, async (req, res) => {
   const name = str(req.body?.name);
   if (!name) return res.status(400).json({ error: "Course name required" });
   const clash = await prisma.course.findFirst({ where: { name: { equals: name } } });
@@ -129,7 +137,7 @@ router.post("/courses", requireAuth, requireAdmin, async (req, res) => {
   res.status(201).json(sCourse(p));
 });
 
-router.put("/courses/:id", requireAuth, requireAdmin, async (req, res) => {
+router.put("/courses/:id", requireAuth, requireHndWrite, async (req, res) => {
   const existing = await prisma.course.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Course not found" });
   const data = {};
@@ -146,7 +154,7 @@ router.put("/courses/:id", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Units are un-assigned (not deleted) when their course goes.
-router.delete("/courses/:id", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/courses/:id", requireAuth, requireHndWrite, async (req, res) => {
   try { await prisma.course.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Course not found" }); }
 });
@@ -162,7 +170,7 @@ router.get("/cohorts", requireAuth, async (req, res) => {
   res.json(rows.map(sCohort));
 });
 
-router.post("/cohorts", requireAuth, requireAdmin, async (req, res) => {
+router.post("/cohorts", requireAuth, requireHndWrite, async (req, res) => {
   const name = str(req.body?.name);
   const courseId = str(req.body?.courseId);
   const startDate = str(req.body?.startDate) || null;
@@ -179,7 +187,7 @@ router.post("/cohorts", requireAuth, requireAdmin, async (req, res) => {
   } catch (_e) { res.status(400).json({ error: "Could not create the cohort" }); }
 });
 
-router.put("/cohorts/:id", requireAuth, requireAdmin, async (req, res) => {
+router.put("/cohorts/:id", requireAuth, requireHndWrite, async (req, res) => {
   const existing = await prisma.cohort.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Cohort not found" });
   const data = {};
@@ -199,7 +207,7 @@ router.put("/cohorts/:id", requireAuth, requireAdmin, async (req, res) => {
   res.json(sCohort(c));
 });
 
-router.delete("/cohorts/:id", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/cohorts/:id", requireAuth, requireHndWrite, async (req, res) => {
   try { await prisma.cohort.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Cohort not found" }); }
 });
@@ -220,7 +228,7 @@ router.get("/terms", requireAuth, async (req, res) => {
 
 // Generate the standard 6 terms for a cohort, back-to-back from a start date.
 // Body: { start?, weeksPerTerm? } — start defaults to the cohort's own start date.
-router.post("/cohorts/:id/terms/generate", requireAuth, requireAdmin, async (req, res) => {
+router.post("/cohorts/:id/terms/generate", requireAuth, requireHndWrite, async (req, res) => {
   const cohort = await prisma.cohort.findUnique({ where: { id: req.params.id } });
   if (!cohort) return res.status(404).json({ error: "Cohort not found" });
   const start = str(req.body?.start) || cohort.startDate;
@@ -238,12 +246,19 @@ router.post("/cohorts/:id/terms/generate", requireAuth, requireAdmin, async (req
     data.push({ cohortId: cohort.id, year, index, name: `Year ${year} · Term ${index}`, start: cursor, end });
     cursor = addDays(end, 1);
   }
-  await prisma.term.createMany({ data });
+  try {
+    await prisma.term.createMany({ data });
+  } catch (e) {
+    // Two generate calls can both pass the count check above; the loser trips the
+    // (cohortId, year, index) unique index. Report that as the same clean 409.
+    if (e?.code === "P2002") return res.status(409).json({ error: "This cohort already has terms — edit or delete them first" });
+    throw e;
+  }
   const terms = await prisma.term.findMany({ where: { cohortId: cohort.id }, orderBy: [{ year: "asc" }, { index: "asc" }] });
   res.status(201).json(terms.map(sTerm));
 });
 
-router.put("/terms/:id", requireAuth, requireAdmin, async (req, res) => {
+router.put("/terms/:id", requireAuth, requireHndWrite, async (req, res) => {
   const existing = await prisma.term.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Term not found" });
   const data = {};
@@ -252,11 +267,24 @@ router.put("/terms/:id", requireAuth, requireAdmin, async (req, res) => {
   if (req.body?.end !== undefined) { if (!isDate(str(req.body.end))) return res.status(400).json({ error: "Valid end date required (YYYY-MM-DD)" }); data.end = str(req.body.end); }
   const start = data.start ?? existing.start, end = data.end ?? existing.end;
   if (end < start) return res.status(400).json({ error: "End date must be on or after the start date" });
+  // Terms drive attendance locking, so two terms must never claim the same day —
+  // otherwise two terms read as "current" and which register opens is arbitrary.
+  const siblings = await prisma.term.findMany({ where: { cohortId: existing.cohortId, id: { not: existing.id } } });
+  const clash = siblings.find((o) => overlaps({ start, end }, o));
+  if (clash) return res.status(409).json({ error: `Those dates overlap ${clash.name} (${clash.start} → ${clash.end})` });
   const t = await prisma.term.update({ where: { id: existing.id }, data });
-  res.json(sTerm(t));
+  // A gap between terms leaves days covered by no term at all, which silently locks
+  // every register in that window. Not an error (the college may intend a break), but
+  // report it so the UI can warn instead of leaving the admin to guess.
+  const all = [...siblings, t].sort((a, b) => a.start.localeCompare(b.start));
+  const gaps = [];
+  for (let i = 1; i < all.length; i++) {
+    if (addDays(all[i - 1].end, 1) < all[i].start) gaps.push({ after: all[i - 1].name, before: all[i].name, from: addDays(all[i - 1].end, 1), to: addDays(all[i].start, -1) });
+  }
+  res.json({ ...sTerm(t), gaps });
 });
 
-router.delete("/terms/:id", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/terms/:id", requireAuth, requireHndWrite, async (req, res) => {
   try { await prisma.term.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Term not found" }); }
 });
@@ -277,7 +305,7 @@ router.get("/units", requireAuth, async (_req, res) => {
   res.json(rows.map((m) => ({ ...sUnit(m), studentCount: eMap.get(m.id) || 0, sessionCount: sMap.get(m.id) || 0, endDate: endMap.get(m.id) || null })));
 });
 
-router.post("/units", requireAuth, requireAdmin, async (req, res) => {
+router.post("/units", requireAuth, requireHndWrite, async (req, res) => {
   const code = str(req.body?.code).toUpperCase();
   const name = str(req.body?.name);
   if (!code) return res.status(400).json({ error: "Unit code required" });
@@ -286,9 +314,13 @@ router.post("/units", requireAuth, requireAdmin, async (req, res) => {
   if (prog.error) return res.status(400).json({ error: prog.error });
   const courseId = prog.skip ? null : prog.value;
   // Unit codes are unique WITHIN a course only — the same code may exist on another
-  // course, so we scope the clash check to this unit's course.
-  const clash = await prisma.unit.findFirst({ where: { code, courseId } });
-  if (clash) return res.status(409).json({ error: `Unit code "${code}" already exists in this course` });
+  // course, so we scope the clash check to this unit's course. Note that the composite
+  // unique index can't enforce this for course-LESS units (Postgres treats NULLs as
+  // distinct), so for those this check is the only guard and two simultaneous creates
+  // could still slip through; assigning a course closes that gap.
+  const where = courseId ? { code, courseId } : { code, courseId: null };
+  const clash = await prisma.unit.findFirst({ where });
+  if (clash) return res.status(409).json({ error: courseId ? `Unit code "${code}" already exists in this course` : `Unit code "${code}" already exists among units with no course` });
   const ct = await resolveCohortTerm(req.body?.cohortId, req.body?.termId);
   if (ct.error) return res.status(400).json({ error: ct.error });
   try {
@@ -298,12 +330,12 @@ router.post("/units", requireAuth, requireAdmin, async (req, res) => {
     res.status(201).json(sUnit(m));
   } catch (e) {
     // P2002 = the DB's unique index rejected it. A clean 409 beats a raw 500.
-    if (e?.code === "P2002") return res.status(409).json({ error: `Unit code "${code}" already exists in this course` });
+    if (e?.code === "P2002") return res.status(409).json({ error: courseId ? `Unit code "${code}" already exists in this course` : `Unit code "${code}" is already in use` });
     throw e;
   }
 });
 
-router.put("/units/:id", requireAuth, requireAdmin, async (req, res) => {
+router.put("/units/:id", requireAuth, requireHndWrite, async (req, res) => {
   const existing = await prisma.unit.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Unit not found" });
   const data = {};
@@ -319,7 +351,7 @@ router.put("/units/:id", requireAuth, requireAdmin, async (req, res) => {
   // Re-check uniqueness within the (possibly new) course whenever code OR course moves.
   if (codeChanging || courseChanging) {
     const clash = await prisma.unit.findFirst({ where: { code: effectiveCode, courseId: targetCourseId, id: { not: existing.id } } });
-    if (clash) return res.status(409).json({ error: `Unit code "${effectiveCode}" already exists in this course` });
+    if (clash) return res.status(409).json({ error: `Unit code "${effectiveCode}" already exists in ${targetCourseId ? "this course" : "the no-course group"}` });
   }
   if (codeChanging) data.code = effectiveCode;
   if (req.body?.name !== undefined) {
@@ -338,13 +370,13 @@ router.put("/units/:id", requireAuth, requireAdmin, async (req, res) => {
     const m = await prisma.unit.update({ where: { id: existing.id }, data });
     res.json(sUnit(m));
   } catch (e) {
-    if (e?.code === "P2002") return res.status(409).json({ error: `Unit code "${data.code || existing.code}" already exists in this course` });
+    if (e?.code === "P2002") return res.status(409).json({ error: `Unit code "${data.code || existing.code}" already exists in ${targetCourseId ? "this course" : "the no-course group"}` });
     throw e;
   }
 });
 
 // Deleting a unit cascades to its sessions, marks and enrolments (schema-level).
-router.delete("/units/:id", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/units/:id", requireAuth, requireHndWrite, async (req, res) => {
   try { await prisma.unit.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Unit not found" }); }
 });
@@ -353,7 +385,7 @@ router.delete("/units/:id", requireAuth, requireAdmin, async (req, res) => {
 // PUT /students/:id/enrolments. Replaces the whole set; un-enrolling a student
 // deliberately KEEPS any marks they already have, so past registers still read
 // as they were taken.
-router.put("/units/:id/enrolments", requireAuth, requireAdmin, async (req, res) => {
+router.put("/units/:id/enrolments", requireAuth, requireHndWrite, async (req, res) => {
   const mod = await prisma.unit.findUnique({ where: { id: req.params.id } });
   if (!mod) return res.status(404).json({ error: "Unit not found" });
   if (!Array.isArray(req.body?.studentIds)) return res.status(400).json({ error: "studentIds must be an array of student ids" });
@@ -385,7 +417,7 @@ router.get("/students", requireAuth, async (_req, res) => {
   res.json(rows.map(sStudent));
 });
 
-router.post("/students", requireAuth, requireAdmin, async (req, res) => {
+router.post("/students", requireAuth, requireHndWrite, async (req, res) => {
   const firstName = str(req.body?.firstName);
   const lastName = str(req.body?.lastName);
   const studentRef = str(req.body?.studentRef);
@@ -422,7 +454,7 @@ router.post("/students", requireAuth, requireAdmin, async (req, res) => {
   res.status(201).json(sStudent(s));
 });
 
-router.put("/students/:id", requireAuth, requireAdmin, async (req, res) => {
+router.put("/students/:id", requireAuth, requireHndWrite, async (req, res) => {
   const existing = await prisma.student.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Student not found" });
 
@@ -468,7 +500,7 @@ router.put("/students/:id", requireAuth, requireAdmin, async (req, res) => {
   res.json(sStudent(s));
 });
 
-router.delete("/students/:id", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/students/:id", requireAuth, requireHndWrite, async (req, res) => {
   try { await prisma.student.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Student not found" }); }
 });
@@ -476,7 +508,7 @@ router.delete("/students/:id", requireAuth, requireAdmin, async (req, res) => {
 // Replace a student's unit enrolments wholesale.
 // Un-enrolling drops the student from future registers but deliberately KEEPS
 // their existing marks, so past registers still read as they were taken.
-router.put("/students/:id/enrolments", requireAuth, requireAdmin, async (req, res) => {
+router.put("/students/:id/enrolments", requireAuth, requireHndWrite, async (req, res) => {
   const student = await prisma.student.findUnique({ where: { id: req.params.id } });
   if (!student) return res.status(404).json({ error: "Student not found" });
   // This is the one call that can wipe a student's whole enrolment set, so malformed
@@ -515,7 +547,7 @@ router.get("/sessions", requireAuth, async (req, res) => {
   res.json(rows.map((s) => ({ ...sSession(s), markedCount: cMap.get(s.id) || 0 })));
 });
 
-router.post("/sessions", requireAuth, requireAdmin, async (req, res) => {
+router.post("/sessions", requireAuth, requireHndWrite, async (req, res) => {
   const unitId = str(req.body?.unitId);
   const date = str(req.body?.date);
   const start = str(req.body?.start);
@@ -538,7 +570,7 @@ router.post("/sessions", requireAuth, requireAdmin, async (req, res) => {
   res.status(201).json(sSession(s));
 });
 
-router.put("/sessions/:id", requireAuth, requireAdmin, async (req, res) => {
+router.put("/sessions/:id", requireAuth, requireHndWrite, async (req, res) => {
   const existing = await prisma.hndSession.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Session not found" });
   const data = {};
@@ -564,7 +596,7 @@ router.put("/sessions/:id", requireAuth, requireAdmin, async (req, res) => {
   res.json(sSession(s));
 });
 
-router.delete("/sessions/:id", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/sessions/:id", requireAuth, requireHndWrite, async (req, res) => {
   try { await prisma.hndSession.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Session not found" }); }
 });
@@ -575,7 +607,7 @@ router.delete("/sessions/:id", requireAuth, requireAdmin, async (req, res) => {
 // at once. Idempotent: dates that already have a session for this unit are
 // skipped, so re-running never duplicates.
 const MAX_WEEKLY_SESSIONS = 60; // ~14 months of weeks — a safety cap, not a limit anyone hits
-router.post("/units/:id/sessions/generate", requireAuth, requireAdmin, async (req, res) => {
+router.post("/units/:id/sessions/generate", requireAuth, requireHndWrite, async (req, res) => {
   const mod = await prisma.unit.findUnique({ where: { id: req.params.id } });
   if (!mod) return res.status(404).json({ error: "Unit not found" });
 
@@ -673,7 +705,7 @@ router.get("/sessions/:id/register", requireAuth, async (req, res) => {
 // Save the register. Accepts a partial list — only the students present in the
 // body are written, so a half-finished register can be saved and resumed.
 // A row with status null/"" clears that student's mark.
-router.put("/sessions/:id/register", requireAuth, requireAdmin, async (req, res) => {
+router.put("/sessions/:id/register", requireAuth, requireHndWrite, async (req, res) => {
   const session = await prisma.hndSession.findUnique({ where: { id: req.params.id }, include: { unit: { include: { term: true } } } });
   if (!session) return res.status(404).json({ error: "Session not found" });
 

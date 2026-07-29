@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { api, getToken, setToken } from "./api";
 import { registerForPush, unregisterForPush } from "./push";
+import { clearBiometricPrefs } from "./biometric";
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
@@ -84,6 +85,9 @@ export function AuthProvider({ children }) {
   // handed-on phone keeps receiving the previous user's leave decisions.
   const logout = async () => {
     try { await unregisterForPush(); } catch (_) { /* never block signing out */ }
+    // The app-lock preference is stored per DEVICE, so clear it on the way out —
+    // otherwise the next account to sign in on this phone inherits it.
+    try { clearBiometricPrefs(); } catch (_) {}
     setToken(null);
     setUser(null);
   };

@@ -1,15 +1,19 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sLeave } = require("../serializers");
-const { requireAuth, requireAnyPage } = require("../auth");
+const { requireAuth, requireAnyPage, hasPage } = require("../auth");
 const { notifyStaff, notifyAdmins } = require("../notify");
 const { localDate } = require("../clock");
-const { allDatesAreBankHolidays, chargeableDays, bankHolidayCount } = require("../bankHolidays");
+const { chargeableDays, bankHolidayCount } = require("../bankHolidays");
 
 // Local (London) date, not the server's UTC date — so a request made just after
 // midnight BST is filed under the correct day, not the previous one.
 const today = () => localDate();
 const VALID_TYPES = ["annual", "sick", "personal", "training", "unpaid"];
+// Admin sections that legitimately manage OTHER people's leave: seeing everyone's
+// requests, booking on someone's behalf, and backfilling a past date. Being an ADMIN
+// for an unrelated page (e.g. Documents) must not grant any of that.
+const LEAVE_ADMIN_PAGES = ["requests", "approvals", "calendar", "balances"];
 // Types that DON'T draw down the paid holiday allowance. Unpaid leave is time off
 // the books, so approving it neither checks nor consumes the allowance. Must stay
 // in sync with the client's NON_ALLOWANCE_TYPES.
@@ -41,7 +45,9 @@ const daysBetween = (a, b) => {
 
 // GET /api/leave  — admin: all; staff: own
 router.get("/", requireAuth, async (req, res) => {
-  const where = req.user.accountRole === "ADMIN" ? {} : { staffId: req.user.id };
+  // Leave rows carry a free-text reason, so "see everyone" needs one of the leave
+  // sections — not merely being an ADMIN for some unrelated page.
+  const where = hasPage(req.user, LEAVE_ADMIN_PAGES) ? {} : { staffId: req.user.id };
   const rows = await prisma.leave.findMany({ where, orderBy: { requestedAt: "desc" } });
   res.json(rows.map(sLeave));
 });
@@ -57,11 +63,11 @@ router.post("/", requireAuth, async (req, res) => {
   const isRealDate = (s) => { const d = new Date(s + "T00:00:00Z"); return !isNaN(d) && d.toISOString().slice(0, 10) === s; };
   if (!isRealDate(start) || !isRealDate(end)) return res.status(400).json({ error: "Dates must be valid calendar dates" });
   if (start > end) return res.status(400).json({ error: "End date must not be before start date" });
-  // Staff can't book leave in the past. Admins are exempt so they can still record a
-  // past absence retroactively on someone's behalf.
-  if (req.user.accountRole !== "ADMIN" && start < today()) return res.status(400).json({ error: "You can't book leave for a past date." });
+  // Only a leave admin may backfill a past date, so they can still record a past
+  // absence on someone's behalf. Ordinary staff can never book the past.
+  if (!hasPage(req.user, LEAVE_ADMIN_PAGES) && start < today()) return res.status(400).json({ error: "You can't book leave for a past date." });
   if (staffId !== undefined && typeof staffId !== "string") return res.status(400).json({ error: "staffId must be a string" });
-  const targetStaff = req.user.accountRole === "ADMIN" && staffId ? staffId : req.user.id;
+  const targetStaff = hasPage(req.user, LEAVE_ADMIN_PAGES) && staffId ? staffId : req.user.id;
   // Guard against a non-existent staffId (would otherwise throw a foreign-key error and crash the request).
   const exists = await prisma.staff.findUnique({ where: { id: targetStaff } });
   if (!exists) return res.status(400).json({ error: "Unknown staff member" });
@@ -126,34 +132,45 @@ router.put("/:id/decision", requireAuth, requireAnyPage(["requests", "approvals"
     // usedDays rule). Unpaid leave is the exception: it neither checks nor consumes
     // the allowance, so it can always be approved regardless of the balance.
     if (status === "approved" && !UNPAID_TYPES.includes(leave.type)) {
-      const [staff, adj, usedAgg] = await Promise.all([
+      // The allowance is per LEAVE YEAR (calendar year), so only that year's approved
+      // leave and adjustments count — otherwise usage accumulated for ever and a staff
+      // member could never book again after spending one year's entitlement.
+      const year = String(leave.start).slice(0, 4);
+      const yearStart = `${year}-01-01`, yearEnd = `${year}-12-31`;
+      const [staff, adj, others] = await Promise.all([
         prisma.staff.findUnique({ where: { id: leave.staffId } }),
-        prisma.adjustment.aggregate({ where: { staffId: leave.staffId }, _sum: { days: true } }),
-        // All already-approved allowance-consuming leave, excluding this request and
-        // any unpaid leave (which never counts against the paid allowance).
-        prisma.leave.aggregate({
-          where: { staffId: leave.staffId, status: "approved", id: { not: leave.id }, type: { notIn: UNPAID_TYPES } },
-          _sum: { days: true },
+        prisma.adjustment.aggregate({ where: { staffId: leave.staffId, date: { gte: yearStart, lte: yearEnd } }, _sum: { days: true } }),
+        // All already-approved allowance-consuming leave in the same leave year,
+        // excluding this request and any unpaid leave. We read the DATES (not the
+        // stored `days`) and recompute, so a legacy row whose `days` was a raw
+        // calendar count can't over-charge the allowance.
+        prisma.leave.findMany({
+          where: {
+            staffId: leave.staffId, status: "approved", id: { not: leave.id },
+            type: { notIn: UNPAID_TYPES }, start: { gte: yearStart, lte: yearEnd },
+          },
+          select: { start: true, end: true },
         }),
       ]);
       // The bookable pot excludes the bank holidays (normally 8), which are a
       // separate entitlement and never bookable: bookable = total + adjustments − 8.
-      const bankPot = bankHolidayCount(Number(leave.start.slice(0, 4)));
+      const bankPot = bankHolidayCount(Number(year));
       const bookableAllowance = Math.max(0, (staff?.allowance || 0) + (adj._sum.days || 0) - bankPot);
-      const usedDays = usedAgg._sum.days || 0;
-      // Recompute this request's cost from its dates (weekends + bank holidays removed)
-      // so an old row with a stale calendar-based `days` can't over-charge on approval.
+      const usedDays = others.reduce((n, l) => n + chargeableDays(l.start, l.end), 0);
+      // Recompute this request's cost from its dates (weekends + bank holidays removed).
       const thisDays = chargeableDays(leave.start, leave.end);
       if (usedDays + thisDays > bookableAllowance) {
-        return { error: { code: 400, message: `Approval would exceed allowance: ${usedDays} used + ${thisDays} requested > ${bookableAllowance} available` } };
+        return { error: { code: 400, message: `Approval would exceed the ${year} allowance: ${usedDays} used + ${thisDays} requested > ${bookableAllowance} available` } };
       }
     }
 
     // Conditional update: only transitions a row that is still pending, so even if
-    // the lock were bypassed the decision could not be applied twice.
+    // the lock were bypassed the decision could not be applied twice. `days` is
+    // re-derived here so a legacy row stored with a raw calendar count is corrected
+    // on approval and every later reader agrees on the cost.
     const claimed = await prisma.leave.updateMany({
       where: { id: leave.id, status: "pending" },
-      data: { status, note: note || (status === "approved" ? "Approved" : "Declined"), decidedBy: req.user.name, decidedAt: today() },
+      data: { status, days: chargeableDays(leave.start, leave.end), note: note || (status === "approved" ? "Approved" : "Declined"), decidedBy: req.user.name, decidedAt: today() },
     });
     if (claimed.count === 0) return { error: { code: 409, message: "This request has already been decided" } };
     return { leave: await prisma.leave.findUnique({ where: { id: leave.id } }) };

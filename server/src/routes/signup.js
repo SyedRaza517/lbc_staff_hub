@@ -3,8 +3,8 @@
 // An applicant is NOT a staff member: their details sit in SignupRequest until an
 // admin approves, so they never appear in the staff list, calendars or registers,
 // and they cannot sign in. Approval copies the row into Staff — password hash
-// included, so the applicant keeps the password they chose — and requires them to
-// enrol an authenticator on first sign-in.
+// included, so the applicant keeps the password they chose. (Authenticator/2FA
+// enrolment is currently switched off — see the commented-out branches in auth.js.)
 const router = require("express").Router();
 const prisma = require("../db");
 const { sSignup, sStaff, sStudent } = require("../serializers");
@@ -51,16 +51,34 @@ router.post("/", async (req, res) => {
       prisma.student.findUnique({ where: { email } }),
       prisma.signupRequest.findUnique({ where: { email } }),
     ]);
-    // Match by college ID first (the stronger identifier), then email.
-    const student = byRef || byEmail;
+    // Link the request to an existing student record ONLY when the college ID and the
+    // email point at the SAME person. Trusting the college ID alone meant a mistyped
+    // ID silently attached the request to somebody else's record — and approving it
+    // then overwrote that student's password and activated their account.
+    let student = null, matchNote = " — no matching record";
+    if (byRef && byEmail && byRef.id === byEmail.id) {
+      student = byRef; matchNote = " — matches an existing student record";
+    } else if (byRef && !byEmail) {
+      // The ID belongs to a record with a different email on file: could be a typo of
+      // another student's ID, so never auto-link. An admin resolves it by hand.
+      matchNote = ` — WARNING: college ID ${collegeId} is on file under a different email; check before approving`;
+    } else if (!byRef && byEmail) {
+      // Email is the login identifier, so trust it, but flag the ID discrepancy.
+      student = byEmail; matchNote = ` — email matches a student record whose college ID differs from ${collegeId}; please verify`;
+    } else if (byRef && byEmail) {
+      // Both exist but are different people — definitely do not link either.
+      matchNote = ` — WARNING: college ID ${collegeId} and this email belong to two different student records; check before approving`;
+    }
     // Same generic reply if the email is a staff account, an already-claimed student
-    // account, or already has a live request — never reveal which.
-    if (staffClash || (student && student.passwordHash) || (existingRequest && existingRequest.status !== "rejected")) return genericOk();
+    // account, or already has a live request — never reveal which. Both candidate
+    // records are checked so a claimed account can't be re-claimed via the other key.
+    const alreadyClaimed = (byRef && byRef.passwordHash) || (byEmail && byEmail.passwordHash);
+    if (staffClash || alreadyClaimed || (existingRequest && existingRequest.status !== "rejected")) return genericOk();
 
     const data = { kind: "student", studentId: student?.id || null, collegeId, name, email, passwordHash: hashPassword(password), jobTitle: "", dept: "", site: null, status: "pending", note: null, decidedBy: null, decidedAt: null };
     if (existingRequest) await prisma.signupRequest.update({ where: { id: existingRequest.id }, data });
     else await prisma.signupRequest.create({ data });
-    notifyAdmins({ type: "info", message: `New STUDENT sign-up from ${name} (ID ${collegeId})${student ? " — matches an existing student record" : " — no matching record"} — awaiting approval`, link: "signups" });
+    notifyAdmins({ type: "info", message: `New STUDENT sign-up from ${name} (ID ${collegeId})${matchNote} — awaiting approval`, link: "signups" });
     return genericOk();
   }
 
@@ -129,7 +147,17 @@ router.put("/:id/decision", requireAuth, requirePage("signups"), async (req, res
   // fresh one if there was no match) with the password they chose at sign-up. No 2FA.
   if (reqRow.kind === "student") {
     let student = reqRow.studentId ? await prisma.student.findUnique({ where: { id: reqRow.studentId } }) : null;
+    // Re-resolve by email AND by college ID: an admin may have created the record
+    // between sign-up and approval. Without the studentRef lookup the create branch
+    // below fired and collided on studentRef, so the request could never be approved.
     if (!student) student = await prisma.student.findUnique({ where: { email: reqRow.email } });
+    if (!student && reqRow.collegeId) student = await prisma.student.findUnique({ where: { studentRef: reqRow.collegeId } });
+    // Never re-claim an account that already has a password — a second request for the
+    // same person (via a different email) would otherwise overwrite their credentials
+    // and sign them out. The admin must resolve that by hand.
+    if (student && student.passwordHash) {
+      return res.status(409).json({ error: "That student account has already been claimed. Reject this request, or reset the student's password instead." });
+    }
     try {
       const ops = student
         ? [prisma.student.update({ where: { id: student.id }, data: { passwordHash: reqRow.passwordHash, active: true, tokenVersion: { increment: 1 } } }),
@@ -140,7 +168,8 @@ router.put("/:id/decision", requireAuth, requirePage("signups"), async (req, res
       const [savedStudent, updatedReq] = await prisma.$transaction(ops);
       return res.status(201).json({ request: sSignup(updatedReq), student: sStudent(savedStudent) });
     } catch (e) {
-      if (e.code === "P2002") return res.status(409).json({ error: "A student account with that email already exists" });
+      // P2002 can fire on either unique key, so name both rather than guessing email.
+      if (e.code === "P2002") return res.status(409).json({ error: "A student record already exists with that email or college ID" });
       return res.status(500).json({ error: "Could not activate the student account" });
     }
   }
@@ -181,7 +210,7 @@ router.put("/:id/decision", requireAuth, requirePage("signups"), async (req, res
 
     notifyStaff(staff.id, {
       type: "success",
-      message: `Your Staff Hub account has been approved. Sign in with your email and password, then set up your authenticator app.`,
+      message: `Your Staff Hub account has been approved. You can now sign in with your email and password.`,
       link: "home",
     });
 

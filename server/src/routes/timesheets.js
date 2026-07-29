@@ -9,7 +9,7 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sTimesheet } = require("../serializers");
-const { requireAuth, requirePage } = require("../auth");
+const { requireAuth, requirePage, hasPage } = require("../auth");
 const { notifyAdmins, notifyStaff } = require("../notify");
 const { localDate } = require("../clock");
 
@@ -54,7 +54,9 @@ function parseBody(body) {
 // Staff see only their own. Admins may pass staffId to view one person, or omit it
 // to see every submitted entry (for the review screen).
 router.get("/", requireAuth, async (req, res) => {
-  const isAdmin = req.user.accountRole === "ADMIN";
+  // "See everyone" requires the timesheets page itself — being an ADMIN for some
+  // OTHER section must not expose colleagues' timesheets (or their private drafts).
+  const isAdmin = hasPage(req.user, "timesheets");
   const where = {};
   if (req.query.month) {
     if (!isMonth(req.query.month)) return res.status(400).json({ error: "month must be YYYY-MM" });
@@ -64,8 +66,10 @@ router.get("/", requireAuth, async (req, res) => {
     if (req.query.staffId) where.staffId = String(req.query.staffId);
     // The finance review screen shows everything that has left "draft" — pending
     // (submitted), approved, and bounced-back (changes_requested) — so both the
-    // approval queue and the history are visible. It never shows private drafts.
-    if (!req.query.staffId && !req.query.all) where.status = { in: ["submitted", "approved", "changes_requested"] };
+    // approval queue and the history are visible. It NEVER shows private drafts,
+    // whether or not a staffId is given. (An `?all` escape hatch used to bypass
+    // this and return every staff member's unsent drafts — removed.)
+    where.status = { in: ["submitted", "approved", "changes_requested"] };
   } else {
     where.staffId = req.user.id; // staff: always scoped to self
   }
@@ -88,7 +92,8 @@ router.get("/pending-count", requireAuth, requirePage("timesheets"), async (req,
 router.post("/", requireAuth, async (req, res) => {
   const parsed = parseBody(req.body);
   if (parsed.error) return res.status(400).json({ error: parsed.error });
-  const staffId = req.user.accountRole === "ADMIN" && req.body.staffId ? String(req.body.staffId) : req.user.id;
+  // Creating an entry for someone else is a timesheets-page power.
+  const staffId = hasPage(req.user, "timesheets") && req.body.staffId ? String(req.body.staffId) : req.user.id;
   const exists = await prisma.staff.findUnique({ where: { id: staffId } });
   if (!exists) return res.status(400).json({ error: "Unknown staff member" });
   const rec = await prisma.timesheetEntry.create({ data: { ...parsed.data, staffId, status: "draft", createdAt: new Date() } });
@@ -99,7 +104,8 @@ router.post("/", requireAuth, async (req, res) => {
 router.put("/:id", requireAuth, async (req, res) => {
   const existing = await prisma.timesheetEntry.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Entry not found" });
-  const isAdmin = req.user.accountRole === "ADMIN";
+  // Only a timesheets admin may touch someone else's entry or a locked one.
+  const isAdmin = hasPage(req.user, "timesheets");
   if (existing.staffId !== req.user.id && !isAdmin) return res.status(403).json({ error: "Forbidden" });
   // Editable only while the owner still holds it: a fresh draft, or a month bounced
   // back with "changes_requested". Once submitted or approved it is locked.
@@ -114,7 +120,7 @@ router.put("/:id", requireAuth, async (req, res) => {
 router.delete("/:id", requireAuth, async (req, res) => {
   const existing = await prisma.timesheetEntry.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Entry not found" });
-  const isAdmin = req.user.accountRole === "ADMIN";
+  const isAdmin = hasPage(req.user, "timesheets");
   if (existing.staffId !== req.user.id && !isAdmin) return res.status(403).json({ error: "Forbidden" });
   if (!isAdmin && !["draft", "changes_requested"].includes(existing.status)) return res.status(409).json({ error: "This timesheet has been sent and can't be changed until it's reviewed" });
   await prisma.timesheetEntry.delete({ where: { id: existing.id } });

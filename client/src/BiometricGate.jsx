@@ -8,6 +8,7 @@ import { isNativeApp } from "./PhoneShell";
 import { getToken } from "./api";
 import { isBiometricEnabled, verifyBiometric, biometricStatus, biometryLabel, enableBiometric } from "./biometric";
 import { Fingerprint, Loader2, LogOut, ShieldCheck, XCircle } from "lucide-react";
+import { useBackHandler } from "./backButton";
 
 const NAVY = "#1a3a8f", NAVY_DARK = "#14306f";
 
@@ -159,6 +160,14 @@ export function BiometricSetupPrompt() {
   const [label, setLabel] = useState("biometric unlock");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Android hardware back dismisses the prompt (same as "Not now") instead of falling
+  // through to the screen underneath while this stays on top. Declared here (not after
+  // the early return below) because hooks must run on every render.
+  const dismissPrompt = useCallback(() => {
+    try { localStorage.setItem(PROMPT_DISMISSED_KEY, "1"); } catch (_) {}
+    setShow(false);
+  }, []);
+  useBackHandler(show, () => { dismissPrompt(); return true; });
 
   useEffect(() => {
     if (!isNativeApp() || isBiometricEnabled()) return;
@@ -181,10 +190,7 @@ export function BiometricSetupPrompt() {
     if (res.reason !== "cancelled") setError(res.reason || "Could not turn this on. Try again.");
   };
 
-  const notNow = () => {
-    try { localStorage.setItem(PROMPT_DISMISSED_KEY, "1"); } catch (_) {}
-    setShow(false);
-  };
+  const notNow = dismissPrompt;
 
   return (
     <div

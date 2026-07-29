@@ -196,7 +196,10 @@ export const api = {
   saveGrades: (id, grades) => request(`/assessments/${id}/grades`, { method: "PUT", body: { grades } }),
   listGrades: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/assessments/grades${q ? `?${q}` : ""}`); },
   assessmentOverview: () => request("/assessments/overview"),
-  studentAssessments: (studentId) => request(`/assessments/student/${studentId}`),
+  // Admin gradebook view of ONE student. Deliberately named differently from the
+  // student app's `studentAssessments` (their own results) — when both keys shared a
+  // name the later one silently won and broke the student "My Results" screen.
+  adminStudentAssessments: (studentId) => request(`/assessments/student/${studentId}`),
   execSummary: () => request("/assessments/exec-summary"),
   // timesheets
   listTimesheets: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/timesheets${q ? `?${q}` : ""}`); },

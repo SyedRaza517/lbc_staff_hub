@@ -3,8 +3,14 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sAssessment, sGrade, sStudent, sUnit } = require("../serializers");
-const { requireAuth, requireAdmin, requirePage } = require("../auth");
+const { requireAuth, requireAdmin, requirePage, requireAnyPage } = require("../auth");
 const { isRealDate } = require("../validate");
+
+// The Executive Dashboard is its own admin page, so its summary endpoint accepts
+// EITHER "executive" or "assessments". Registered before the router-wide gate below,
+// which would otherwise demand "assessments" and leave an executive-only admin
+// staring at an empty dashboard.
+router.get("/exec-summary", requireAuth, requireAnyPage(["executive", "assessments"]), (req, res, next) => execSummary(req, res).catch(next));
 
 // DEF-01: the gradebook is admin-only (student marks are sensitive; no staff/mobile
 // flow reads them). Guard every route, reads included, against non-admin tokens.
@@ -15,7 +21,10 @@ const str = (v) => (typeof v === "string" ? v.trim() : "");
 const isInt = (v) => Number.isInteger(v);
 // HND-style banding of a percentage.
 const bandOf = (pct) => (pct == null ? null : pct >= 70 ? "Distinction" : pct >= 60 ? "Merit" : pct >= 40 ? "Pass" : "Fail");
-const pctOf = (marks, max) => (max > 0 ? Math.round((marks / max) * 1000) / 10 : null);
+// Percentage of a mark out of its maximum, clamped to 0–100. The clamp is a safety
+// net for any historic row whose mark exceeds the assessment's current maximum — an
+// uncapped value would report >100% and skew averages, bands and pass rates.
+const pctOf = (marks, max) => (max > 0 ? Math.min(100, Math.max(0, Math.round((marks / max) * 1000) / 10)) : null);
 
 /* ============================== assessments ============================== */
 
@@ -86,6 +95,16 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   if (!existing) return res.status(404).json({ error: "Assessment not found" });
   const v = await validateAssessment(req.body, true);
   if (v.error) return res.status(400).json({ error: v.error });
+  // Lowering the maximum below a mark that has already been awarded would make that
+  // mark score over 100% and silently inflate every average, grade band and pass
+  // rate that reads it. Refuse instead, naming the highest mark in the way.
+  if (v.data.maxMarks != null && v.data.maxMarks < existing.maxMarks) {
+    const top = await prisma.assessmentGrade.aggregate({ where: { assessmentId: existing.id }, _max: { marks: true } });
+    const highest = top._max.marks;
+    if (highest != null && highest > v.data.maxMarks) {
+      return res.status(409).json({ error: `Can't lower the maximum to ${v.data.maxMarks}: a mark of ${highest} has already been awarded. Change that mark first.` });
+    }
+  }
   const a = await prisma.assessment.update({ where: { id: existing.id }, data: v.data, include: { unit: { select: { code: true, name: true } }, _count: { select: { grades: true } } } });
   res.json(sAssessment(a));
 });
@@ -261,7 +280,7 @@ router.get("/student/:id", requireAuth, async (req, res) => {
 // Dashboard. A student "passes" if their AVERAGE graded mark is 40%+. Results are
 // grouped by cohort (the "course"), plus per-course pass-rate. Heavy per-student
 // aggregation done here (server-side) so the client never fetches 100s of students.
-router.get("/exec-summary", requireAuth, async (req, res) => {
+async function execSummary(req, res) {
   const [students, assessments, grades, cohorts, courseList, unitList, enrolments] = await Promise.all([
     prisma.student.findMany({ select: { id: true, cohortId: true } }),
     prisma.assessment.findMany({ select: { id: true, maxMarks: true, unitId: true } }),
@@ -320,12 +339,15 @@ router.get("/exec-summary", requireAuth, async (req, res) => {
       if (g.sum / g.n >= 40) { b.passed += 1; totalPassed += 1; }
     }
   }
+  // Pass rate is measured over students who have actually been ASSESSED (graded),
+  // not the whole headcount — otherwise every un-marked student counts as a failure
+  // and a course reads 0% until marking is complete. Matches /overview's definition.
   const courses = [...byCourse.entries()]
     .map(([cid, b]) => ({
       courseId: cid, code: b.code,
       studentCount: b.count, studentsPassed: b.passed, graded: b.graded,
       assessments: assessByCourse.get(cid) || 0,
-      passRate: b.count ? Math.round((b.passed / b.count) * 1000) / 10 : 0,
+      passRate: b.graded ? Math.round((b.passed / b.graded) * 1000) / 10 : null,
     }))
     .filter((c) => c.courseId !== "__none__" || c.studentCount > 0) // hide empty "Unassigned"
     .sort((a, b) => b.studentCount - a.studentCount);
@@ -334,13 +356,13 @@ router.get("/exec-summary", requireAuth, async (req, res) => {
       students: students.length,
       studentsPassed: totalPassed,
       graded: totalGraded,
-      passRate: students.length ? Math.round((totalPassed / students.length) * 1000) / 10 : 0,
+      passRate: totalGraded ? Math.round((totalPassed / totalGraded) * 1000) / 10 : null,
       assessments: assessments.length,
       courses: courseList.length,
     },
     courses,
   });
-});
+}
 
 module.exports = router;
 module.exports.TYPES = TYPES;

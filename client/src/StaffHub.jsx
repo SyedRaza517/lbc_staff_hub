@@ -37,7 +37,11 @@ const NAVY = "#1a3a8f";
 const NAVY_DARK = "#14306f";
 const MAROON = "#9e1b32";
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+// Today as YYYY-MM-DD in the college's own timezone (Europe/London), matching the
+// server's localDate(). Using the browser's UTC date instead put the client a day
+// behind between midnight and 01:00 BST, so a register the UI showed as open was
+// rejected as out-of-term, and a same-day booking was refused as a past date.
+const todayISO = () => new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 // Combine several per-unit attendance summaries into one overall (P/L/E/A + %),
 // re-deriving the percentage from summed earned/possible so it stays weighted by
 // sessions, not a naive average of percentages.
@@ -150,12 +154,15 @@ const ATT_STATUSES = [
 const ATT_POINTS = { P: 2, L: 1, E: 1, A: 0 };
 const ATT_MAX = 2;
 const attMeta = (key) => ATT_STATUSES.find(s => s.key === key) || null;
-// Traffic-light tone for an attendance percentage. Below 70% is the level the
-// college chases up, so it reads red; 85%+ is comfortably on track.
+// Traffic-light tone for an attendance percentage. Thresholds match the college's
+// attendance-rating bands (see riskBand): under 40% is High Risk, 40–50 Monitor,
+// 50–70 Good, 70+ on track. Keeping one set of cut-offs stops the same figure from
+// showing a green rating badge next to an amber percentage.
 function pctTone(pct) {
   if (pct === null || pct === undefined) return { text: "text-slate-400", bg: "bg-slate-100", ring: "ring-slate-200", colour: "#94a3b8" };
-  if (pct >= 85) return { text: "text-emerald-700", bg: "bg-emerald-50", ring: "ring-emerald-200", colour: "#059669" };
-  if (pct >= 70) return { text: "text-amber-700", bg: "bg-amber-50", ring: "ring-amber-200", colour: "#b45309" };
+  if (pct >= 70) return { text: "text-emerald-700", bg: "bg-emerald-50", ring: "ring-emerald-200", colour: "#059669" };
+  if (pct >= 50) return { text: "text-yellow-700", bg: "bg-yellow-50", ring: "ring-yellow-200", colour: "#ca8a04" };
+  if (pct >= 40) return { text: "text-orange-700", bg: "bg-orange-50", ring: "ring-orange-200", colour: "#ea580c" };
   return { text: "text-rose-700", bg: "bg-rose-50", ring: "ring-rose-200", colour: MAROON };
 }
 const fmtPct = (pct) => (pct === null || pct === undefined ? "—" : `${pct}%`);
@@ -309,7 +316,11 @@ export function StaffApp({ store, currentStaffId, setCurrentStaffId, logout, onC
     return () => window.removeEventListener("push:open", onOpen);
   }, []);
 
-  const me = staff.find(s => s.id === currentStaffId) || staff[0];
+  // Strictly the signed-in user. There used to be a `|| staff[0]` fallback, which
+  // meant that if the staff list ever came back without this user, the app rendered
+  // a COLLEAGUE's profile, balance and check-ins as though they were the user's own.
+  // Better to wait (or fall back to the token's own user) than to show someone else.
+  const me = staff.find(s => s.id === currentStaffId) || (store.currentUser?.id === currentStaffId ? store.currentUser : null);
   if (!me) return <div className="flex justify-center py-20 text-slate-400">Loading…</div>;
 
   return (
@@ -1349,8 +1360,9 @@ const canAccessPage = (user, key) => {
 
 /* ============================ Dashboard shared bits ============================ */
 const fmtMonth = (ym) => { const [y, m] = String(ym || "").split("-"); if (!y || !m) return ym; return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("en-GB", { month: "short", year: "numeric" }); };
-// Traffic-light colour for a percentage: <40 red, 40–70 amber, 70+ green.
-const pctColour = (v) => v == null ? "#94a3b8" : v >= 70 ? "#0d7a5f" : v >= 40 ? "#d97706" : "#dc2626";
+// Colour for a percentage, taken from the same rating bands used everywhere else
+// (see riskBand) so one figure never gets two different colours on one screen.
+const pctColour = (v) => riskBand(v).colour;
 const kNum = (n) => n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "")}K` : String(n);
 
 function FilterSelect({ label, value, onChange, options }) {
@@ -1411,9 +1423,10 @@ function ExecutiveDashboard({ store }) {
   const [course, setCourse] = useState("all");
   const [unit, setUnit] = useState("all");
 
+  const [err, setErr] = useState("");
   // exec-summary loads once; monthly attendance re-scopes to the Course/Unit filters.
   const load = useCallback(async (scope, withExec) => {
-    setLoading(true);
+    setLoading(true); setErr("");
     try {
       const [e, m] = await Promise.all([
         withExec ? api.execSummary() : Promise.resolve(null),
@@ -1421,15 +1434,28 @@ function ExecutiveDashboard({ store }) {
       ]);
       if (withExec) setExec(e);
       setMonthly(m); setRefreshed(new Date());
-    } catch (_) { /* toast handled elsewhere */ } finally { setLoading(false); }
+    } catch (e) {
+      // Surface the failure — silently swallowing it made a broken/forbidden request
+      // look identical to "there is genuinely no data".
+      setErr(e?.status === 403 ? "You don't have access to this data." : (e?.message || "Could not load dashboard data"));
+    } finally { setLoading(false); }
   }, []);
   useEffect(() => { load({}, true); }, [load]);
   const scopeOf = (c, u) => ({ ...(c !== "all" ? { courseId: c } : {}), ...(u !== "all" ? { unitId: u } : {}) });
-  const onCourse = (c) => { setCourse(c); load(scopeOf(c, unit), false); };
+  // Units are listed per course, so changing the course must clear a unit that isn't
+  // in it — otherwise the two filters AND together into an impossible scope and every
+  // attendance tile silently reads zero while the student tiles show real numbers.
+  const unitsForCourse = course === "all" ? store.units : store.units.filter(u => u.courseId === course);
+  const onCourse = (c) => {
+    const keep = c === "all" || store.units.some(u => u.id === unit && u.courseId === c);
+    const nextUnit = keep ? unit : "all";
+    setCourse(c); setUnit(nextUnit); load(scopeOf(c, nextUnit), false);
+  };
   const onUnit = (u) => { setUnit(u); load(scopeOf(course, u), false); };
 
   const months = monthly?.months || [];
-  const years = [...new Set(months.map(m => m.month.slice(0, 4)))].sort();
+  // Plain calendar years, from 2025 onwards (the college's first year on the system).
+  const years = [...new Set(months.map(m => m.month.slice(0, 4)))].filter(y => Number(y) >= 2025).sort();
   const inYear = (m) => year === "all" || m.month.slice(0, 4) === year;
   const monthData = months.filter(inYear).map(m => ({ label: fmtMonth(m.month), pct: m.pct }));
   // Attendance % recomputed (points-weighted) over the months the Year filter shows.
@@ -1438,34 +1464,44 @@ function ExecutiveDashboard({ store }) {
   const possible = win.reduce((a, m) => a + (m.P + m.L + m.E + m.A) * 2, 0);
   const attPct = possible ? Math.round(earned / possible * 1000) / 10 : null;
   const totalMarks = win.reduce((a, m) => a + m.P + m.L + m.E + m.A, 0);
+  // Sessions in the selected Year, derived from the months actually in scope, so this
+  // tile tracks the Year filter like the other attendance figures. (monthly.sessions
+  // is the course/unit-scoped all-time count, used only when no year is selected.)
+  const totalSessions = year === "all" ? (monthly?.sessions ?? 0) : null;
 
   const allCourses = exec?.courses || [];
   const courses = allCourses.filter(c => course === "all" || c.courseId === course);
-  const courseData = courses.map(c => ({ code: c.code, passRate: c.passRate }));
+  // Only plot courses that actually have a measurable pass rate.
+  const courseData = courses.filter(c => c.passRate != null).map(c => ({ code: c.code, passRate: c.passRate }));
   const shownStudents = course === "all" ? (exec?.totals?.students ?? store.students.length) : courses.reduce((a, c) => a + c.studentCount, 0);
   const shownPassed = course === "all" ? (exec?.totals?.studentsPassed ?? 0) : courses.reduce((a, c) => a + c.studentsPassed, 0);
-  const shownPassRate = shownStudents ? Math.round(shownPassed / shownStudents * 1000) / 10 : 0;
+  // Pass rate counts only ASSESSED students; null (—) until someone has been graded.
+  const shownGraded = course === "all" ? (exec?.totals?.graded ?? 0) : courses.reduce((a, c) => a + (c.graded || 0), 0);
+  const shownPassRate = shownGraded ? Math.round(shownPassed / shownGraded * 1000) / 10 : null;
   const totalCourses = course === "all" ? (exec?.totals?.courses ?? store.courses.length) : 1;
   const assessmentsCount = course === "all" ? (exec?.totals?.assessments ?? store.assessments.length) : courses.reduce((a, c) => a + (c.assessments || 0), 0);
-  const totalSessions = monthly?.sessions ?? store.sessions.length;
+  // A Unit filter narrows attendance only — say so rather than mixing scopes silently.
+  const unitScoped = unit !== "all";
 
   return (
     <>
       <AdminHeader title="Executive Dashboard" subtitle="College-wide attendance & results at a glance" Icon={BarChart3}
         action={<div className="flex items-center gap-2 text-[11px] text-slate-400">{refreshed && <span className="hidden sm:inline">Last refreshed {refreshed.toLocaleString("en-GB")}</span>}<button onClick={() => load(scopeOf(course, unit), true)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button></div>} />
       <div className="mb-4 flex flex-wrap gap-2">
-        <FilterSelect label="Academic Year" value={year} onChange={setYear} options={[{ v: "all", l: "All years" }, ...years.map(y => ({ v: y, l: y }))]} />
+        <FilterSelect label="Year" value={year} onChange={setYear} options={[{ v: "all", l: "All years" }, ...years.map(y => ({ v: y, l: y }))]} />
         <FilterSelect label="Course" value={course} onChange={onCourse} options={[{ v: "all", l: "All courses" }, ...allCourses.map(c => ({ v: c.courseId, l: c.code }))]} />
-        <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...store.units.map(m => ({ v: m.id, l: m.code }))]} />
+        <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...unitsForCourse.map(m => ({ v: m.id, l: m.code }))]} />
       </div>
+      {err && <div className="mb-3 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 ring-1 ring-rose-200"><AlertCircle size={15} /> {err}</div>}
+      {unitScoped && <p className="mb-3 text-[11px] text-slate-400">Unit filter applies to the attendance figures; student and results figures cover the whole {course === "all" ? "college" : "course"}.</p>}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         <ExecKpi label="Total Students" value={shownStudents} />
         <ExecKpi label="Total Courses" value={totalCourses} />
-        <ExecKpi label="Attendance %" value={attPct == null ? "—" : `${Math.round(attPct)}%`} tone={pctColour(attPct)} />
+        <ExecKpi label="Attendance %" value={attPct == null ? "—" : `${attPct}%`} tone={pctColour(attPct)} />
         <ExecKpi label="Assessments" value={assessmentsCount} />
-        <ExecKpi label="Student Pass Rate" value={`${Math.round(shownPassRate)}%`} tone={pctColour(shownPassRate)} />
+        <ExecKpi label="Student Pass Rate" value={shownPassRate == null ? "—" : `${shownPassRate}%`} tone={pctColour(shownPassRate)} sub={shownGraded ? `of ${shownGraded} assessed` : "no marks yet"} />
         <ExecKpi label="Students Passed" value={shownPassed} tone="#0d7a5f" />
-        <ExecKpi label="Total Sessions" value={totalSessions} />
+        <ExecKpi label="Total Sessions" value={totalSessions == null ? "—" : totalSessions} sub={totalSessions == null ? "all years only" : undefined} />
         <ExecKpi label="Total Attendance" value={kNum(totalMarks)} sub="marks recorded" />
       </div>
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
@@ -1495,25 +1531,27 @@ function ExecutiveDashboard({ store }) {
       <ChartCard title="Results by Course" className="mt-3">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-left text-xs font-bold uppercase tracking-wide text-slate-400"><tr><th className="py-2 pr-4">Course Code</th><th className="px-2 py-2 text-right">Students</th><th className="px-2 py-2 text-right">Passed</th><th className="py-2 pl-2 text-right">Pass Rate</th></tr></thead>
+            <thead className="text-left text-xs font-bold uppercase tracking-wide text-slate-400"><tr><th className="py-2 pr-4">Course</th><th className="px-2 py-2 text-right">Students</th><th className="px-2 py-2 text-right">Assessed</th><th className="px-2 py-2 text-right">Passed</th><th className="py-2 pl-2 text-right">Pass Rate</th></tr></thead>
             <tbody>
               {courses.map(c => (
                 <tr key={c.courseId} className="border-t border-slate-100">
                   <td className="py-2 pr-4 font-medium text-slate-700">{c.code}</td>
                   <td className="px-2 py-2 text-right tabular-nums text-slate-600">{c.studentCount}</td>
+                  <td className="px-2 py-2 text-right tabular-nums text-slate-500">{c.graded ?? 0}</td>
                   <td className="px-2 py-2 text-right font-semibold tabular-nums text-emerald-600">{c.studentsPassed}</td>
-                  <td className="py-2 pl-2 text-right font-bold tabular-nums" style={{ color: pctColour(c.passRate) }}>{c.passRate}%</td>
+                  <td className="py-2 pl-2 text-right font-bold tabular-nums" style={{ color: pctColour(c.passRate) }}>{c.passRate == null ? "—" : `${c.passRate}%`}</td>
                 </tr>
               ))}
               {courses.length > 0 && (
                 <tr className="border-t-2 border-slate-200 font-bold text-slate-800">
                   <td className="py-2 pr-4">Total</td>
                   <td className="px-2 py-2 text-right tabular-nums">{shownStudents}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{shownGraded}</td>
                   <td className="px-2 py-2 text-right tabular-nums">{shownPassed}</td>
-                  <td className="py-2 pl-2 text-right tabular-nums" style={{ color: pctColour(shownPassRate) }}>{shownPassRate}%</td>
+                  <td className="py-2 pl-2 text-right tabular-nums" style={{ color: pctColour(shownPassRate) }}>{shownPassRate == null ? "—" : `${shownPassRate}%`}</td>
                 </tr>
               )}
-              {courses.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-slate-400">{loading ? "Loading…" : "No course data yet."}</td></tr>}
+              {courses.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-slate-400">{loading ? "Loading…" : "No course data yet."}</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1980,7 +2018,9 @@ function AdminOverview({ store, setTab }) {
 function AdminCheckin({ store }) {
   const [day, setDay] = useState(todayISO());
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ staffId: "s1", in: "09:00", out: "", site: "" });
+  // No demo "s1" default — the dropdown would show the first real person while the
+  // form still held an id the server doesn't know.
+  const [form, setForm] = useState({ staffId: "", in: "09:00", out: "", site: "" });
   const [query, setQuery] = useState("");
   const recs = store.checkins.filter(c => c.date === day);
   // Only real clock-ins count as present — a summary-first row has an empty `in`.
@@ -1989,6 +2029,7 @@ function AdminCheckin({ store }) {
   const filteredStaff = store.staff.filter(s => !ql || s.name.toLowerCase().includes(ql) || (s.dept || "").toLowerCase().includes(ql));
   const paged = usePaged(filteredStaff, 12, ql);
   const addCheckin = async () => {
+    if (!form.staffId) return;
     await store.upsertCheckin({ staffId: form.staffId, date: day, in: form.in, out: form.out || null, site: form.site || null }); setModal(false);
   };
   const setOut = (rec) => store.checkOut(rec.id);
@@ -2032,7 +2073,7 @@ function AdminCheckin({ store }) {
       <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
       <Modal open={modal} onClose={() => setModal(false)} title="Add / edit check-in">
         <div className="space-y-3">
-          <Field label="Staff member"><select value={form.staffId} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))} className={inputCls}>{store.staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+          <Field label="Staff member"><select value={form.staffId} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))} className={inputCls}><option value="">Choose…</option>{store.staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
           <div className="grid grid-cols-2 gap-3"><Field label="Time in"><input type="time" value={form.in} onChange={e => setForm(f => ({ ...f, in: e.target.value }))} className={inputCls} /></Field><Field label="Time out (optional)"><input type="time" value={form.out} onChange={e => setForm(f => ({ ...f, out: e.target.value }))} className={inputCls} /></Field></div>
           <Field label="Site (optional)"><select value={form.site} onChange={e => setForm(f => ({ ...f, site: e.target.value }))} className={inputCls}><option value="">—</option>{SITES.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>
           <p className="text-xs text-slate-400">Date: {fmtDate(day)}</p>
@@ -2129,14 +2170,18 @@ function AdminCalendar({ store }) {
   const overAllowance = form.type !== "unpaid" && !!form.staffId && days > remaining;
   const blocked = !form.staffId || nothingToBook || overAllowance;
 
+  // A ref, not just `busy` state: two taps in the same tick both read the old state,
+  // but both see the ref — and each tap creates a separate approved booking.
+  const addingRef = useRef(false);
   const addHoliday = async () => {
-    if (blocked) return;
+    if (blocked || addingRef.current) return;
+    addingRef.current = true;
     setBusy(true);
     try {
       await store.addApprovedLeave({ staffId: form.staffId, type: form.type, start: form.start, end: form.end, reason: form.reason.trim() || "Added by admin" });
       setModal(false);
     } catch (_) { /* store toasts the error and refetches; keep the modal open */ }
-    finally { setBusy(false); }
+    finally { addingRef.current = false; setBusy(false); }
   };
 
   return (
@@ -2153,7 +2198,7 @@ function AdminCalendar({ store }) {
 
       <Modal open={modal} onClose={() => setModal(false)} title="Add holiday">
         <div className="space-y-3">
-          <Field label="Staff member"><select value={form.staffId} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))} className={inputCls}>{store.staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+          <Field label="Staff member"><select value={form.staffId} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))} className={inputCls}><option value="">Choose…</option>{store.staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
           <Field label="Type"><select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} className={inputCls}>{LEAVE_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="From"><input type="date" value={form.start} onChange={e => setForm(f => ({ ...f, start: e.target.value, end: e.target.value > f.end ? e.target.value : f.end }))} className={inputCls} /></Field>
@@ -2178,8 +2223,20 @@ function AdminCalendar({ store }) {
 function AdminRequests({ store }) {
   const [filter, setFilter] = useState("all");
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ staffId: "s1", type: "annual", start: todayISO(), end: todayISO(), reason: "" });
-  const create = async () => { await store.requestLeave({ staffId: form.staffId, type: form.type, start: form.start, end: form.end, reason: form.reason }); setModal(false); };
+  // No hard-coded staff id: "s1" was a leftover demo id, so the dropdown showed the
+  // first real person while the form still held "s1" and the server rejected it as an
+  // unknown staff member. Default to nothing and require an explicit choice.
+  const [form, setForm] = useState({ staffId: "", type: "annual", start: todayISO(), end: todayISO(), reason: "" });
+  const reqDays = store.chargeableDays(form.start, form.end);
+  const reqRemaining = form.staffId ? store.remaining(form.staffId) : 0;
+  const reqNothing = !!form.staffId && reqDays === 0;
+  const reqOver = form.type !== "unpaid" && !!form.staffId && reqDays > reqRemaining;
+  const reqBlocked = !form.staffId || reqNothing || reqOver;
+  const create = async () => {
+    if (reqBlocked) return;
+    try { await store.requestLeave({ staffId: form.staffId, type: form.type, start: form.start, end: form.end, reason: form.reason }); setModal(false); }
+    catch (_) { /* store toasts; keep the modal open so the admin can adjust */ }
+  };
   const list = store.leave.filter(l => filter === "all" ? true : l.status === filter).slice().reverse();
   const counts = { all: store.leave.length, pending: store.leave.filter(l => l.status === "pending").length, approved: store.leave.filter(l => l.status === "approved").length, rejected: store.leave.filter(l => l.status === "rejected").length };
   const paged = usePaged(list, 10, filter);
@@ -2210,11 +2267,19 @@ function AdminRequests({ store }) {
       <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
       <Modal open={modal} onClose={() => setModal(false)} title="New leave request">
         <div className="space-y-3">
-          <Field label="Staff member"><select value={form.staffId} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))} className={inputCls}>{store.staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+          <Field label="Staff member"><select value={form.staffId} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))} className={inputCls}><option value="">Choose…</option>{store.staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
           <Field label="Type"><select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} className={inputCls}>{LEAVE_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></Field>
           <div className="grid grid-cols-2 gap-3"><Field label="From"><input type="date" value={form.start} onChange={e => setForm(f => ({ ...f, start: e.target.value, end: e.target.value > f.end ? e.target.value : f.end }))} className={inputCls} /></Field><Field label="To"><input type="date" value={form.end} min={form.start} onChange={e => setForm(f => ({ ...f, end: e.target.value }))} className={inputCls} /></Field></div>
           <Field label="Reason"><input value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} className={inputCls} /></Field>
-          <PrimaryBtn onClick={create} className="w-full"><Plus size={16} /> Create request</PrimaryBtn>
+          {/* Same pre-checks as the staff app, so the admin sees the cost and any
+              problem before the server rejects the request. */}
+          <div className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-100">
+            Created as a <b>pending</b> request for approval. Weekends and bank holidays aren't charged.{" "}
+            {form.type === "unpaid" ? "Unpaid leave doesn't use the holiday allowance." : form.staffId ? `${reqDays} working day${reqDays === 1 ? "" : "s"} · ${reqRemaining}d allowance left.` : "Choose a staff member."}
+          </div>
+          {reqNothing && <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-600">Those dates are all weekends and/or bank holidays — there are no working days to book.</p>}
+          {reqOver && <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-600">Not enough allowance: {reqRemaining}d left but {reqDays}d requested. Choose Unpaid Leave, or a shorter period.</p>}
+          <PrimaryBtn onClick={create} disabled={reqBlocked} className="w-full"><Plus size={16} /> Create request</PrimaryBtn>
         </div>
       </Modal>
     </>
@@ -2321,7 +2386,7 @@ function AdminSignups({ store }) {
   const confirm = async () => {
     setBusy(true);
     try {
-      await store.decideSignup(modal.req.id, modal.action, note, modal.action === "approved" ? Number(allowance) : undefined);
+      await store.decideSignup(modal.req.id, modal.action, note, modal.action === "approved" && modal.req.kind !== "student" ? Number(allowance) : undefined);
       setModal(null);
     } catch (_) {
       // The store already surfaced the error as a toast and refetched, so the
@@ -2331,11 +2396,19 @@ function AdminSignups({ store }) {
     }
   };
 
+  // Student requests have no position/department/site, so without the kind and college
+  // ID columns their rows exported as blanks with nothing to identify them.
   const exportCsv = () => downloadCSV("signup-requests.csv", [
-    { key: "name", label: "Name" }, { key: "email", label: "Email" }, { key: "role", label: "Position" },
+    { key: "kind", label: "Type" }, { key: "name", label: "Name" }, { key: "email", label: "Email" },
+    { key: "collegeId", label: "College ID" }, { key: "role", label: "Position" },
     { key: "dept", label: "Department" }, { key: "site", label: "Site" }, { key: "status", label: "Status" },
     { key: "decidedBy", label: "Decided by" }, { key: "decidedAt", label: "Decided on" },
-  ], rows.map(r => ({ ...r, site: r.site || "", decidedBy: r.decidedBy || "", decidedAt: r.decidedAt || "" })));
+  ], rows.map(r => ({
+    ...r,
+    kind: r.kind === "student" ? "Student" : "Staff",
+    collegeId: r.collegeId || "",
+    site: r.site || "", decidedBy: r.decidedBy || "", decidedAt: r.decidedAt || "",
+  })));
 
   return (
     <>
@@ -3453,6 +3526,17 @@ function AdminStudents({ store }) {
     (s.unitIds || []).forEach(mid => { if (isCurrentUnit(mid)) { const st = row.units[mid]; if (st) { earned += st.earned || 0; possible += st.possible || 0; } } });
     return possible > 0 ? Math.round((earned / possible) * 1000) / 10 : null;
   };
+  // Lifetime % across EVERY unit the student has been enrolled on. The Attendance-Risk
+  // badge and its filter use this, so the list agrees with the rating shown inside the
+  // student dashboard — those two used to read different figures, so a red "High Risk"
+  // row could open onto a green "Excellent" rating.
+  const allPctOf = (s) => {
+    const row = attnRowById[s.id];
+    if (!row) return null;
+    let earned = 0, possible = 0;
+    (s.unitIds || []).forEach(mid => { const st = row.units[mid]; if (st) { earned += st.earned || 0; possible += st.possible || 0; } });
+    return possible > 0 ? Math.round((earned / possible) * 1000) / 10 : null;
+  };
 
   const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", active: true, cohortId: "", unitIds: [] }); setModal(true); };
   const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, active: s.active !== false, cohortId: s.cohortId || "", unitIds: s.unitIds || [] }); setModal(true); };
@@ -3478,7 +3562,7 @@ function AdminStudents({ store }) {
     if (statusFilter === "active" && s.active === false) return false;
     if (statusFilter === "inactive" && s.active !== false) return false;
     if (unitFilter && !(s.unitIds || []).includes(unitFilter)) return false;
-    if (riskFilter !== "all" && riskBand(currentPctOf(s)).label !== riskFilter) return false;
+    if (riskFilter !== "all" && riskBand(allPctOf(s)).label !== riskFilter) return false;
     return !ql || s.name.toLowerCase().includes(ql) || s.email.toLowerCase().includes(ql) || s.studentRef.includes(ql);
   });
   const paged = usePaged(filtered, 12, `${ql}|${unitFilter}|${statusFilter}|${riskFilter}`);
@@ -3497,13 +3581,17 @@ function AdminStudents({ store }) {
       [
         { key: "firstName", label: "First name" }, { key: "lastName", label: "Last name" },
         { key: "studentRef", label: "Student number" }, { key: "email", label: "Email" },
-        { key: "status", label: "Status" }, { key: "units", label: "Units" }, { key: "attendance", label: "Overall attendance" },
+        { key: "status", label: "Status" }, { key: "units", label: "Units" },
+        { key: "attendance", label: "Current-unit attendance" },
+        { key: "lifetime", label: "All-unit attendance" }, { key: "risk", label: "Attendance risk" },
       ],
       filtered.map(s => ({
         firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email,
         status: s.active === false ? "Inactive" : "Active",
         units: (s.unitIds || []).map(id => unitById[id]?.code).filter(Boolean).join(" "),
         attendance: currentPctOf(s) == null ? "" : `${currentPctOf(s)}%`,
+        lifetime: allPctOf(s) == null ? "" : `${allPctOf(s)}%`,
+        risk: riskBand(allPctOf(s)).label,
       })),
     );
     store.notify?.("Exported students CSV");
@@ -3563,6 +3651,7 @@ function AdminStudents({ store }) {
           <option value="Good">🟡 Good</option>
           <option value="Excellent">🟢 Excellent</option>
           <option value="Perfect">🟣 Perfect</option>
+          <option value="No data">⚪ No data</option>
         </select>
         {riskFilter === "High Risk" && <span className="rounded-full bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-600 ring-1 ring-rose-200">Showing red flags</span>}
         <span className="ml-auto text-xs font-semibold text-slate-400">{filtered.length} of {total}</span>
@@ -3576,7 +3665,8 @@ function AdminStudents({ store }) {
             </thead>
             <tbody>
               {paged.slice.map(s => {
-                const pct = currentPctOf(s);
+                const pct = currentPctOf(s);      // current units (the % pill)
+                const lifetimePct = allPctOf(s);   // all units (the risk badge + filter)
                 const tone = pctTone(pct ?? null);
                 return (
                   <tr key={s.id} className="border-t border-slate-100 transition-colors duration-150 hover:bg-blue-50/30">
@@ -3591,7 +3681,7 @@ function AdminStudents({ store }) {
                     </td>
                     <td className="px-5 py-3 text-slate-500"><span className="block max-w-[220px] truncate" title={s.email}>{s.email}</span></td>
                     <td className="px-5 py-3">
-                      {(() => { const b = riskBand(pct); return <span className="inline-block rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ background: b.bg, color: b.colour }} title={pct == null ? "No attendance data" : `${pct}% attendance`}>{b.label}</span>; })()}
+                      {(() => { const b = riskBand(lifetimePct); return <span className="inline-block rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ background: b.bg, color: b.colour }} title={lifetimePct == null ? "No attendance data" : `${lifetimePct}% attendance across all units`}>{b.label}</span>; })()}
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex max-w-[200px] flex-wrap gap-1">
@@ -3682,14 +3772,19 @@ function StudentAttendanceDetail({ student, store }) {
   // Assessment results + month-by-month attendance for this student (dashboard).
   const [assess, setAssess] = useState(null);
   const [monthly, setMonthly] = useState(null);
+  // Results come from the gradebook, which is gated on the "assessments" page. An
+  // admin with Students but not Assessments gets a 403 — we record that so the UI can
+  // say "no permission" instead of silently implying the student has no marks.
+  const [assessDenied, setAssessDenied] = useState(false);
   useEffect(() => {
-    let alive = true; setAssess(null); setMonthly(null);
-    (async () => {
-      try {
-        const [a, m] = await Promise.all([api.studentAssessments(student.id), api.attendanceMonthly({ studentId: student.id })]);
-        if (alive) { setAssess(a); setMonthly(m); }
-      } catch (_) { /* endpoints may not be deployed yet — dashboard degrades gracefully */ }
-    })();
+    let alive = true; setAssess(null); setMonthly(null); setAssessDenied(false);
+    // Fetch independently: a 403 on results must not also blank the attendance chart.
+    api.adminStudentAssessments(student.id)
+      .then(a => { if (alive) setAssess(a); })
+      .catch(e => { if (alive && e?.status === 403) setAssessDenied(true); });
+    api.attendanceMonthly({ studentId: student.id })
+      .then(m => { if (alive) setMonthly(m); })
+      .catch(() => { /* chart just stays hidden */ });
     return () => { alive = false; };
   }, [student.id]);
 
@@ -3791,7 +3886,7 @@ function StudentAttendanceDetail({ student, store }) {
       {/* ---- Student dashboard: course, rating, results, charts ---- */}
       <div className="flex items-center justify-between gap-2 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200/70">
         <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">First course</p>
+          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Cohort</p>
           <p className="truncate text-sm font-bold text-slate-700">{firstCourse}</p>
         </div>
         <div className="text-right">
@@ -3801,13 +3896,14 @@ function StudentAttendanceDetail({ student, store }) {
       </div>
 
       <div className="grid grid-cols-3 gap-2">
-        <MiniKpi label="Avg mark" value={avgMark == null ? "—" : Math.round(avgMark)} tone={pctColour(avgMark)} />
-        <MiniKpi label="Pass rate" value={passRate == null ? "—" : `${Math.round(passRate)}%`} tone={pctColour(passRate)} />
-        <MiniKpi label="Units done" value={`${unitsWithMark}/${enrolledCount}`} tone={NAVY} />
+        <MiniKpi label="Avg mark" value={assessDenied ? "🔒" : avgMark == null ? "—" : Math.round(avgMark)} tone={pctColour(avgMark)} />
+        <MiniKpi label="Pass rate" value={assessDenied ? "🔒" : passRate == null ? "—" : `${Math.round(passRate)}%`} tone={pctColour(passRate)} />
+        <MiniKpi label="Units done" value={assessDenied ? "🔒" : `${unitsWithMark}/${enrolledCount}`} tone={NAVY} />
         <MiniKpi label="Present" value={allOverall.P} tone="#0d7a5f" />
         <MiniKpi label="Absent" value={allOverall.A} tone={MAROON} />
         <MiniKpi label="Attendance" value={fmtPct(allOverall.pct ?? null)} tone={pctColour(allOverall.pct)} />
       </div>
+      {assessDenied && <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-500 ring-1 ring-slate-100">Results are hidden — your account doesn't have access to the Assessments section.</p>}
 
       {monthData.length > 0 && (
         <ChartCard title="Attendance % by Year and Month">
@@ -4001,7 +4097,16 @@ function HndCourses({ store, onOpen }) {
   };
   const remove = async (p) => {
     const n = p.unitCount || 0;
-    if (!window.confirm(`Delete the course "${p.name}"?\n\n${n ? `Its ${n} unit${n === 1 ? "" : "s"} will be kept but left unassigned — no sessions or registers are deleted.` : "It has no units."}`)) return;
+    // Cohorts and their terms cascade-delete with the course, and units lose their
+    // cohort/term link — spell all of that out rather than only mentioning units.
+    const myCohorts = (store.cohorts || []).filter(c => c.courseId === p.id);
+    const nTerms = (store.terms || []).filter(t => myCohorts.some(c => c.id === t.cohortId)).length;
+    const lines = [`Delete the course "${p.name}"?`, ""];
+    lines.push(n ? `• Its ${n} unit${n === 1 ? "" : "s"} will be KEPT but left unassigned (no sessions or registers are deleted).` : "• It has no units.");
+    if (myCohorts.length) lines.push(`• ${myCohorts.length} cohort${myCohorts.length === 1 ? "" : "s"}${nTerms ? ` and ${nTerms} term${nTerms === 1 ? "" : "s"}` : ""} under it will be PERMANENTLY DELETED.`);
+    if (nTerms) lines.push("• Those units lose their term dates, so term-based attendance locking no longer applies to them.");
+    lines.push("", "This cannot be undone.");
+    if (!window.confirm(lines.join("\n"))) return;
     await store.removeCourse(p.id);
   };
 
@@ -4111,7 +4216,17 @@ function CohortManager({ store, course, onClose }) {
     setBusy(true);
     try { await store.generateTerms(c.id, {}); } catch (_) {} finally { setBusy(false); }
   };
-  const setTermDate = async (t, field, value) => { if (value) { try { await store.updateTerm(t.id, { [field]: value }); } catch (_) {} } };
+  // Saving a term date can leave a GAP between terms — days covered by no term at all,
+  // which silently locks every register in that window. The server reports them; warn
+  // rather than letting the admin discover it when attendance won't open.
+  const setTermDate = async (t, field, value) => {
+    if (!value) return;
+    try {
+      const res = await store.updateTerm(t.id, { [field]: value });
+      const gaps = res?.gaps || [];
+      if (gaps.length) store.notify?.(`Warning: no term covers ${gaps.map(g => `${fmtDate(g.from)} → ${fmtDate(g.to)}`).join(", ")} — registers are locked on those dates.`, "error");
+    } catch (_) { /* store toasts the error (e.g. overlapping dates) */ }
+  };
   const delTerm = async (t) => { if (window.confirm(`Delete ${t.name}?`)) await store.removeTerm(t.id); };
 
   // ---- Term editor for one cohort ----
@@ -4285,7 +4400,7 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
           <Search size={15} className="text-slate-400" />
           <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search units…" className="w-40 bg-transparent text-sm outline-none sm:w-56" />
         </div>
-        <PrimaryBtn onClick={openAdd}><Plus size={16} /> Add course</PrimaryBtn>
+        <PrimaryBtn onClick={openAdd}><Plus size={16} /> Add unit</PrimaryBtn>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -4348,7 +4463,7 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
         )}
         {store.units.length > 0 && list.length === 0 && (
           <div className="sm:col-span-2 lg:col-span-3 xl:col-span-4">
-            <Card><EmptyState Icon={Search} title="No matching courses" msg={query ? `Nothing matches "${query}".` : "No courses in this course yet — use “Add course” to create one."} /></Card>
+            <Card><EmptyState Icon={Search} title="No matching units" msg={query ? `Nothing matches "${query}".` : "No units on this course yet — use “Add unit” to create one."} /></Card>
           </div>
         )}
       </div>
@@ -4382,7 +4497,7 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
               <Field label="Unit code"><input value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))} placeholder="e.g. OBM" className={inputCls} /></Field>
               <Field label="Tutor"><select value={form.tutor} onChange={e => setForm(f => ({ ...f, tutor: e.target.value }))} className={inputCls}><option value="">— none —</option>{store.staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></Field>
             </div>
-            <Field label="Course name"><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Organisational Behaviour Management" className={inputCls} /></Field>
+            <Field label="Unit name"><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Organisational Behaviour Management" className={inputCls} /></Field>
 
             {/* Enrol students onto this unit, straight from the student list */}
             <Field label={`Students on this unit${picked.length ? ` · ${picked.length} selected` : ""}`}>
@@ -4661,7 +4776,7 @@ function AssessmentsOverview({ store }) {
   const rows = ov.units.filter(m => !ql || m.code.toLowerCase().includes(ql) || m.name.toLowerCase().includes(ql));
   const exportCSV = () => {
     downloadCSV("assessment-averages.csv", [
-      { key: "code", label: "Course code" }, { key: "name", label: "Course" }, { key: "students", label: "Students" },
+      { key: "code", label: "Unit code" }, { key: "name", label: "Unit" }, { key: "students", label: "Students" },
       { key: "assessments", label: "Assessments" }, { key: "graded", label: "Graded" }, { key: "avg", label: "Average %" },
       ...GRADE_BANDS.map(b => ({ key: b, label: b })),
     ], ov.units.map(m => ({ code: m.code, name: m.name, students: m.students, assessments: m.assessmentCount, graded: m.gradedCount, avg: m.avgPct ?? "", ...Object.fromEntries(GRADE_BANDS.map(b => [b, m.dist[b] || 0])) })));
@@ -4995,7 +5110,7 @@ function AssessmentRecords({ store }) {
           {store.courses.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
         <select value={fUnit} onChange={e => setFUnit(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 outline-none">
-          <option value="">All courses{fCourse ? " in course" : ""}</option>
+          <option value="">All units{fCourse ? " in course" : ""}</option>
           {(fCourse ? coursesInProg(fCourse) : store.units).map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}
         </select>
         <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200"><Search size={15} className="text-slate-400" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search student or assessment…" className="w-40 bg-transparent text-sm outline-none sm:w-52" /></div>
@@ -5005,7 +5120,7 @@ function AssessmentRecords({ store }) {
       {meta.capped && (
         <div className="mb-3 flex items-start gap-2 rounded-xl bg-amber-50 px-3.5 py-2.5 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
           <AlertCircle size={15} className="mt-0.5 shrink-0 text-amber-600" />
-          Showing the most recent <b>{records.length.toLocaleString()}</b> of <b>{meta.total.toLocaleString()}</b> records. Filter by course or course to see the rest.
+          Showing the most recent <b>{records.length.toLocaleString()}</b> of <b>{meta.total.toLocaleString()}</b> records. Filter by course or unit to see the rest.
         </div>
       )}
 
@@ -5013,7 +5128,7 @@ function AssessmentRecords({ store }) {
         <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
           <table className="w-full min-w-[860px] text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
-              <tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Course</th><th className="px-5 py-3">Course</th><th className="px-5 py-3">Assessment</th><th className="px-5 py-3 whitespace-nowrap">Marks</th><th className="px-5 py-3 text-center">%</th><th className="px-5 py-3 text-center">Grade</th><th className="px-5 py-3 text-right">Actions</th></tr>
+              <tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Course</th><th className="px-5 py-3">Unit</th><th className="px-5 py-3">Assessment</th><th className="px-5 py-3 whitespace-nowrap">Marks</th><th className="px-5 py-3 text-center">%</th><th className="px-5 py-3 text-center">Grade</th><th className="px-5 py-3 text-right">Actions</th></tr>
             </thead>
             <tbody>
               {loading && <tr><td colSpan={8} className="px-5 py-10 text-center text-sm text-slate-400">Loading…</td></tr>}
@@ -5035,7 +5150,7 @@ function AssessmentRecords({ store }) {
         </div>
       </div>
       <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
-      <p className="mt-3 text-[11px] text-slate-400">{list.length.toLocaleString()} record{list.length === 1 ? "" : "s"}{query ? " matching" : ""}{fUnit ? " for this course" : fCourse ? " for this course" : ""}{meta.capped ? ` (of ${meta.total.toLocaleString()} total — narrow the filter to load all)` : ""}. Grades: 70%+ Distinction · 60–69 Merit · 40–59 Pass · below 40 Fail.</p>
+      <p className="mt-3 text-[11px] text-slate-400">{list.length.toLocaleString()} record{list.length === 1 ? "" : "s"}{query ? " matching" : ""}{fUnit ? " for this unit" : fCourse ? " for this course" : ""}{meta.capped ? ` (of ${meta.total.toLocaleString()} total — narrow the filter to load all)` : ""}. Grades: 70%+ Distinction · 60–69 Merit · 40–59 Pass · below 40 Fail.</p>
 
       <Modal open={modal} onClose={() => !busy && setModal(false)} title={edit ? "Edit grade record" : "Add grade record"} width={520}>
         <div className="space-y-3">
@@ -5046,12 +5161,12 @@ function AssessmentRecords({ store }) {
           ) : (
             <>
               <Field label="Course"><select value={form.courseId} onChange={e => setForm(f => ({ ...f, courseId: e.target.value, unitId: "", assessmentId: "", studentId: "" }))} className={inputCls}><option value="">Choose…</option>{store.courses.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
-              <Field label="Course"><select value={form.unitId} onChange={e => setForm(f => ({ ...f, unitId: e.target.value, assessmentId: "", studentId: "" }))} disabled={!form.courseId} className={inputCls}><option value="">Choose…</option>{coursesInProg(form.courseId).map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}</select></Field>
-              <Field label="Assessment"><select value={form.assessmentId} onChange={e => setForm(f => ({ ...f, assessmentId: e.target.value }))} disabled={!form.unitId} className={inputCls}><option value="">Choose…</option>{assessmentsInCourse(form.unitId).map(a => <option key={a.id} value={a.id}>{a.title} — out of {a.maxMarks}</option>)}</select>{form.unitId && assessmentsInCourse(form.unitId).length === 0 && <p className="mt-1 text-[11px] text-amber-600">This course has no assessments — add one on the “Assessments &amp; grades” tab first.</p>}</Field>
+              <Field label="Unit"><select value={form.unitId} onChange={e => setForm(f => ({ ...f, unitId: e.target.value, assessmentId: "", studentId: "" }))} disabled={!form.courseId} className={inputCls}><option value="">Choose…</option>{coursesInProg(form.courseId).map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}</select></Field>
+              <Field label="Assessment"><select value={form.assessmentId} onChange={e => setForm(f => ({ ...f, assessmentId: e.target.value }))} disabled={!form.unitId} className={inputCls}><option value="">Choose…</option>{assessmentsInCourse(form.unitId).map(a => <option key={a.id} value={a.id}>{a.title} — out of {a.maxMarks}</option>)}</select>{form.unitId && assessmentsInCourse(form.unitId).length === 0 && <p className="mt-1 text-[11px] text-amber-600">This unit has no assessments — add one on the “Assessments &amp; grades” tab first.</p>}</Field>
               <Field label="Student"><StudentCombo students={studentsInCourse(form.unitId)} value={form.studentId} onChange={id => setForm(f => ({ ...f, studentId: id }))} /></Field>
             </>
           )}
-          <Field label={`Total marks (out of ${maxMarks})`}><input type="number" min={0} max={maxMarks} value={form.marks} onChange={e => setForm(f => ({ ...f, marks: e.target.value }))} placeholder={`0–${maxMarks}`} className={inputCls} /></Field>
+          <Field label={`Total marks (out of ${maxMarks})`}><input type="number" min={0} max={maxMarks} step={1} value={form.marks} onChange={e => setForm(f => ({ ...f, marks: e.target.value.replace(/[^0-9]/g, "") }))} placeholder={`0–${maxMarks}`} className={inputCls} /></Field>
           {form.marks !== "" && Number(form.marks) >= 0 && Number(form.marks) <= maxMarks && (
             <p className="text-[11px] text-slate-400">= {Math.round(Number(form.marks) / maxMarks * 1000) / 10}% · <span className="font-bold" style={{ color: gradeTone(bandOf(Math.round(Number(form.marks) / maxMarks * 1000) / 10)).colour }}>{bandOf(Math.round(Number(form.marks) / maxMarks * 1000) / 10)}</span></p>
           )}

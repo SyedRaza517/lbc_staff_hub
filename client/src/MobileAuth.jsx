@@ -160,7 +160,7 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
 
       <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-400">
         <ShieldCheck size={13} className="mt-px shrink-0" />
-        Accounts created in the app are protected with an authenticator app and must be approved by a college administrator.
+        New accounts must be approved by a college administrator before you can sign in.
       </p>
     </form>
   );
@@ -209,7 +209,7 @@ function SignUp({ goSignIn }) {
         <h2 className="text-lg font-extrabold tracking-tight text-slate-800">Request sent</h2>
         <p className="mt-1 text-xs leading-relaxed text-slate-500">
           Your details have gone to the college administrator for approval. You'll be able to sign in once your
-          account is approved — you'll set up your authenticator app then.
+          account is approved.
         </p>
       </div>
       <div className="w-full rounded-xl bg-slate-50 p-3 text-left ring-1 ring-slate-200">

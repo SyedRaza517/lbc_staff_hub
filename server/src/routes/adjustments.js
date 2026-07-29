@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sAdj } = require("../serializers");
-const { requireAuth, requirePage } = require("../auth");
+const { requireAuth, requirePage, hasPage } = require("../auth");
 const { isInt32, MAX_ADJUSTMENT_DAYS } = require("../validate");
 const { localDate } = require("../clock");
 
@@ -9,7 +9,8 @@ const today = () => localDate();
 
 // GET /api/adjustments — admin: all; staff: own
 router.get("/", requireAuth, async (req, res) => {
-  const where = req.user.accountRole === "ADMIN" ? {} : { staffId: req.user.id };
+  // Only a balances admin sees everyone's adjustments (they carry HR notes).
+  const where = hasPage(req.user, "balances") ? {} : { staffId: req.user.id };
   const rows = await prisma.adjustment.findMany({ where, orderBy: { date: "desc" } });
   res.json(rows.map(sAdj));
 });

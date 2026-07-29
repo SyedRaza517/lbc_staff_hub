@@ -278,6 +278,9 @@ function MoreScreen({ user, logout }) {
   };
   // delete account
   const [showDel, setShowDel] = useState(false);
+  // Back collapses the delete-account form first (it holds a typed password), the
+  // same way the sign-out ConfirmDialog cancels on back.
+  useBackHandler(showDel, () => { setShowDel(false); return true; });
   const [delPw, setDelPw] = useState(""); const [delConfirm, setDelConfirm] = useState("");
   const [delBusy, setDelBusy] = useState(false); const [delErr, setDelErr] = useState("");
   const del = async () => {

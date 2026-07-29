@@ -1,7 +1,7 @@
 // UK (England & Wales) statutory bank holidays — server copy of the client's
 // engine (client/src/bankHolidays.js). Kept in sync deliberately; both compute the
-// standard 8 per year with weekend substitution. Used to auto-approve a leave
-// request that falls entirely on bank holidays (no manager step needed).
+// standard 8 per year with weekend substitution. Used to work out which days in a
+// leave range are chargeable (bank holidays and weekends never are).
 
 const mkUTC = (y, m, d) => new Date(Date.UTC(y, m, d));
 const iso = (d) => d.toISOString().slice(0, 10);

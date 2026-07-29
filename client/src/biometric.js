@@ -91,6 +91,17 @@ export const setBiometricEnabled = (on) => {
   try { on ? localStorage.setItem(ENABLED_KEY, "1") : localStorage.removeItem(ENABLED_KEY); } catch (_) {}
 };
 
+// Clear the app-lock preference and the "don't ask again" flag. Called on sign-out:
+// both live in localStorage, so without this they were device-global — the next
+// person to sign in on the same phone inherited the previous user's app lock and
+// their dismissal of the setup prompt.
+export const clearBiometricPrefs = () => {
+  try {
+    localStorage.removeItem(ENABLED_KEY);
+    localStorage.removeItem("lbc_biometric_prompt_dismissed");
+  } catch (_) {}
+};
+
 /**
  * Turn the lock on. Verifies once first — enabling a lock the device can't
  * actually satisfy would shut the user out of their own app.

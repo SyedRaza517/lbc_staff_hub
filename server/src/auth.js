@@ -98,14 +98,26 @@ function requireSuperAdmin(req, res, next) {
 function requireAnyPage(pages) {
   const wanted = Array.isArray(pages) ? pages : [pages];
   return (req, res, next) => {
-    const u = req.user;
-    if (u?.isSuperAdmin) return next();
-    if (u?.accountRole !== "ADMIN") return res.status(403).json({ error: "Admin access required" });
-    const allowed = u.adminPages; // null = unconfigured = full access
-    if (allowed == null || wanted.some((p) => allowed.includes(p))) return next();
+    if (hasPage(req.user, wanted)) return next();
+    if (req.user?.accountRole !== "ADMIN" && !req.user?.isSuperAdmin) return res.status(403).json({ error: "Admin access required" });
     return res.status(403).json({ error: "You don't have access to this section" });
   };
 }
 const requirePage = (page) => requireAnyPage([page]);
 
-module.exports = { hashPassword, verifyPassword, signToken, signStudentToken, requireAuth, requireAdmin, requireStudent, requireSuperAdmin, requirePage, requireAnyPage, SECRET };
+// The same rule as requireAnyPage, but as a plain predicate for routes that serve
+// BOTH the signed-in user's own data and (for a privileged admin) everyone's. Those
+// routes previously widened on `accountRole === "ADMIN"` alone — but granting ANY
+// page makes an account an ADMIN, so a page-scoped admin could read/modify sections
+// they were never granted. Gate the "see everyone" branch on this instead.
+function hasPage(user, pages) {
+  if (!user) return false;
+  if (user.isSuperAdmin) return true;
+  if (user.accountRole !== "ADMIN") return false;
+  const allowed = user.adminPages; // null = unconfigured = full access
+  if (allowed == null) return true;
+  const wanted = Array.isArray(pages) ? pages : [pages];
+  return wanted.some((p) => allowed.includes(p));
+}
+
+module.exports = { hashPassword, verifyPassword, signToken, signStudentToken, requireAuth, requireAdmin, requireStudent, requireSuperAdmin, requirePage, requireAnyPage, hasPage, SECRET };

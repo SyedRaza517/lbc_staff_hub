@@ -12,7 +12,7 @@ const DEFAULT_PW = "password123";
 const daysBetween = (a, b) => { const d1 = new Date(a + "T00:00:00Z"), d2 = new Date(b + "T00:00:00Z"); return Math.max(1, Math.round((d2 - d1) / 86400000) + 1); };
 
 /* ---------- HND attendance registers ---------- */
-const HND_MODULES = [
+const HND_UNITS = [
   { id: "m-obm",  code: "OBM",  name: "Organisational Behaviour Management",        tutor: "Aisha Rahman" },
   { id: "m-ws",   code: "WS",   name: "Professional Skills Workshop",               tutor: "Daniel Okoye" },
   { id: "m-bs",   code: "BS",   name: "Business Strategy",                          tutor: "James Whitfield" },
@@ -73,7 +73,7 @@ async function main() {
   await prisma.hndSession.deleteMany();
   await prisma.enrolment.deleteMany();
   await prisma.student.deleteMany();
-  await prisma.hndModule.deleteMany();
+  await prisma.unit.deleteMany();
 
   console.log("Seeding staff…");
   for (const s of STAFF) {
@@ -107,7 +107,7 @@ async function main() {
   ]});
 
   console.log("Seeding HND modules…");
-  for (const m of HND_MODULES) await prisma.hndModule.create({ data: m });
+  for (const m of HND_UNITS) await prisma.unit.create({ data: m });
 
   console.log("Seeding HND students…");
   for (const s of HND_STUDENTS) {
@@ -129,8 +129,8 @@ async function main() {
     "m-bs":   HND_STUDENTS.slice(0, 7),
     "m-dito": HND_STUDENTS.slice(3),
   };
-  for (const [moduleId, list] of Object.entries(enrolMap)) {
-    await prisma.enrolment.createMany({ data: list.map((s) => ({ studentId: `st-${s.ref}`, moduleId })) });
+  for (const [unitId, list] of Object.entries(enrolMap)) {
+    await prisma.enrolment.createMany({ data: list.map((s) => ({ studentId: `st-${s.ref}`, unitId })) });
   }
 
   console.log("Seeding sessions + registers…");
@@ -144,24 +144,24 @@ async function main() {
   // Most recent date on or before today that falls on the given weekday.
   const lastWeekdayOffset = (dow) => (new Date().getDay() - dow + 7) % 7;
 
-  for (const [moduleId, t] of Object.entries(TIMETABLE)) {
+  for (const [unitId, t] of Object.entries(TIMETABLE)) {
     const base = lastWeekdayOffset(t.dow);
     // Six taught weeks behind us, two scheduled ahead (registers not yet taken).
     const offsets = [base + 35, base + 28, base + 21, base + 14, base + 7, base, base - 7, base - 14];
     for (const off of offsets) {
-      const id = `ses-${moduleId}-${off}`;
+      const id = `ses-${unitId}-${off}`;
       const date = iso(off);
       await prisma.hndSession.create({ data: {
-        id, moduleId, date, startTime: t.start, endTime: t.end,
+        id, unitId, date, startTime: t.start, endTime: t.end,
         description: t.desc, audience: "All students",
       }});
 
       // Only past/today sessions have a register taken. Today's Workshop is left
       // deliberately blank so there's an untaken register to try out.
       if (off < 0) continue;
-      if (moduleId === "m-ws" && off === base) continue;
+      if (unitId === "m-ws" && off === base) continue;
 
-      const cohort = enrolMap[moduleId];
+      const cohort = enrolMap[unitId];
       await prisma.attendanceMark.createMany({ data: cohort.map((s) => {
         const m = markFor(s.ref, id);
         return { sessionId: id, studentId: `st-${s.ref}`, status: m.status, remark: m.remark, takenBy: "HR Administrator" };

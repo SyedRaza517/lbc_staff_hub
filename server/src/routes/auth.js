@@ -14,6 +14,17 @@ const totp = require("../totp");
 // only accepted by the /totp/* endpoints below. That way a correct password alone
 // can never be exchanged for API access.
 const CHALLENGE_TTL = "10m";
+
+// --- Two-factor enforcement flag ---
+// The second factor is currently switched OFF at sign-in (see the commented-out
+// branches in /login). Every other place that demanded a code — password reset and
+// account deletion — must honour the same switch, or an account that still has
+// totpEnabled=true signs in with a password alone yet can never reset its password
+// or delete itself without a code it may no longer have. Flip this to true (and
+// uncomment the /login branches) to turn 2FA back on everywhere at once.
+const TOTP_ENFORCED = false;
+// True when this account must satisfy a second factor right now.
+const totpRequiredFor = (staff) => TOTP_ENFORCED && !!staff?.totpEnabled;
 // The challenge carries tokenVersion for the same reason a session does: a password
 // reset must sever authentication that is already in flight, not just completed
 // sessions. Without it, someone holding the OLD password could start a sign-in,
@@ -400,7 +411,7 @@ router.delete("/account", requireAuth, async (req, res) => {
   if (!password || !verifyPassword(password, staff.passwordHash)) {
     return res.status(400).json({ error: "Password is incorrect" });
   }
-  if (staff.totpEnabled) {
+  if (totpRequiredFor(staff)) {
     if (!code) return res.status(400).json({ error: "Enter the current code from your authenticator app" });
     const lockedMins = codeLockedFor(staff.id);
     if (lockedMins) return res.status(429).json({ error: `Too many incorrect codes. Try again in ${lockedMins} minute${lockedMins === 1 ? "" : "s"}.` });
@@ -488,7 +499,7 @@ router.post("/forgot-password", async (req, res) => {
     });
 
     const link = `${CLIENT_URL}/?reset=${raw}`;
-    const needsCode = staff.totpEnabled;
+    const needsCode = totpRequiredFor(staff);
     const text =
       `Hello ${staff.name},\n\nUse this link to choose a new password. It expires in 30 minutes and can only be used once:\n\n${link}\n\n` +
       (needsCode ? "You will also need the current code from your authenticator app.\n\n" : "") +
@@ -543,7 +554,7 @@ async function findLiveReset(rawToken) {
 router.post("/reset-password/verify", async (req, res) => {
   const row = await findLiveReset(req.body?.token);
   if (!row) return res.status(400).json({ error: "This reset link is invalid or has expired. Please request a new one." });
-  res.json({ ok: true, name: row.staff.name, email: row.staff.email, requiresCode: row.staff.totpEnabled });
+  res.json({ ok: true, name: row.staff.name, email: row.staff.email, requiresCode: totpRequiredFor(row.staff) });
 });
 
 // POST /api/auth/reset-password — set the new password.
@@ -557,7 +568,7 @@ router.post("/reset-password", async (req, res) => {
   // The whole point of two-factor auth is that the password is not sufficient on
   // its own. A reset link arrives by email, so accepting it alone would let anyone
   // who reaches the mailbox walk straight past the authenticator. Demand the code.
-  if (staff.totpEnabled) {
+  if (totpRequiredFor(staff)) {
     if (!code) return res.status(400).json({ error: "Enter the current code from your authenticator app" });
     const lockedMins = codeLockedFor(staff.id);
     if (lockedMins) return res.status(429).json({ error: `Too many incorrect codes. Try again in ${lockedMins} minute${lockedMins === 1 ? "" : "s"}.` });
