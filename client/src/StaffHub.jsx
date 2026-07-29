@@ -609,20 +609,24 @@ function CheckInScreen({ store, me }) {
 
 /* ----- Holiday Balance ----- */
 function BalanceScreen({ store, me }) {
-  const allowance = store.effectiveAllowance(me.id);
-  const used = store.usedDays(me.id);
-  const bankUsed = store.bankHolidayDaysUsed();
-  const left = allowance - used - bankUsed;
+  // Two separate pots: the bookable Holiday Allowance (e.g. 20) and the fixed Bank
+  // Holidays (e.g. 8). Bank holidays are never bookable and never touch the 20.
+  const bookable = store.bookableAllowance(me.id);   // total entitlement − 8 bank holidays
+  const used = store.usedDays(me.id);                // working days booked (weekends/BH excluded)
+  const left = store.remaining(me.id);               // bookable − used
+  const bankTotal = store.bankHolidayTotal;          // 8
+  const bankUsed = store.bankHolidayDaysUsed();       // bank holidays passed so far
   const myLeave = store.leave.filter(l => l.staffId === me.id);
   const myAdj = store.adjustments.filter(a => a.staffId === me.id);
   const animLeft = useCountUp(left);
-  // Read-only counts of this user's leave by type (any status), days summed safely.
+  // Read-only counts of this user's leave by type (any status), summed as WORKING days
+  // (weekends + bank holidays excluded — matches what is actually charged).
   const byType = LEAVE_TYPES.map(t => {
     const rows = myLeave.filter(l => l.type === t.key);
-    const days = rows.reduce((sum, l) => sum + daysBetween(l.start, l.end), 0);
+    const days = rows.reduce((sum, l) => sum + store.chargeableDays(l.start, l.end), 0);
     return { ...t, count: rows.length, days };
   }).filter(x => x.count > 0);
-  const usedPct = allowance > 0 ? Math.round(((used + bankUsed) / allowance) * 100) : 0;
+  const usedPct = bookable > 0 ? Math.round((used / bookable) * 100) : 0;
   return (
     <Screen>
       <Card>
@@ -630,18 +634,26 @@ function BalanceScreen({ store, me }) {
           <div className="relative h-40 w-40">
             <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
               <circle cx="60" cy="60" r="52" fill="none" stroke="#eef1f6" strokeWidth="14" />
-              <circle cx="60" cy="60" r="52" fill="none" stroke={NAVY} strokeWidth="14" strokeLinecap="round" strokeDasharray={`${2 * Math.PI * 52}`} strokeDashoffset={`${2 * Math.PI * 52 * (1 - (allowance > 0 ? left / allowance : 0))}`} style={{ transition: "stroke-dashoffset 1s ease" }} />
+              <circle cx="60" cy="60" r="52" fill="none" stroke={NAVY} strokeWidth="14" strokeLinecap="round" strokeDasharray={`${2 * Math.PI * 52}`} strokeDashoffset={`${2 * Math.PI * 52 * (1 - (bookable > 0 ? left / bookable : 0))}`} style={{ transition: "stroke-dashoffset 1s ease" }} />
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center scale-in"><span className="text-4xl font-extrabold tabular-nums" style={{ color: NAVY }}>{animLeft}</span><span className="text-xs font-medium text-slate-400">days left</span></div>
           </div>
         </div>
-        <p className="mt-2 text-center text-[11px] font-semibold text-slate-400">{usedPct}% of your allowance used</p>
-        <div className="mt-4 grid grid-cols-2 gap-2 text-center">
-          <div className="rounded-xl bg-slate-50 py-2"><p className="text-lg font-extrabold text-slate-700">{allowance}</p><p className="text-[11px] text-slate-400">Allowance</p></div>
-          <div className="rounded-xl py-2" style={{ background: MAROON + "0d" }}><p className="text-lg font-extrabold" style={{ color: MAROON }}>{used}</p><p className="text-[11px] text-slate-400">Leave used</p></div>
-          <div className="rounded-xl py-2" style={{ background: NAVY + "0d" }}><p className="text-lg font-extrabold" style={{ color: NAVY }}>{bankUsed}</p><p className="text-[11px] text-slate-400">Bank holidays</p></div>
-          <div className="rounded-xl bg-emerald-50 py-2"><p className="text-lg font-extrabold text-emerald-600">{left}</p><p className="text-[11px] text-slate-400">Remaining</p></div>
+        <p className="mt-2 text-center text-[11px] font-semibold text-slate-400">{used} of {bookable} days booked · {usedPct}% used</p>
+        {/* The two pots, matching the design — each shows "taken — total". */}
+        <div className="mt-4 grid grid-cols-2 gap-3 text-center">
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 py-3">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Holiday Allowance</p>
+            <p className="mt-1 text-2xl font-extrabold tabular-nums" style={{ color: NAVY }}>{used}<span className="mx-1.5 text-slate-300">—</span>{bookable}</p>
+            <p className="text-[11px] text-slate-400">taken · total</p>
+          </div>
+          <div className="rounded-2xl border border-amber-100 bg-amber-50 py-3">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-amber-500">Bank Holidays</p>
+            <p className="mt-1 text-2xl font-extrabold tabular-nums text-amber-600">{bankUsed}<span className="mx-1.5 text-amber-300">—</span>{bankTotal}</p>
+            <p className="text-[11px] text-amber-500/80">passed · total</p>
+          </div>
         </div>
+        <div className="mt-2 rounded-xl bg-emerald-50 py-2 text-center"><span className="text-lg font-extrabold text-emerald-600">{left}</span> <span className="text-[11px] text-slate-400">days remaining to book</span></div>
         {myAdj.length > 0 && <p className="mt-3 text-center text-[11px] text-slate-400">Includes {store.adjDays(me.id) >= 0 ? "+" : ""}{store.adjDays(me.id)}d HR adjustment</p>}
       </Card>
       {byType.length > 0 && (
@@ -721,7 +733,8 @@ function MonthGrid({ store, big }) {
   );
 }
 // A compact list of the current calendar year's bank holidays, flagging which have
-// already passed (and so have been counted against everyone's 28-day allowance).
+// already passed. Bank holidays are a fixed pot of days off, separate from and never
+// drawn from the bookable holiday allowance.
 function BankHolidayList({ store }) {
   const year = new Date().getFullYear();
   const today = todayISO();
@@ -730,13 +743,13 @@ function BankHolidayList({ store }) {
   const passed = list.filter(h => h.date <= today).length;
   return (
     <div className="mt-5">
-      <p className="mb-2 px-1 text-xs font-bold uppercase tracking-wide text-slate-400">Bank holidays {year} · {passed}/{list.length} counted so far</p>
+      <p className="mb-2 px-1 text-xs font-bold uppercase tracking-wide text-slate-400">Bank holidays {year} · {passed} of {list.length} passed</p>
       <Card className="p-0">
         {list.map((h, i, a) => { const done = h.date <= today; return (
           <div key={h.date} className={`flex items-center gap-3 px-4 py-2.5 ${i < a.length - 1 ? "border-b border-slate-100" : ""}`}>
             <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm ${done ? "bg-amber-100" : "bg-slate-100"}`}>🏛</span>
             <div className="flex-1"><p className="text-sm font-semibold text-slate-700">{h.name}</p><p className="text-[11px] text-slate-400">{fmtDate(h.date)}</p></div>
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${done ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-400"}`}>{done ? "Counted" : "Upcoming"}</span>
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${done ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-400"}`}>{done ? "Passed" : "Upcoming"}</span>
           </div>
         ); })}
       </Card>
@@ -753,7 +766,7 @@ function CalendarScreen({ store }) {
         <div className="mt-3 border-t border-slate-100 pt-3">
           <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">Leave types</p>
           <LeaveLegend />
-          <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-400" /> Bank holiday — counts toward your 28 days automatically</div>
+          <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-400" /> Bank holiday — a fixed day off for everyone, separate from your bookable allowance</div>
         </div>
       </Card>
       <BankHolidayList store={store} />
@@ -779,24 +792,30 @@ function RequestLeaveScreen({ store, me, setScreen }) {
   const [end, setEnd] = useState(todayISO());
   const [reason, setReason] = useState("");
   const [done, setDone] = useState(false);
-  const [autoOk, setAutoOk] = useState(false);
   const [busy, setBusy] = useState(false);
-  const days = daysBetween(start, end);
+  const spanDays = daysBetween(start, end);                  // calendar length of the range
+  const charged = store.chargeableDays(start, end);          // working days actually deducted
+  const bankInRange = store.bankHolidaysBetween(start, end);  // bank holidays inside the range
+  const weekendInRange = Math.max(0, spanDays - charged - bankInRange); // Sat/Sun in the range
   const left = store.remaining(me.id);
-  // Bank holidays inside the range are already days off for everyone: they aren't
-  // charged, and a request made up ENTIRELY of them is approved automatically.
-  const bankInRange = store.bankHolidays.filter(h => h.date >= start && h.date <= end).length;
-  const allBank = days > 0 && bankInRange >= days;
-  const chargedDays = Math.max(0, days - bankInRange);
+  const isUnpaid = type === "unpaid";
+  // Leave can't be booked for a date that has already passed.
+  const inPast = start < todayISO();
+  // A range made up entirely of weekends and/or bank holidays has no working day to
+  // book — the app blocks it (bank holidays aren't bookable; weekends are days off).
+  const nothingToBook = charged === 0;
+  // Paid leave can't exceed the remaining bookable days; unpaid never charges.
+  const overAllowance = !isUnpaid && charged > left;
+  const blocked = inPast || nothingToBook || overAllowance;
   // A ref, not just state: two taps in the same tick would both read the old
   // state value, but both see the ref. The whole round trip is a window in which
   // the button is otherwise still live, and a double-tap booked the leave twice.
   const sending = useRef(false);
   const submit = async () => {
-    if (sending.current) return;
+    if (sending.current || blocked) return;
     sending.current = true;
     setBusy(true);
-    try { await store.requestLeave({ type, start, end, reason }); setAutoOk(allBank); setDone(true); }
+    try { await store.requestLeave({ type, start, end, reason }); setDone(true); }
     catch (e) {}
     finally { sending.current = false; setBusy(false); }
   };
@@ -804,8 +823,8 @@ function RequestLeaveScreen({ store, me, setScreen }) {
     <Screen>
       <Card className="text-center">
         <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 ring-4 ring-emerald-50 bounce-in"><CheckCircle2 size={36} className="text-emerald-600" /></div>
-        <p className="text-xl font-extrabold" style={{ color: NAVY }}>{autoOk ? "Approved Automatically" : "Request Submitted"}</p>
-        <p className="mt-1 text-sm text-slate-500">{autoOk ? "That's a bank holiday — approved automatically, no manager needed. See it under Holiday Balance." : "Your manager has been notified. Track it under Holiday Balance."}</p>
+        <p className="text-xl font-extrabold" style={{ color: NAVY }}>Request Submitted</p>
+        <p className="mt-1 text-sm text-slate-500">Your manager has been notified. Track it under Holiday Balance.</p>
         <div className="mt-5 flex gap-2"><PrimaryBtn onClick={() => setScreen("home")} className="flex-1">Back to Hub</PrimaryBtn><button onClick={() => { setDone(false); setReason(""); }} className="flex-1 rounded-xl border-2 border-slate-200 py-2.5 text-sm font-bold text-slate-600">New request</button></div>
       </Card>
     </Screen>
@@ -822,16 +841,22 @@ function RequestLeaveScreen({ store, me, setScreen }) {
           ); })}
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="From"><input type="date" value={start} onChange={e => { setStart(e.target.value); if (e.target.value > end) setEnd(e.target.value); }} className={inputCls} /></Field>
-          <Field label="To"><input type="date" value={end} min={start} onChange={e => setEnd(e.target.value)} className={inputCls} /></Field>
+          <Field label="From"><input type="date" value={start} min={todayISO()} onChange={e => { setStart(e.target.value); if (e.target.value > end) setEnd(e.target.value); }} className={inputCls} /></Field>
+          <Field label="To"><input type="date" value={end} min={start > todayISO() ? start : todayISO()} onChange={e => setEnd(e.target.value)} className={inputCls} /></Field>
         </div>
         <div className="mt-4"><Field label="Reason (optional)"><textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Add a short note for your manager…" className={inputCls + " resize-none"} /></Field></div>
-        <div className="mt-4 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5 text-sm"><span className="text-slate-500">Duration</span><span className="font-bold" style={{ color: NAVY }}>{days} day{days > 1 ? "s" : ""}{bankInRange > 0 && !allBank ? ` · ${chargedDays} charged` : ""}</span></div>
-        {allBank
-          ? <div className="mt-2 flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700"><Info size={15} /> Bank holiday — approved automatically, no manager approval needed.</div>
-          : chargedDays > left && <div className="mt-2 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600"><AlertCircle size={15} /> Exceeds your {left} remaining days</div>}
-        <PrimaryBtn onClick={submit} disabled={busy || (!allBank && chargedDays > left)} className="mt-5 w-full !py-3.5">
-          {busy ? <><Loader2 size={18} className="animate-spin" /> Submitting…</> : allBank ? <><CheckCircle2 size={18} /> Confirm (auto-approved)</> : <><Plus size={18} /> Submit Request</>}
+        <div className="mt-4 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5 text-sm"><span className="text-slate-500">Working days charged</span><span className="font-bold" style={{ color: NAVY }}>{charged} day{charged === 1 ? "" : "s"}{spanDays !== charged ? ` · ${spanDays} selected` : ""}</span></div>
+        {/* Explain what was skipped, then block anything that can't be booked. */}
+        {(bankInRange > 0 || weekendInRange > 0) && !nothingToBook && !inPast && (
+          <div className="mt-2 flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700"><Info size={15} /> Not counted: {[weekendInRange > 0 && `${weekendInRange} weekend day${weekendInRange === 1 ? "" : "s"}`, bankInRange > 0 && `${bankInRange} bank holiday${bankInRange === 1 ? "" : "s"}`].filter(Boolean).join(" · ")}.</div>
+        )}
+        {inPast
+          ? <div className="mt-2 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600"><AlertCircle size={15} /> You can't book leave for a past date — choose today or later.</div>
+          : nothingToBook
+          ? <div className="mt-2 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600"><AlertCircle size={15} /> These dates are all weekends and/or bank holidays — there are no working days to book.</div>
+          : overAllowance && <div className="mt-2 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600"><AlertCircle size={15} /> Exceeds your {left} remaining day{left === 1 ? "" : "s"} — choose Unpaid Leave or a shorter period.</div>}
+        <PrimaryBtn onClick={submit} disabled={busy || blocked} className="mt-5 w-full !py-3.5">
+          {busy ? <><Loader2 size={18} className="animate-spin" /> Submitting…</> : <><Plus size={18} /> Submit Request</>}
         </PrimaryBtn>
       </Card>
     </Screen>
@@ -1863,9 +1888,9 @@ function AdminBalances({ store }) {
   return (
     <>
       <AdminHeader title="Holiday Balances" subtitle="Set allowances and apply adjustments — staff see changes instantly" Icon={Check} action={(() => {
-        // Read-only org-wide totals, safe-guarded.
-        const totalAllow = store.staff.reduce((a, s) => a + store.effectiveAllowance(s.id), 0);
-        const totalConsumed = store.staff.reduce((a, s) => a + store.usedDays(s.id) + store.bankHolidayDaysUsed(), 0);
+        // Read-only org-wide totals over the BOOKABLE pot (bank holidays excluded).
+        const totalAllow = store.staff.reduce((a, s) => a + store.bookableAllowance(s.id), 0);
+        const totalConsumed = store.staff.reduce((a, s) => a + store.usedDays(s.id), 0);
         const pct = totalAllow > 0 ? Math.round((totalConsumed / totalAllow) * 100) : 0;
         return <div className="flex flex-wrap items-center gap-2"><span className="flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 ring-1 ring-blue-200"><Layers size={13} /> {totalConsumed}/{totalAllow}d used</span><span className="flex items-center gap-1.5 rounded-full bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600 ring-1 ring-slate-200"><Activity size={13} /> {pct}% org</span><ExportBtn onClick={exportBalances} /></div>;
       })()} />
@@ -1876,7 +1901,7 @@ function AdminBalances({ store }) {
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400"><tr><th className="px-5 py-3">Staff</th><th className="px-5 py-3">Base</th><th className="px-5 py-3">Adj</th><th className="px-5 py-3">Used</th><th className="px-5 py-3">Bank</th><th className="px-5 py-3">Remaining</th><th className="px-5 py-3 w-40">Usage</th><th className="px-5 py-3">Actions</th></tr></thead>
           <tbody>
-            {paged.slice.map(s => { const eff = store.effectiveAllowance(s.id); const used = store.usedDays(s.id); const bank = store.bankHolidayDaysUsed(); const left = eff - used - bank; const adjv = store.adjDays(s.id); const pct = eff > 0 ? Math.round((used + bank) / eff * 100) : 0; return (
+            {paged.slice.map(s => { const bookable = store.bookableAllowance(s.id); const used = store.usedDays(s.id); const bank = store.bankHolidayDaysUsed(); const left = store.remaining(s.id); const adjv = store.adjDays(s.id); const pct = bookable > 0 ? Math.round(used / bookable * 100) : 0; return (
               <tr key={s.id} className="border-t border-slate-100 transition-colors duration-150 hover:bg-blue-50/40">
                 <td className="px-5 py-3"><div className="flex items-center gap-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-sm" style={{ background: s.colour }}>{s.initials}</span><div><p className="font-semibold text-slate-700">{s.name}</p><p className="text-[11px] text-slate-400">{s.dept}</p></div></div></td>
                 <td className="px-5 py-3 font-medium text-slate-600">{s.allowance}d</td>
@@ -1915,15 +1940,19 @@ function AdminCalendar({ store }) {
   const [form, setForm] = useState({ staffId: "", type: "annual", start: todayISO(), end: todayISO(), reason: "" });
 
   const openAdd = () => { setForm({ staffId: store.staff[0]?.id || "", type: "annual", start: todayISO(), end: todayISO(), reason: "" }); setModal(true); };
-  const days = daysBetween(form.start, form.end);
+  const spanDays = daysBetween(form.start, form.end);          // calendar length
+  const days = store.chargeableDays(form.start, form.end);     // working days actually charged
   const staff = store.staff.find(s => s.id === form.staffId);
   const remaining = form.staffId ? store.remaining(form.staffId) : 0;
+  // A range that's all weekends/bank holidays has no working day to book — block it.
+  const nothingToBook = !!form.staffId && days === 0;
   // Paid types draw down the allowance; unpaid does not. Block over-allowance before
   // creating anything, so a rejected approval never leaves a dangling pending request.
-  const overAllowance = form.type !== "unpaid" && form.staffId && days > remaining;
+  const overAllowance = form.type !== "unpaid" && !!form.staffId && days > remaining;
+  const blocked = !form.staffId || nothingToBook || overAllowance;
 
   const addHoliday = async () => {
-    if (!form.staffId || overAllowance) return;
+    if (blocked) return;
     setBusy(true);
     try {
       await store.addApprovedLeave({ staffId: form.staffId, type: form.type, start: form.start, end: form.end, reason: form.reason.trim() || "Added by admin" });
@@ -1939,7 +1968,7 @@ function AdminCalendar({ store }) {
       <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 fade-up">
         <MonthGrid store={store} big />
         <div className="mt-4 border-t border-slate-100 pt-4"><p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">Leave types</p><LeaveLegend />
-          <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-400" /> Bank holiday — auto-applied to all staff, counts toward the 28-day allowance</div>
+          <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-400" /> Bank holiday — a fixed day off for all staff, separate from the bookable allowance</div>
         </div>
       </div>
       <BankHolidayList store={store} />
@@ -1954,11 +1983,13 @@ function AdminCalendar({ store }) {
           </div>
           <Field label="Reason"><input value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} placeholder="Optional" className={inputCls} /></Field>
           <div className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-100">
-            Added as an <b>approved</b> absence — it appears on the calendar straight away.{" "}
-            {form.type === "unpaid" ? "Unpaid leave doesn't use the holiday allowance." : staff ? `${days}d requested · ${remaining}d allowance left.` : ""}
+            Added as an <b>approved</b> absence — it appears on the calendar straight away. Weekends and bank holidays in the range aren't charged.{" "}
+            {form.type === "unpaid" ? "Unpaid leave doesn't use the holiday allowance." : staff ? `${days} working day${days === 1 ? "" : "s"} charged${spanDays !== days ? ` (of ${spanDays} selected)` : ""} · ${remaining}d allowance left.` : ""}
           </div>
-          {overAllowance && <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-600">Not enough allowance: {remaining}d left but {days}d requested. Choose Unpaid Leave, or a shorter period.</p>}
-          <PrimaryBtn onClick={addHoliday} disabled={busy || !form.staffId || overAllowance} className="w-full"><Plus size={16} /> {busy ? "Adding…" : "Add holiday"}</PrimaryBtn>
+          {nothingToBook
+            ? <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-600">Those dates are all weekends and/or bank holidays — there are no working days to book.</p>
+            : overAllowance && <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-600">Not enough allowance: {remaining}d left but {days}d requested. Choose Unpaid Leave, or a shorter period.</p>}
+          <PrimaryBtn onClick={addHoliday} disabled={busy || blocked} className="w-full"><Plus size={16} /> {busy ? "Adding…" : "Add holiday"}</PrimaryBtn>
         </div>
       </Modal>
     </>

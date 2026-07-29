@@ -19,76 +19,110 @@
 </head>
 <body>
   <h1>Privacy Policy</h1>
-  <p class="muted">London Brookes College — Staff Hub · Last updated: <span class="fill">[DATE]</span></p>
+  <p class="muted">London Brookes College — LBC Staff Hub · Last updated: <span class="fill">29 July 2026</span></p>
 
   <p>This Privacy Policy explains how the <strong>LBC Staff Hub</strong> application ("the app", "we", "us")
   collects, uses, stores and protects personal data when you use it. The app is provided by
-  <strong>London Brookes College</strong> ("the College") for use by its staff and administrators.
-  We are committed to protecting your privacy and handling your data in line with the
+  <strong>London Brookes College</strong> ("the College") for use by its <strong>staff, administrators and
+  enrolled students</strong>. We are committed to protecting your privacy and handling your data in line with the
   <strong>UK General Data Protection Regulation (UK GDPR)</strong> and the Data Protection Act 2018.</p>
 
   <h2>1. Who is responsible for your data</h2>
   <p>The data controller is <strong>London Brookes College</strong>. For any privacy questions or requests,
-  contact us at <span class="fill">[privacy@londonbrookescollege.co.uk]</span>.</p>
+  contact us at <span class="fill">[privacy@lbc.ac.uk]</span>.</p>
 
   <h2>2. What data we collect</h2>
+  <p><strong>For all users (staff and students):</strong></p>
   <ul>
-    <li><strong>Account details</strong> — your name, email address, job title and department.</li>
-    <li><strong>Authentication data</strong> — a securely hashed password and, where enabled, two‑step (authenticator) verification data.</li>
-    <li><strong>Attendance &amp; leave</strong> — daily check‑in/out times, daily summaries, holiday balances and leave requests.</li>
+    <li><strong>Account details</strong> — your name and email address.</li>
+    <li><strong>Authentication data</strong> — a securely hashed password and, where enabled for staff, two‑step
+    (authenticator) verification data.</li>
+    <li><strong>Device data</strong> — if you enable push notifications, a device notification token; and standard
+    technical data needed to operate the service securely.</li>
+    <li><strong>Messages you send</strong> — the content of queries and messages you submit through the app.</li>
+  </ul>
+  <p><strong>For staff and administrators, additionally:</strong></p>
+  <ul>
+    <li><strong>Employment details</strong> — job title, department and home site.</li>
+    <li><strong>Attendance &amp; leave</strong> — daily check‑in/out times, daily summaries, holiday balances and
+    leave requests (including the reason you provide).</li>
     <li><strong>Documents &amp; notifications</strong> — documents shared with you and in‑app notifications.</li>
-    <li><strong>Administrative records (staff/admin users only)</strong> — where you hold an administrator role, the app processes student records (names, reference numbers, college email addresses), attendance registers, assessment marks and pastoral (PAT) interaction notes, for the purpose of running the College's programmes.</li>
-    <li><strong>Device data</strong> — if you enable push notifications, a device notification token; and standard technical data needed to operate the service securely.</li>
+    <li><strong>Administrative records (admin users only)</strong> — where you hold an administrator role, the app
+    processes student records (names, student reference / College ID numbers, college email addresses), attendance
+    registers, assessment marks and pastoral (PAT) interaction notes, for the purpose of running the College's
+    programmes.</li>
+  </ul>
+  <p><strong>For students, additionally:</strong></p>
+  <ul>
+    <li><strong>Student identifiers</strong> — first and last name, your <strong>College ID / student reference
+    number</strong>, and your college email address.</li>
+    <li><strong>Academic records</strong> — your attendance by module and your assessment results/grades, shown to
+    you within the app.</li>
+    <li><strong>Queries to the College</strong> — the subject and content of queries you send to administrators,
+    and the responses sent back to you.</li>
   </ul>
 
   <h2>3. How we use your data</h2>
   <ul>
-    <li>To provide the app's features: sign‑in, attendance, leave management, documents, notifications, and (for administrators) student attendance and assessment management.</li>
+    <li>To provide the app's features: sign‑in; for staff — attendance, leave management, documents, notifications,
+    and (for administrators) student attendance and assessment management; for students — viewing your attendance
+    and assessment results and contacting the College.</li>
     <li>To authenticate you and keep your account secure.</li>
-    <li>To send you notifications relevant to your account (e.g. leave decisions).</li>
+    <li>To send you notifications relevant to your account (e.g. leave decisions, responses to your queries).</li>
+    <li>To review and approve new account requests submitted through the app.</li>
   </ul>
 
   <h2>4. Legal basis for processing</h2>
   <p>We process your data on the basis of the College's <strong>legitimate interests</strong> in administering
-  its staff and educational programmes, and to perform our contract with you as a member of staff. Special‑category
-  or sensitive information is only processed where necessary and with appropriate safeguards.</p>
+  its staff and educational programmes, to perform our contract with you as a member of staff, and to provide
+  educational services to enrolled students. Special‑category or sensitive information is only processed where
+  necessary and with appropriate safeguards.</p>
 
   <h2>5. How your data is stored and protected</h2>
   <ul>
     <li>Data is stored in a <strong>PostgreSQL database hosted on Supabase</strong> within the <strong>European Union</strong>.</li>
     <li>All communication between the app and our servers is <strong>encrypted in transit (HTTPS/TLS)</strong>.</li>
-    <li>Passwords are <strong>hashed with bcrypt</strong> and never stored in plain text.</li>
-    <li>Access is protected by signed session tokens, role‑based access control and optional two‑step verification.</li>
+    <li>Passwords are <strong>securely hashed</strong> and never stored in plain text.</li>
+    <li>Access is protected by signed session tokens, role‑based access control, per‑account data isolation
+    (users only see their own records), and optional two‑step verification for staff.</li>
   </ul>
 
   <h2>6. Sharing your data</h2>
-  <p>We do <strong>not</strong> sell your personal data. We share it only with service providers that host and
-  operate the app on our behalf, under appropriate data‑protection terms:</p>
+  <p>We do <strong>not</strong> sell your personal data and we do <strong>not</strong> use it for advertising.
+  We share it only with service providers that host and operate the app on our behalf, under appropriate
+  data‑protection terms:</p>
   <ul>
     <li><strong>Supabase</strong> — database hosting (EU).</li>
     <li><strong>Render</strong> — application/API hosting.</li>
-    <li><strong>Google Firebase Cloud Messaging</strong> — only if push notifications are enabled, to deliver notifications to your device.</li>
+    <li><strong>Google Firebase Cloud Messaging</strong> — only if push notifications are enabled, to deliver
+    notifications to your device.</li>
     <li>Email is sent via our configured email provider to deliver account and password‑reset messages.</li>
   </ul>
 
   <h2>7. Data retention</h2>
   <p>We keep your data for as long as you hold an account with the College, and delete or anonymise it when it is
-  no longer needed, or when you delete your account (see below), subject to any legal retention obligations.</p>
+  no longer needed, or when you delete your account (see below), subject to any legal or academic retention
+  obligations (for example, the College may retain academic records where required).</p>
 
   <h2>8. Your rights</h2>
   <p>Under UK GDPR you have the right to access, correct, erase, restrict or object to the processing of your data,
-  and to data portability. To exercise these rights, contact <span class="fill">[privacy@londonbrookescollege.co.uk]</span>.
+  and to data portability. To exercise these rights, contact <span class="fill">[privacy@lbc.ac.uk]</span>.
   You also have the right to complain to the UK Information Commissioner's Office (ICO) at <a href="https://ico.org.uk">ico.org.uk</a>.</p>
 
   <h2>9. Deleting your account</h2>
-  <p>You can permanently delete your own account and personal data from within the app:
-  <strong>Staff App → More → Delete my account</strong>. This removes your profile, check‑in history, leave requests,
-  balance adjustments, notifications and any outstanding password‑reset links. The action requires your password
-  (and your authenticator code if two‑step verification is on) and cannot be undone.</p>
+  <p>You can permanently delete your own app account from within the app:</p>
+  <ul>
+    <li><strong>Staff:</strong> Staff App → More → Delete my account. This removes your profile, check‑in history,
+    leave requests, balance adjustments, notifications and any outstanding password‑reset links.</li>
+    <li><strong>Students:</strong> Student App → More → Delete account. This removes your app sign‑in access and
+    personal login data. Your underlying academic record held by the College (attendance and assessment results)
+    may be retained by the College as part of its official student records, independently of the app.</li>
+  </ul>
+  <p>Deleting your account requires your password and cannot be undone.</p>
 
   <h2>10. Children</h2>
-  <p>The app is intended for College staff and administrators. It is not directed at children and we do not
-  knowingly collect data from children through this app.</p>
+  <p>The app is intended for College staff, administrators and enrolled students. It is not directed at children
+  under 13 and we do not knowingly collect data from children under 13 through this app.</p>
 
   <h2>11. Changes to this policy</h2>
   <p>We may update this policy from time to time. The "Last updated" date above shows when it last changed.</p>
@@ -96,10 +130,10 @@
   <h2>12. Contact us</h2>
   <p>London Brookes College<br>
   <span class="fill">[College address]</span><br>
-  Email: <span class="fill">[privacy@londonbrookescollege.co.uk]</span></p>
+  Email: <span class="fill">[privacy@lbc.ac.uk]</span></p>
 
   <hr>
   <p class="note">Note for the publisher: replace every <span class="fill">[bracketed]</span> placeholder
-  (date, contact email, address) with the College's real details before submitting to the app stores.</p>
+  (contact email, address) with the College's real details before submitting to the app stores.</p>
 </body>
 </html>

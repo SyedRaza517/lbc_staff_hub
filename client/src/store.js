@@ -93,31 +93,60 @@ export function useApiStore(notify, user) {
 
   // --- Bank holidays ---
   // The standard UK (England & Wales) bank holidays, computed for a span of years so
-  // the calendar can page around. These are part of the 28-day allowance: each one
-  // reduces every staff member's balance automatically as its date passes.
+  // the calendar can page around. The 28-day total is split into two separate pots:
+  //   • 8 bank holidays  — fixed days off, NOT bookable, shown as they pass.
+  //   • 20 holiday allowance — the days a staff member can actually book.
+  // Bank holidays never draw down the bookable 20; they live in their own counter.
   const thisYear = new Date().getFullYear();
   const bankHolidays = useMemo(() => ukBankHolidaysRange(thisYear - 1, thisYear + 2), [thisYear]);
   const bankHolidaySet = useMemo(() => new Map(bankHolidays.map((h) => [h.date, h.name])), [bankHolidays]);
   const isBankHoliday = useCallback((iso) => bankHolidaySet.has(iso), [bankHolidaySet]);
   // How many bank holidays fall inside an inclusive date range.
   const bankHolidaysBetween = useCallback((start, end) => bankHolidays.reduce((n, h) => n + (h.date >= start && h.date <= end ? 1 : 0), 0), [bankHolidays]);
-  // "As each occurs": bank holidays in THIS calendar year whose date has arrived.
+  // The number of bank holidays in the current year (normally 8) — the total shown
+  // on the Bank Holidays card and the size of the bank-holiday pot.
+  const bankHolidayTotal = useMemo(() => bankHolidays.filter((h) => h.date.slice(0, 4) === String(thisYear)).length, [bankHolidays, thisYear]);
+  // "As each occurs": bank holidays in THIS calendar year whose date has arrived —
+  // the "taken/passed" figure on the Bank Holidays card (e.g. 5 of 8 passed).
   const bankHolidayDaysUsed = useCallback(() => {
     const today = todayISO(); const y = String(thisYear);
     return bankHolidays.filter((h) => h.date.slice(0, 4) === y && h.date <= today).length;
   }, [bankHolidays, thisYear]);
 
+  // Days actually charged against the bookable allowance for an inclusive [start,end]
+  // range: Monday–Friday only, excluding bank holidays. Weekends (Sat/Sun) and bank
+  // holidays that fall inside the range are free — they are never deducted. This is
+  // the single source of truth for how many days a booking costs.
+  const chargeableDays = useCallback((start, end) => {
+    if (!start || !end || start > end) return 0;
+    let cur = new Date(start + "T00:00:00Z");
+    const last = new Date(end + "T00:00:00Z");
+    if (isNaN(cur) || isNaN(last)) return 0;
+    let n = 0;
+    while (cur <= last) {
+      const iso = cur.toISOString().slice(0, 10);
+      const dow = cur.getUTCDay(); // 0 = Sun … 6 = Sat
+      if (dow !== 0 && dow !== 6 && !bankHolidaySet.has(iso)) n += 1;
+      cur = new Date(cur.getTime() + 86400000);
+    }
+    return n;
+  }, [bankHolidaySet]);
+
   // Every approved leave type counts against the allowance (sick included) — the
   // total is reduced by any approved leave, regardless of type. Unpaid leave does
   // not draw down the paid allowance, so it's excluded (kept in sync with the
-  // server's UNPAID_TYPES and the client's NON_ALLOWANCE_TYPES). Bank holidays that
-  // fall inside a leave period are subtracted here so they aren't charged twice —
-  // a bank holiday only ever counts once, via the separate bank-holiday deduction.
-  const usedDays = useCallback((id) => leave.filter((l) => l.staffId === id && l.status === "approved" && l.type !== "unpaid").reduce((s, l) => s + Math.max(0, (l.days ?? daysBetween(l.start, l.end)) - bankHolidaysBetween(l.start, l.end)), 0), [leave, bankHolidaysBetween]);
+  // server's UNPAID_TYPES and the client's NON_ALLOWANCE_TYPES). We recompute the
+  // cost from the dates (weekends + bank holidays removed) rather than trusting a
+  // stored day count, so old records are handled correctly too.
+  const usedDays = useCallback((id) => leave.filter((l) => l.staffId === id && l.status === "approved" && l.type !== "unpaid").reduce((s, l) => s + chargeableDays(l.start, l.end), 0), [leave, chargeableDays]);
   const adjDays = useCallback((id) => adjustments.filter((a) => a.staffId === id).reduce((s, a) => s + a.days, 0), [adjustments]);
+  // Total entitlement (e.g. 28) = the bookable allowance + the 8 bank holidays.
   const effectiveAllowance = useCallback((id) => { const s = staff.find((x) => x.id === id); return (s?.allowance || 0) + adjDays(id); }, [staff, adjDays]);
-  // Days a staff member has left: allowance − their approved leave − bank holidays so far.
-  const remaining = useCallback((id) => effectiveAllowance(id) - usedDays(id) - bankHolidayDaysUsed(), [effectiveAllowance, usedDays, bankHolidayDaysUsed]);
+  // The bookable pot (e.g. 20): total entitlement minus the 8 bank holidays, which
+  // are never bookable. This is the "total" on the Holiday Allowance card.
+  const bookableAllowance = useCallback((id) => Math.max(0, effectiveAllowance(id) - bankHolidayTotal), [effectiveAllowance, bankHolidayTotal]);
+  // Days a staff member has left to book: bookable allowance − their approved leave.
+  const remaining = useCallback((id) => bookableAllowance(id) - usedDays(id), [bookableAllowance, usedDays]);
 
   const refreshInteractions = useCallback(async () => {
     try { setInteractions(await api.listInteractions()); }
@@ -305,8 +334,8 @@ export function useApiStore(notify, user) {
     modules, students, sessions, semesters, programmes, cohorts, terms, unassignedSessions, semesterId, attendance, hndLoaded,
     interactions, interactionsLoaded,
     assessments, assessmentOverview, assessmentsLoaded,
-    usedDays, adjDays, effectiveAllowance, remaining,
-    bankHolidays, bankHolidaySet, isBankHoliday, bankHolidayDaysUsed,
+    usedDays, adjDays, effectiveAllowance, bookableAllowance, remaining, chargeableDays,
+    bankHolidays, bankHolidaySet, isBankHoliday, bankHolidaysBetween, bankHolidayDaysUsed, bankHolidayTotal,
     notify, currentUser: user, isAdmin,
     ...actions,
   };

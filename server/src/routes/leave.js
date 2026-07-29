@@ -4,7 +4,7 @@ const { sLeave } = require("../serializers");
 const { requireAuth, requireAnyPage } = require("../auth");
 const { notifyStaff, notifyAdmins } = require("../notify");
 const { localDate } = require("../clock");
-const { allDatesAreBankHolidays } = require("../bankHolidays");
+const { allDatesAreBankHolidays, chargeableDays, bankHolidayCount } = require("../bankHolidays");
 
 // Local (London) date, not the server's UTC date — so a request made just after
 // midnight BST is filed under the correct day, not the previous one.
@@ -57,6 +57,9 @@ router.post("/", requireAuth, async (req, res) => {
   const isRealDate = (s) => { const d = new Date(s + "T00:00:00Z"); return !isNaN(d) && d.toISOString().slice(0, 10) === s; };
   if (!isRealDate(start) || !isRealDate(end)) return res.status(400).json({ error: "Dates must be valid calendar dates" });
   if (start > end) return res.status(400).json({ error: "End date must not be before start date" });
+  // Staff can't book leave in the past. Admins are exempt so they can still record a
+  // past absence retroactively on someone's behalf.
+  if (req.user.accountRole !== "ADMIN" && start < today()) return res.status(400).json({ error: "You can't book leave for a past date." });
   if (staffId !== undefined && typeof staffId !== "string") return res.status(400).json({ error: "staffId must be a string" });
   const targetStaff = req.user.accountRole === "ADMIN" && staffId ? staffId : req.user.id;
   // Guard against a non-existent staffId (would otherwise throw a foreign-key error and crash the request).
@@ -70,22 +73,23 @@ router.post("/", requireAuth, async (req, res) => {
     where: { staffId: targetStaff, type, start, end, status: "pending" },
   });
   if (duplicate) return res.status(200).json(sLeave(duplicate));
-  // A request that falls ENTIRELY on bank holiday(s) needs no manager decision —
-  // those days are already off for everyone — so it's created pre-approved and no
-  // approval notification is raised. Bank-holiday days aren't charged either (the
-  // client excludes them from the allowance), so this is effectively a free record.
-  const autoApprove = allDatesAreBankHolidays(start, end);
+  // Cost of the booking = working days only: Mon–Fri, excluding bank holidays.
+  // Weekends and bank holidays inside the range are free. If NOTHING is chargeable
+  // (the whole range is weekend and/or bank holiday) there is nothing to book, so we
+  // block it with a clear message rather than creating an empty 0-day request.
+  const chargeable = chargeableDays(start, end);
+  if (chargeable === 0) {
+    return res.status(400).json({ error: "Those dates are all weekends or bank holidays — there are no working days to book." });
+  }
   try {
     const rec = await prisma.leave.create({
       data: {
-        staffId: targetStaff, type, start, end, days: daysBetween(start, end), reason: reason || "—",
+        staffId: targetStaff, type, start, end, days: chargeable, reason: reason || "—",
         requestedAt: today(),
-        status: autoApprove ? "approved" : "pending",
-        ...(autoApprove ? { decidedBy: "Bank holiday (automatic)", decidedAt: today() } : {}),
+        status: "pending",
       },
     });
-    // Only a genuine pending request needs a manager's attention.
-    if (!autoApprove) notifyAdmins({ type: "info", message: `New ${type} leave request from ${exists.name}`, link: "approvals" });
+    notifyAdmins({ type: "info", message: `New ${type} leave request from ${exists.name}`, link: "approvals" });
     res.status(201).json(sLeave(rec));
   } catch (e) {
     res.status(400).json({ error: "Could not create leave request" });
@@ -132,11 +136,16 @@ router.put("/:id/decision", requireAuth, requireAnyPage(["requests", "approvals"
           _sum: { days: true },
         }),
       ]);
-      const effectiveAllowance = (staff?.allowance || 0) + (adj._sum.days || 0);
+      // The bookable pot excludes the bank holidays (normally 8), which are a
+      // separate entitlement and never bookable: bookable = total + adjustments − 8.
+      const bankPot = bankHolidayCount(Number(leave.start.slice(0, 4)));
+      const bookableAllowance = Math.max(0, (staff?.allowance || 0) + (adj._sum.days || 0) - bankPot);
       const usedDays = usedAgg._sum.days || 0;
-      const thisDays = leave.days || daysBetween(leave.start, leave.end);
-      if (usedDays + thisDays > effectiveAllowance) {
-        return { error: { code: 400, message: `Approval would exceed allowance: ${usedDays} used + ${thisDays} requested > ${effectiveAllowance} available` } };
+      // Recompute this request's cost from its dates (weekends + bank holidays removed)
+      // so an old row with a stale calendar-based `days` can't over-charge on approval.
+      const thisDays = chargeableDays(leave.start, leave.end);
+      if (usedDays + thisDays > bookableAllowance) {
+        return { error: { code: 400, message: `Approval would exceed allowance: ${usedDays} used + ${thisDays} requested > ${bookableAllowance} available` } };
       }
     }
 

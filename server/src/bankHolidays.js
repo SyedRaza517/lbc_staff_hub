@@ -41,6 +41,34 @@ function ukBankHolidays(year) {
   ].map(iso);
 }
 
+// Days actually charged against the bookable allowance for an inclusive [start,end]
+// range: Monday–Friday only, excluding bank holidays. Weekends (Sat/Sun) and bank
+// holidays inside the range are free and never deducted. Mirrors the client's
+// chargeableDays (store.js) so both sides agree on what a booking costs.
+function chargeableDays(start, end) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) return 0;
+  const y0 = Number(start.slice(0, 4)), y1 = Number(end.slice(0, 4));
+  const set = new Set();
+  for (let y = y0; y <= y1; y++) for (const d of ukBankHolidays(y)) set.add(d);
+  let cur = new Date(start + "T00:00:00Z");
+  const last = new Date(end + "T00:00:00Z");
+  if (isNaN(cur) || isNaN(last)) return 0;
+  let n = 0;
+  while (cur <= last) {
+    const iso = cur.toISOString().slice(0, 10);
+    const dow = cur.getUTCDay(); // 0 = Sun … 6 = Sat
+    if (dow !== 0 && dow !== 6 && !set.has(iso)) n += 1;
+    cur = new Date(cur.getTime() + 86400000);
+  }
+  return n;
+}
+
+// Number of bank holidays in a year (normally 8) — the size of the bank-holiday pot
+// that is carved out of the total entitlement and is never bookable.
+function bankHolidayCount(year) {
+  return ukBankHolidays(year).length;
+}
+
 // True when EVERY calendar day in the inclusive [start, end] range is a bank holiday.
 function allDatesAreBankHolidays(start, end) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) return false;
@@ -57,4 +85,4 @@ function allDatesAreBankHolidays(start, end) {
   return true;
 }
 
-module.exports = { ukBankHolidays, allDatesAreBankHolidays };
+module.exports = { ukBankHolidays, allDatesAreBankHolidays, chargeableDays, bankHolidayCount };
