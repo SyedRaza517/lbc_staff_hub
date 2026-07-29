@@ -291,10 +291,16 @@ router.post("/units", requireAuth, requireAdmin, async (req, res) => {
   if (clash) return res.status(409).json({ error: `Unit code "${code}" already exists in this course` });
   const ct = await resolveCohortTerm(req.body?.cohortId, req.body?.termId);
   if (ct.error) return res.status(400).json({ error: ct.error });
-  const m = await prisma.unit.create({
-    data: { code, name, tutor: str(req.body?.tutor), courseId, cohortId: ct.cohortId, termId: ct.termId },
-  });
-  res.status(201).json(sUnit(m));
+  try {
+    const m = await prisma.unit.create({
+      data: { code, name, tutor: str(req.body?.tutor), courseId, cohortId: ct.cohortId, termId: ct.termId },
+    });
+    res.status(201).json(sUnit(m));
+  } catch (e) {
+    // P2002 = the DB's unique index rejected it. A clean 409 beats a raw 500.
+    if (e?.code === "P2002") return res.status(409).json({ error: `Unit code "${code}" already exists in this course` });
+    throw e;
+  }
 });
 
 router.put("/units/:id", requireAuth, requireAdmin, async (req, res) => {
@@ -328,8 +334,13 @@ router.put("/units/:id", requireAuth, requireAdmin, async (req, res) => {
     if (ct.error) return res.status(400).json({ error: ct.error });
     data.cohortId = ct.cohortId; data.termId = ct.termId;
   }
-  const m = await prisma.unit.update({ where: { id: existing.id }, data });
-  res.json(sUnit(m));
+  try {
+    const m = await prisma.unit.update({ where: { id: existing.id }, data });
+    res.json(sUnit(m));
+  } catch (e) {
+    if (e?.code === "P2002") return res.status(409).json({ error: `Unit code "${data.code || existing.code}" already exists in this course` });
+    throw e;
+  }
 });
 
 // Deleting a unit cascades to its sessions, marks and enrolments (schema-level).
