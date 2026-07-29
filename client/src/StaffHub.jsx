@@ -1438,12 +1438,12 @@ function ExecutiveDashboard({ store }) {
   const totalMarks = months.reduce((a, m) => a + m.P + m.L + m.E + m.A, 0);
 
   const allCourses = exec?.courses || [];
-  const courses = allCourses.filter(c => course === "all" || c.cohortId === course);
+  const courses = allCourses.filter(c => course === "all" || c.courseId === course);
   const courseData = courses.map(c => ({ code: c.code, passRate: c.passRate }));
   const shownStudents = course === "all" ? (exec?.totals?.students ?? store.students.length) : courses.reduce((a, c) => a + c.studentCount, 0);
   const shownPassed = course === "all" ? (exec?.totals?.studentsPassed ?? 0) : courses.reduce((a, c) => a + c.studentsPassed, 0);
   const shownPassRate = shownStudents ? Math.round(shownPassed / shownStudents * 1000) / 10 : 0;
-  const totalCourses = allCourses.filter(c => c.cohortId !== "__none__").length || store.cohorts.length;
+  const totalCourses = exec?.totals?.courses ?? store.courses.length;
   const assessmentsCount = exec?.totals?.assessments ?? store.assessments.length;
 
   return (
@@ -1452,7 +1452,7 @@ function ExecutiveDashboard({ store }) {
         action={<div className="flex items-center gap-2 text-[11px] text-slate-400">{refreshed && <span className="hidden sm:inline">Last refreshed {refreshed.toLocaleString("en-GB")}</span>}<button onClick={() => load(unit, true)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button></div>} />
       <div className="mb-4 flex flex-wrap gap-2">
         <FilterSelect label="Academic Year" value={year} onChange={setYear} options={[{ v: "all", l: "All years" }, ...years.map(y => ({ v: y, l: y }))]} />
-        <FilterSelect label="Course" value={course} onChange={setCourse} options={[{ v: "all", l: "All courses" }, ...allCourses.map(c => ({ v: c.cohortId, l: c.code }))]} />
+        <FilterSelect label="Course" value={course} onChange={setCourse} options={[{ v: "all", l: "All courses" }, ...allCourses.map(c => ({ v: c.courseId, l: c.code }))]} />
         <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...store.units.map(m => ({ v: m.id, l: m.code }))]} />
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -1495,7 +1495,7 @@ function ExecutiveDashboard({ store }) {
             <thead className="text-left text-xs font-bold uppercase tracking-wide text-slate-400"><tr><th className="py-2 pr-4">Course Code</th><th className="px-2 py-2 text-right">Students</th><th className="px-2 py-2 text-right">Passed</th><th className="py-2 pl-2 text-right">Pass Rate</th></tr></thead>
             <tbody>
               {courses.map(c => (
-                <tr key={c.cohortId} className="border-t border-slate-100">
+                <tr key={c.courseId} className="border-t border-slate-100">
                   <td className="py-2 pr-4 font-medium text-slate-700">{c.code}</td>
                   <td className="px-2 py-2 text-right tabular-nums text-slate-600">{c.studentCount}</td>
                   <td className="px-2 py-2 text-right font-semibold tabular-nums text-emerald-600">{c.studentsPassed}</td>

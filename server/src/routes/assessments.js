@@ -278,30 +278,33 @@ router.get("/exec-summary", requireAuth, async (req, res) => {
     const s = perStudent.get(g.studentId) || { sum: 0, n: 0 };
     s.sum += pct; s.n += 1; perStudent.set(g.studentId, s);
   }
-  const progName = new Map(courseList.map((p) => [p.id, p.name]));
-  const cohortMeta = new Map(cohorts.map((c) => [c.id, { name: c.name, prog: progName.get(c.courseId) || "" }]));
-  const byCohort = new Map();
+  // Map a student to their Course via their cohort (student → cohort → course).
+  // Students with no cohort, or a cohort with no course, are "Unassigned".
+  const cohortCourse = new Map(cohorts.map((c) => [c.id, c.courseId || null]));
+  // Seed a bucket for EVERY course up front, so a course with no students yet
+  // still appears on the dashboard (that was the missing piece).
+  const byCourse = new Map();
+  for (const c of courseList) byCourse.set(c.id, { code: c.name, count: 0, passed: 0, graded: 0 });
+  byCourse.set("__none__", { code: "Unassigned", count: 0, passed: 0, graded: 0 });
   let totalPassed = 0, totalGraded = 0;
   for (const st of students) {
-    const key = st.cohortId || "__none__";
-    const b = byCohort.get(key) || { count: 0, passed: 0, graded: 0 };
+    const key = (st.cohortId && cohortCourse.get(st.cohortId)) || "__none__";
+    const b = byCourse.get(key) || byCourse.get("__none__");
     b.count += 1;
     const g = perStudent.get(st.id);
     if (g && g.n > 0) {
       b.graded += 1; totalGraded += 1;
       if (g.sum / g.n >= 40) { b.passed += 1; totalPassed += 1; }
     }
-    byCohort.set(key, b);
   }
-  const courses = [...byCohort.entries()].map(([cid, b]) => {
-    const meta = cohortMeta.get(cid) || { name: cid === "__none__" ? "Unassigned" : cid, prog: "" };
-    return {
-      cohortId: cid,
-      code: meta.prog ? `${meta.prog} — ${meta.name}` : meta.name,
+  const courses = [...byCourse.entries()]
+    .map(([cid, b]) => ({
+      courseId: cid, code: b.code,
       studentCount: b.count, studentsPassed: b.passed, graded: b.graded,
       passRate: b.count ? Math.round((b.passed / b.count) * 1000) / 10 : 0,
-    };
-  }).sort((a, b) => b.studentsPassed - a.studentsPassed);
+    }))
+    .filter((c) => c.courseId !== "__none__" || c.studentCount > 0) // hide empty "Unassigned"
+    .sort((a, b) => b.studentCount - a.studentCount);
   res.json({
     totals: {
       students: students.length,
@@ -309,6 +312,7 @@ router.get("/exec-summary", requireAuth, async (req, res) => {
       graded: totalGraded,
       passRate: students.length ? Math.round((totalPassed / students.length) * 1000) / 10 : 0,
       assessments: assessments.length,
+      courses: courseList.length,
     },
     courses,
   });
