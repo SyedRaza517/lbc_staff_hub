@@ -719,17 +719,20 @@ router.put("/sessions/:id/register", requireAuth, requireAdmin, async (req, res)
 router.get("/attendance/monthly", requireAuth, async (req, res) => {
   const studentId = str(req.query?.studentId);
   const unitId = str(req.query?.unitId);
+  const courseId = str(req.query?.courseId);
+  // Only join Unit when we need to filter by course.
+  const unitJoin = courseId ? `JOIN "Unit" u ON u.id = se."unitId"` : "";
   const base = `
     SELECT left(se.date, 7) ym,
       count(*) FILTER (WHERE am.status='P')::int p,
       count(*) FILTER (WHERE am.status='L')::int l,
       count(*) FILTER (WHERE am.status='E')::int e,
       count(*) FILTER (WHERE am.status='A')::int a
-    FROM "AttendanceMark" am JOIN "HndSession" se ON se.id = am."sessionId"`;
-  // Build WHERE from whichever filters are present, using parameterised values.
+    FROM "AttendanceMark" am JOIN "HndSession" se ON se.id = am."sessionId" ${unitJoin}`;
   const conds = [], params = [];
   if (studentId) { params.push(studentId); conds.push(`am."studentId" = $${params.length}`); }
   if (unitId) { params.push(unitId); conds.push(`se."unitId" = $${params.length}`); }
+  if (courseId) { params.push(courseId); conds.push(`u."courseId" = $${params.length}`); }
   const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
   const rows = await prisma.$queryRawUnsafe(`${base}${where} GROUP BY 1 ORDER BY 1`, ...params);
   let P = 0, L = 0, E = 0, A = 0;
@@ -739,7 +742,15 @@ router.get("/attendance/monthly", requireAuth, async (req, res) => {
     return { month: r.ym, pct: s.pct, marked: s.marked, P: r.p, L: r.l, E: r.e, A: r.a };
   });
   const t = summariseCounts(P, L, E, A);
-  res.json({ months, totals: { pct: t.pct, marked: t.marked, present: P, late: L, excused: E, absent: A } });
+  // Session count under the SAME course/unit scope (independent of student/marks),
+  // so the dashboard's "Total Sessions" tracks the filters too.
+  const sJoin = courseId ? `JOIN "Unit" u ON u.id = se."unitId"` : "";
+  const sConds = [], sParams = [];
+  if (unitId) { sParams.push(unitId); sConds.push(`se."unitId" = $${sParams.length}`); }
+  if (courseId) { sParams.push(courseId); sConds.push(`u."courseId" = $${sParams.length}`); }
+  const sWhere = sConds.length ? ` WHERE ${sConds.join(" AND ")}` : "";
+  const sessRows = await prisma.$queryRawUnsafe(`SELECT count(*)::int n FROM "HndSession" se ${sJoin}${sWhere}`, ...sParams);
+  res.json({ months, totals: { pct: t.pct, marked: t.marked, present: P, late: L, excused: E, absent: A }, sessions: sessRows[0]?.n || 0 });
 });
 
 router.get("/attendance", requireAuth, async (req, res) => {

@@ -179,7 +179,7 @@ export const api = {
   saveRegister: (sessionId, marks, override) => request(`/hnd/sessions/${sessionId}/register`, { method: "PUT", body: { marks, ...(override ? { override: true } : {}) } }),
   // semesterId: "" = all semesters, "unassigned" = sessions outside every semester
   getAttendance: (semesterId, termId) => request(`/hnd/attendance${termId ? `?termId=${encodeURIComponent(termId)}` : semesterId ? `?semesterId=${encodeURIComponent(semesterId)}` : ""}`),
-  attendanceMonthly: (opts = {}) => { const q = new URLSearchParams(); if (opts.studentId) q.set("studentId", opts.studentId); if (opts.unitId) q.set("unitId", opts.unitId); const s = q.toString(); return request(`/hnd/attendance/monthly${s ? `?${s}` : ""}`); },
+  attendanceMonthly: (opts = {}) => { const q = new URLSearchParams(); if (opts.studentId) q.set("studentId", opts.studentId); if (opts.unitId) q.set("unitId", opts.unitId); if (opts.courseId) q.set("courseId", opts.courseId); const s = q.toString(); return request(`/hnd/attendance/monthly${s ? `?${s}` : ""}`); },
   // A student's attendance grouped by term (current + previous terms).
   studentTermAttendance: (id) => request(`/hnd/students/${id}/attendance-terms`),
   // PAT (Personal Academic Tutor) interactions

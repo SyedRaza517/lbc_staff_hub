@@ -262,13 +262,36 @@ router.get("/student/:id", requireAuth, async (req, res) => {
 // grouped by cohort (the "course"), plus per-course pass-rate. Heavy per-student
 // aggregation done here (server-side) so the client never fetches 100s of students.
 router.get("/exec-summary", requireAuth, async (req, res) => {
-  const [students, assessments, grades, cohorts, courseList] = await Promise.all([
+  const [students, assessments, grades, cohorts, courseList, unitList, enrolments] = await Promise.all([
     prisma.student.findMany({ select: { id: true, cohortId: true } }),
-    prisma.assessment.findMany({ select: { id: true, maxMarks: true } }),
+    prisma.assessment.findMany({ select: { id: true, maxMarks: true, unitId: true } }),
     prisma.assessmentGrade.findMany({ select: { studentId: true, assessmentId: true, marks: true } }),
     prisma.cohort.findMany({ select: { id: true, name: true, courseId: true } }),
     prisma.course.findMany({ select: { id: true, name: true } }),
+    prisma.unit.findMany({ select: { id: true, courseId: true } }),
+    prisma.enrolment.findMany({ select: { studentId: true, unitId: true } }),
   ]);
+  // How many assessments belong to each course (via unit → course).
+  const unitCourse = new Map(unitList.map((u) => [u.id, u.courseId || null]));
+  const assessByCourse = new Map();
+  for (const a of assessments) {
+    const cid = unitCourse.get(a.unitId) || "__none__";
+    assessByCourse.set(cid, (assessByCourse.get(cid) || 0) + 1);
+  }
+  // Each student's course from their ENROLLED UNITS (the course whose units they're
+  // on most). This is how students are actually put on a course, so it's the primary
+  // signal — a cohort link is only a fallback. Fixes students showing "Unassigned".
+  const stuCourseCount = new Map(); // studentId -> Map(courseId -> unit count)
+  for (const e of enrolments) {
+    const cid = unitCourse.get(e.unitId); if (!cid) continue;
+    if (!stuCourseCount.has(e.studentId)) stuCourseCount.set(e.studentId, new Map());
+    const m = stuCourseCount.get(e.studentId); m.set(cid, (m.get(cid) || 0) + 1);
+  }
+  const studentCourse = new Map();
+  for (const [sid, m] of stuCourseCount) {
+    let best = null, n = 0; for (const [cid, c] of m) if (c > n) { best = cid; n = c; }
+    if (best) studentCourse.set(sid, best);
+  }
   const aMax = new Map(assessments.map((a) => [a.id, a.maxMarks]));
   // Average graded % per student.
   const perStudent = new Map();
@@ -288,7 +311,7 @@ router.get("/exec-summary", requireAuth, async (req, res) => {
   byCourse.set("__none__", { code: "Unassigned", count: 0, passed: 0, graded: 0 });
   let totalPassed = 0, totalGraded = 0;
   for (const st of students) {
-    const key = (st.cohortId && cohortCourse.get(st.cohortId)) || "__none__";
+    const key = studentCourse.get(st.id) || (st.cohortId && cohortCourse.get(st.cohortId)) || "__none__";
     const b = byCourse.get(key) || byCourse.get("__none__");
     b.count += 1;
     const g = perStudent.get(st.id);
@@ -301,6 +324,7 @@ router.get("/exec-summary", requireAuth, async (req, res) => {
     .map(([cid, b]) => ({
       courseId: cid, code: b.code,
       studentCount: b.count, studentsPassed: b.passed, graded: b.graded,
+      assessments: assessByCourse.get(cid) || 0,
       passRate: b.count ? Math.round((b.passed / b.count) * 1000) / 10 : 0,
     }))
     .filter((c) => c.courseId !== "__none__" || c.studentCount > 0) // hide empty "Unassigned"

@@ -1411,20 +1411,22 @@ function ExecutiveDashboard({ store }) {
   const [course, setCourse] = useState("all");
   const [unit, setUnit] = useState("all");
 
-  // exec-summary loads once; monthly attendance re-loads when the Unit filter changes.
-  const load = useCallback(async (unitId, withExec) => {
+  // exec-summary loads once; monthly attendance re-scopes to the Course/Unit filters.
+  const load = useCallback(async (scope, withExec) => {
     setLoading(true);
     try {
       const [e, m] = await Promise.all([
         withExec ? api.execSummary() : Promise.resolve(null),
-        api.attendanceMonthly(unitId && unitId !== "all" ? { unitId } : {}),
+        api.attendanceMonthly(scope || {}),
       ]);
       if (withExec) setExec(e);
       setMonthly(m); setRefreshed(new Date());
     } catch (_) { /* toast handled elsewhere */ } finally { setLoading(false); }
   }, []);
-  useEffect(() => { load("all", true); }, [load]);
-  const onUnit = (u) => { setUnit(u); load(u, false); };
+  useEffect(() => { load({}, true); }, [load]);
+  const scopeOf = (c, u) => ({ ...(c !== "all" ? { courseId: c } : {}), ...(u !== "all" ? { unitId: u } : {}) });
+  const onCourse = (c) => { setCourse(c); load(scopeOf(c, unit), false); };
+  const onUnit = (u) => { setUnit(u); load(scopeOf(course, u), false); };
 
   const months = monthly?.months || [];
   const years = [...new Set(months.map(m => m.month.slice(0, 4)))].sort();
@@ -1434,8 +1436,8 @@ function ExecutiveDashboard({ store }) {
   const win = months.filter(inYear);
   const earned = win.reduce((a, m) => a + m.P * 2 + m.L + m.E, 0);
   const possible = win.reduce((a, m) => a + (m.P + m.L + m.E + m.A) * 2, 0);
-  const attPct = possible ? Math.round(earned / possible * 1000) / 10 : (monthly?.totals?.pct ?? null);
-  const totalMarks = months.reduce((a, m) => a + m.P + m.L + m.E + m.A, 0);
+  const attPct = possible ? Math.round(earned / possible * 1000) / 10 : null;
+  const totalMarks = win.reduce((a, m) => a + m.P + m.L + m.E + m.A, 0);
 
   const allCourses = exec?.courses || [];
   const courses = allCourses.filter(c => course === "all" || c.courseId === course);
@@ -1443,16 +1445,17 @@ function ExecutiveDashboard({ store }) {
   const shownStudents = course === "all" ? (exec?.totals?.students ?? store.students.length) : courses.reduce((a, c) => a + c.studentCount, 0);
   const shownPassed = course === "all" ? (exec?.totals?.studentsPassed ?? 0) : courses.reduce((a, c) => a + c.studentsPassed, 0);
   const shownPassRate = shownStudents ? Math.round(shownPassed / shownStudents * 1000) / 10 : 0;
-  const totalCourses = exec?.totals?.courses ?? store.courses.length;
-  const assessmentsCount = exec?.totals?.assessments ?? store.assessments.length;
+  const totalCourses = course === "all" ? (exec?.totals?.courses ?? store.courses.length) : 1;
+  const assessmentsCount = course === "all" ? (exec?.totals?.assessments ?? store.assessments.length) : courses.reduce((a, c) => a + (c.assessments || 0), 0);
+  const totalSessions = monthly?.sessions ?? store.sessions.length;
 
   return (
     <>
       <AdminHeader title="Executive Dashboard" subtitle="College-wide attendance & results at a glance" Icon={BarChart3}
-        action={<div className="flex items-center gap-2 text-[11px] text-slate-400">{refreshed && <span className="hidden sm:inline">Last refreshed {refreshed.toLocaleString("en-GB")}</span>}<button onClick={() => load(unit, true)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button></div>} />
+        action={<div className="flex items-center gap-2 text-[11px] text-slate-400">{refreshed && <span className="hidden sm:inline">Last refreshed {refreshed.toLocaleString("en-GB")}</span>}<button onClick={() => load(scopeOf(course, unit), true)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button></div>} />
       <div className="mb-4 flex flex-wrap gap-2">
         <FilterSelect label="Academic Year" value={year} onChange={setYear} options={[{ v: "all", l: "All years" }, ...years.map(y => ({ v: y, l: y }))]} />
-        <FilterSelect label="Course" value={course} onChange={setCourse} options={[{ v: "all", l: "All courses" }, ...allCourses.map(c => ({ v: c.courseId, l: c.code }))]} />
+        <FilterSelect label="Course" value={course} onChange={onCourse} options={[{ v: "all", l: "All courses" }, ...allCourses.map(c => ({ v: c.courseId, l: c.code }))]} />
         <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...store.units.map(m => ({ v: m.id, l: m.code }))]} />
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -1462,7 +1465,7 @@ function ExecutiveDashboard({ store }) {
         <ExecKpi label="Assessments" value={assessmentsCount} />
         <ExecKpi label="Student Pass Rate" value={`${Math.round(shownPassRate)}%`} tone={pctColour(shownPassRate)} />
         <ExecKpi label="Students Passed" value={shownPassed} tone="#0d7a5f" />
-        <ExecKpi label="Total Sessions" value={store.sessions.length} />
+        <ExecKpi label="Total Sessions" value={totalSessions} />
         <ExecKpi label="Total Attendance" value={kNum(totalMarks)} sub="marks recorded" />
       </div>
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
