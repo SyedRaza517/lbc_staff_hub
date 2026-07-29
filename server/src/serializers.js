@@ -43,15 +43,15 @@ const sAdj = (a) => ({ id: a.id, staffId: a.staffId, days: a.days, note: a.note,
 
 /* ---------- HND attendance registers ---------- */
 const sSemester = (s) => ({ id: s.id, name: s.name, start: s.start, end: s.end });
-const sProgramme = (p) => ({
+const sCourse = (p) => ({
   id: p.id, name: p.name, colour: p.colour,
   // Present only when the query asked Prisma to count relations.
-  ...(p._count ? { moduleCount: p._count.modules, cohortCount: p._count.cohorts } : {}),
+  ...(p._count ? { unitCount: p._count.units, cohortCount: p._count.cohorts } : {}),
 });
-const sCohort = (c) => ({ id: c.id, name: c.name, programmeId: c.programmeId, startDate: c.startDate ?? null, createdAt: c.createdAt });
+const sCohort = (c) => ({ id: c.id, name: c.name, courseId: c.courseId, startDate: c.startDate ?? null, createdAt: c.createdAt });
 const sTerm = (t) => ({ id: t.id, cohortId: t.cohortId, year: t.year, index: t.index, name: t.name, start: t.start, end: t.end });
-const sModule = (m) => ({
-  id: m.id, code: m.code, name: m.name, tutor: m.tutor, programmeId: m.programmeId ?? null,
+const sUnit = (m) => ({
+  id: m.id, code: m.code, name: m.name, tutor: m.tutor, courseId: m.courseId ?? null,
   cohortId: m.cohortId ?? null, termId: m.termId ?? null,
   // Present only when the query asked Prisma to count relations.
   ...(m._count ? { sessionCount: m._count.sessions, studentCount: m._count.enrolments } : {}),
@@ -60,10 +60,10 @@ const sStudent = (s) => ({
   id: s.id, firstName: s.firstName, lastName: s.lastName, name: `${s.firstName} ${s.lastName}`,
   studentRef: s.studentRef, email: s.email, initials: s.initials, colour: s.colour, active: s.active,
   cohortId: s.cohortId ?? null,
-  ...(s.enrolments ? { moduleIds: s.enrolments.map((e) => e.moduleId) } : {}),
+  ...(s.enrolments ? { unitIds: s.enrolments.map((e) => e.unitId) } : {}),
 });
 const sSession = (x) => ({
-  id: x.id, moduleId: x.moduleId, date: x.date, start: x.startTime, end: x.endTime,
+  id: x.id, unitId: x.unitId, date: x.date, start: x.startTime, end: x.endTime,
   description: x.description, audience: x.audience, kind: x.kind ?? "",
   ...(x._count ? { markedCount: x._count.marks } : {}),
 });
@@ -77,10 +77,10 @@ const sInteraction = (i) => ({
 });
 
 const sAssessment = (a) => ({
-  id: a.id, moduleId: a.moduleId, title: a.title, type: a.type, maxMarks: a.maxMarks,
+  id: a.id, unitId: a.unitId, title: a.title, type: a.type, maxMarks: a.maxMarks,
   weight: a.weight, dueDate: a.dueDate, createdAt: a.createdAt,
   ...(a._count ? { gradedCount: a._count.grades } : {}),
-  ...(a.module ? { moduleCode: a.module.code, moduleName: a.module.name } : {}),
+  ...(a.unit ? { unitCode: a.unit.code, unitName: a.unit.name } : {}),
 });
 const sGrade = (g) => ({
   id: g.id, assessmentId: g.assessmentId, studentId: g.studentId, marks: g.marks,
@@ -91,7 +91,7 @@ const sGrade = (g) => ({
 const sTimesheet = (t) => ({
   id: t.id, staffId: t.staffId, date: t.date, start: t.startTime, end: t.endTime,
   minutes: t.minutes, hours: Math.round((t.minutes / 60) * 100) / 100,
-  mode: t.mode, title: t.title, moduleId: t.moduleId ?? null, note: t.note,
+  mode: t.mode, title: t.title, unitId: t.unitId ?? null, note: t.note,
   status: t.status, submittedAt: t.submittedAt, createdAt: t.createdAt,
   reviewNote: t.reviewNote ?? null, reviewedBy: t.reviewedBy ?? null, reviewedAt: t.reviewedAt ?? null,
   ...(t.staff ? { staffName: t.staff.name, staffDept: t.staff.dept, staffInitials: t.staff.initials, staffColour: t.staff.colour } : {}),
@@ -108,4 +108,4 @@ const sStudentQuery = (q) => ({
   ...(q.student ? { studentName: q.student.name || `${q.student.firstName} ${q.student.lastName}`, studentRef: q.student.studentRef, studentEmail: q.student.email, studentInitials: q.student.initials, studentColour: q.student.colour } : {}),
 });
 
-module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sProgramme, sCohort, sTerm, sModule, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet, sStudentQuery };
+module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sCourse, sCohort, sTerm, sUnit, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet, sStudentQuery };

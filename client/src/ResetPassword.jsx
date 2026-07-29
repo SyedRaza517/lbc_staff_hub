@@ -45,7 +45,7 @@ function Labelled({ label, Icon, children }) {
   );
 }
 
-// Declared at module scope, NOT inside the page component.
+// Declared at unit scope, NOT inside the page component.
 //
 // A component defined inside another component's body is a new component *type* on
 // every render, so React unmounts and remounts its entire subtree each time state

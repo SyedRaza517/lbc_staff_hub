@@ -1,9 +1,9 @@
-// HND attendance registers — modules, students, enrolments, sessions, marks.
+// HND attendance registers — units, students, enrolments, sessions, marks.
 // Reads require a signed-in user; every mutation is admin-only, matching the
 // rest of the admin console.
 const router = require("express").Router();
 const prisma = require("../db");
-const { sSemester, sProgramme, sCohort, sTerm, sModule, sStudent, sSession, sMark } = require("../serializers");
+const { sSemester, sCourse, sCohort, sTerm, sUnit, sStudent, sSession, sMark } = require("../serializers");
 const { requireAuth, requireAdmin, requireAnyPage } = require("../auth");
 const { isStatus, summarise, summariseCounts } = require("../attendance");
 
@@ -80,19 +80,19 @@ router.delete("/semesters/:id", requireAuth, requireAdmin, async (req, res) => {
   catch (_e) { res.status(404).json({ error: "Semester not found" }); }
 });
 
-/* ============================== programmes ============================== */
-// A programme (e.g. "HND Business") groups the modules taught under it. Deleting
-// one leaves its modules intact but unassigned (schema-level onDelete: SetNull),
-// so no register is ever lost by reorganising the programme structure.
+/* ============================== courses ============================== */
+// A course (e.g. "HND Business") groups the units taught under it. Deleting
+// one leaves its units intact but unassigned (schema-level onDelete: SetNull),
+// so no register is ever lost by reorganising the course structure.
 
-// Resolve a programmeId from the body into a value Prisma can store. Returns
+// Resolve a courseId from the body into a value Prisma can store. Returns
 // { value } on success (null clears the link) or { error } if the id is unknown.
-async function resolveProgramme(raw) {
+async function resolveCourse(raw) {
   if (raw === undefined) return { skip: true };
   const id = str(raw);
   if (!id) return { value: null };
-  const exists = await prisma.programme.findUnique({ where: { id } });
-  if (!exists) return { error: "Unknown programme" };
+  const exists = await prisma.course.findUnique({ where: { id } });
+  if (!exists) return { error: "Unknown course" };
   return { value: id };
 }
 
@@ -111,70 +111,70 @@ async function resolveCohortTerm(rawCohort, rawTerm) {
   return { cohortId, termId: null };
 }
 
-router.get("/programmes", requireAuth, async (_req, res) => {
-  const rows = await prisma.programme.findMany({
+router.get("/courses", requireAuth, async (_req, res) => {
+  const rows = await prisma.course.findMany({
     orderBy: { name: "asc" },
-    include: { _count: { select: { modules: true, cohorts: true } } },
+    include: { _count: { select: { units: true, cohorts: true } } },
   });
-  res.json(rows.map(sProgramme));
+  res.json(rows.map(sCourse));
 });
 
-router.post("/programmes", requireAuth, requireAdmin, async (req, res) => {
+router.post("/courses", requireAuth, requireAdmin, async (req, res) => {
   const name = str(req.body?.name);
-  if (!name) return res.status(400).json({ error: "Programme name required" });
-  const clash = await prisma.programme.findFirst({ where: { name: { equals: name } } });
-  if (clash) return res.status(409).json({ error: `A programme called "${name}" already exists` });
+  if (!name) return res.status(400).json({ error: "Course name required" });
+  const clash = await prisma.course.findFirst({ where: { name: { equals: name } } });
+  if (clash) return res.status(409).json({ error: `A course called "${name}" already exists` });
   const colour = str(req.body?.colour) || colourFor(name);
-  const p = await prisma.programme.create({ data: { name, colour }, include: { _count: { select: { modules: true, cohorts: true } } } });
-  res.status(201).json(sProgramme(p));
+  const p = await prisma.course.create({ data: { name, colour }, include: { _count: { select: { units: true, cohorts: true } } } });
+  res.status(201).json(sCourse(p));
 });
 
-router.put("/programmes/:id", requireAuth, requireAdmin, async (req, res) => {
-  const existing = await prisma.programme.findUnique({ where: { id: req.params.id } });
-  if (!existing) return res.status(404).json({ error: "Programme not found" });
+router.put("/courses/:id", requireAuth, requireAdmin, async (req, res) => {
+  const existing = await prisma.course.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: "Course not found" });
   const data = {};
   if (req.body?.name !== undefined) {
     const name = str(req.body.name);
-    if (!name) return res.status(400).json({ error: "Programme name required" });
-    const clash = await prisma.programme.findFirst({ where: { name: { equals: name }, id: { not: existing.id } } });
-    if (clash) return res.status(409).json({ error: `A programme called "${name}" already exists` });
+    if (!name) return res.status(400).json({ error: "Course name required" });
+    const clash = await prisma.course.findFirst({ where: { name: { equals: name }, id: { not: existing.id } } });
+    if (clash) return res.status(409).json({ error: `A course called "${name}" already exists` });
     data.name = name;
   }
   if (req.body?.colour !== undefined) data.colour = str(req.body.colour) || existing.colour;
-  const p = await prisma.programme.update({ where: { id: existing.id }, data, include: { _count: { select: { modules: true, cohorts: true } } } });
-  res.json(sProgramme(p));
+  const p = await prisma.course.update({ where: { id: existing.id }, data, include: { _count: { select: { units: true, cohorts: true } } } });
+  res.json(sCourse(p));
 });
 
-// Modules are un-assigned (not deleted) when their programme goes.
-router.delete("/programmes/:id", requireAuth, requireAdmin, async (req, res) => {
-  try { await prisma.programme.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
-  catch (_e) { res.status(404).json({ error: "Programme not found" }); }
+// Units are un-assigned (not deleted) when their course goes.
+router.delete("/courses/:id", requireAuth, requireAdmin, async (req, res) => {
+  try { await prisma.course.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
+  catch (_e) { res.status(404).json({ error: "Course not found" }); }
 });
 
 /* ============================== cohorts ============================== */
-// An intake of students on a programme, e.g. "SEP 2025". One programme runs many
-// cohorts over time; each name is unique within its programme.
+// An intake of students on a course, e.g. "SEP 2025". One course runs many
+// cohorts over time; each name is unique within its course.
 
 router.get("/cohorts", requireAuth, async (req, res) => {
-  const programmeId = str(req.query?.programmeId);
-  const where = programmeId ? { programmeId } : {};
-  const rows = await prisma.cohort.findMany({ where, orderBy: [{ programmeId: "asc" }, { createdAt: "asc" }] });
+  const courseId = str(req.query?.courseId);
+  const where = courseId ? { courseId } : {};
+  const rows = await prisma.cohort.findMany({ where, orderBy: [{ courseId: "asc" }, { createdAt: "asc" }] });
   res.json(rows.map(sCohort));
 });
 
 router.post("/cohorts", requireAuth, requireAdmin, async (req, res) => {
   const name = str(req.body?.name);
-  const programmeId = str(req.body?.programmeId);
+  const courseId = str(req.body?.courseId);
   const startDate = str(req.body?.startDate) || null;
   if (!name) return res.status(400).json({ error: "Cohort name required" });
-  if (!programmeId) return res.status(400).json({ error: "Programme is required" });
+  if (!courseId) return res.status(400).json({ error: "Course is required" });
   if (startDate && !isDate(startDate)) return res.status(400).json({ error: "Start date must be a valid date (YYYY-MM-DD)" });
-  const prog = await prisma.programme.findUnique({ where: { id: programmeId } });
-  if (!prog) return res.status(400).json({ error: "Unknown programme" });
-  const clash = await prisma.cohort.findFirst({ where: { programmeId, name } });
-  if (clash) return res.status(409).json({ error: `"${name}" already exists on this programme` });
+  const prog = await prisma.course.findUnique({ where: { id: courseId } });
+  if (!prog) return res.status(400).json({ error: "Unknown course" });
+  const clash = await prisma.cohort.findFirst({ where: { courseId, name } });
+  if (clash) return res.status(409).json({ error: `"${name}" already exists on this course` });
   try {
-    const c = await prisma.cohort.create({ data: { name, programmeId, startDate } });
+    const c = await prisma.cohort.create({ data: { name, courseId, startDate } });
     res.status(201).json(sCohort(c));
   } catch (_e) { res.status(400).json({ error: "Could not create the cohort" }); }
 });
@@ -186,8 +186,8 @@ router.put("/cohorts/:id", requireAuth, requireAdmin, async (req, res) => {
   if (req.body?.name !== undefined) {
     const name = str(req.body.name);
     if (!name) return res.status(400).json({ error: "Cohort name required" });
-    const clash = await prisma.cohort.findFirst({ where: { programmeId: existing.programmeId, name, id: { not: existing.id } } });
-    if (clash) return res.status(409).json({ error: `"${name}" already exists on this programme` });
+    const clash = await prisma.cohort.findFirst({ where: { courseId: existing.courseId, name, id: { not: existing.id } } });
+    if (clash) return res.status(409).json({ error: `"${name}" already exists on this course` });
     data.name = name;
   }
   if (req.body?.startDate !== undefined) {
@@ -261,82 +261,82 @@ router.delete("/terms/:id", requireAuth, requireAdmin, async (req, res) => {
   catch (_e) { res.status(404).json({ error: "Term not found" }); }
 });
 
-/* ============================== modules ============================== */
+/* ============================== units ============================== */
 
-router.get("/modules", requireAuth, async (_req, res) => {
-  // Two grouped aggregations instead of a per-module _count (which issues a
+router.get("/units", requireAuth, async (_req, res) => {
+  // Two grouped aggregations instead of a per-unit _count (which issues a
   // correlated subquery per row and collapsed at scale). Same response shape.
   const [rows, enrolAgg, sessAgg] = await Promise.all([
-    prisma.hndModule.findMany({ orderBy: { code: "asc" } }),
-    prisma.enrolment.groupBy({ by: ["moduleId"], _count: { _all: true } }),
-    prisma.hndSession.groupBy({ by: ["moduleId"], _count: { _all: true }, _max: { date: true } }),
+    prisma.unit.findMany({ orderBy: { code: "asc" } }),
+    prisma.enrolment.groupBy({ by: ["unitId"], _count: { _all: true } }),
+    prisma.hndSession.groupBy({ by: ["unitId"], _count: { _all: true }, _max: { date: true } }),
   ]);
-  const eMap = new Map(enrolAgg.map((e) => [e.moduleId, e._count._all]));
-  const sMap = new Map(sessAgg.map((s) => [s.moduleId, s._count._all]));
-  const endMap = new Map(sessAgg.map((s) => [s.moduleId, s._max.date || null]));
-  res.json(rows.map((m) => ({ ...sModule(m), studentCount: eMap.get(m.id) || 0, sessionCount: sMap.get(m.id) || 0, endDate: endMap.get(m.id) || null })));
+  const eMap = new Map(enrolAgg.map((e) => [e.unitId, e._count._all]));
+  const sMap = new Map(sessAgg.map((s) => [s.unitId, s._count._all]));
+  const endMap = new Map(sessAgg.map((s) => [s.unitId, s._max.date || null]));
+  res.json(rows.map((m) => ({ ...sUnit(m), studentCount: eMap.get(m.id) || 0, sessionCount: sMap.get(m.id) || 0, endDate: endMap.get(m.id) || null })));
 });
 
-router.post("/modules", requireAuth, requireAdmin, async (req, res) => {
+router.post("/units", requireAuth, requireAdmin, async (req, res) => {
   const code = str(req.body?.code).toUpperCase();
   const name = str(req.body?.name);
-  if (!code) return res.status(400).json({ error: "Module code required" });
-  if (!name) return res.status(400).json({ error: "Module name required" });
-  const clash = await prisma.hndModule.findUnique({ where: { code } });
-  if (clash) return res.status(409).json({ error: `Module code "${code}" already exists` });
-  const prog = await resolveProgramme(req.body?.programmeId);
+  if (!code) return res.status(400).json({ error: "Unit code required" });
+  if (!name) return res.status(400).json({ error: "Unit name required" });
+  const clash = await prisma.unit.findUnique({ where: { code } });
+  if (clash) return res.status(409).json({ error: `Unit code "${code}" already exists` });
+  const prog = await resolveCourse(req.body?.courseId);
   if (prog.error) return res.status(400).json({ error: prog.error });
   const ct = await resolveCohortTerm(req.body?.cohortId, req.body?.termId);
   if (ct.error) return res.status(400).json({ error: ct.error });
-  const m = await prisma.hndModule.create({
-    data: { code, name, tutor: str(req.body?.tutor), programmeId: prog.skip ? null : prog.value, cohortId: ct.cohortId, termId: ct.termId },
+  const m = await prisma.unit.create({
+    data: { code, name, tutor: str(req.body?.tutor), courseId: prog.skip ? null : prog.value, cohortId: ct.cohortId, termId: ct.termId },
   });
-  res.status(201).json(sModule(m));
+  res.status(201).json(sUnit(m));
 });
 
-router.put("/modules/:id", requireAuth, requireAdmin, async (req, res) => {
-  const existing = await prisma.hndModule.findUnique({ where: { id: req.params.id } });
-  if (!existing) return res.status(404).json({ error: "Module not found" });
+router.put("/units/:id", requireAuth, requireAdmin, async (req, res) => {
+  const existing = await prisma.unit.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: "Unit not found" });
   const data = {};
   if (req.body?.code !== undefined) {
     const code = str(req.body.code).toUpperCase();
-    if (!code) return res.status(400).json({ error: "Module code required" });
-    const clash = await prisma.hndModule.findUnique({ where: { code } });
-    if (clash && clash.id !== existing.id) return res.status(409).json({ error: `Module code "${code}" already exists` });
+    if (!code) return res.status(400).json({ error: "Unit code required" });
+    const clash = await prisma.unit.findUnique({ where: { code } });
+    if (clash && clash.id !== existing.id) return res.status(409).json({ error: `Unit code "${code}" already exists` });
     data.code = code;
   }
   if (req.body?.name !== undefined) {
     const name = str(req.body.name);
-    if (!name) return res.status(400).json({ error: "Module name required" });
+    if (!name) return res.status(400).json({ error: "Unit name required" });
     data.name = name;
   }
   if (req.body?.tutor !== undefined) data.tutor = str(req.body.tutor);
-  const prog = await resolveProgramme(req.body?.programmeId);
+  const prog = await resolveCourse(req.body?.courseId);
   if (prog.error) return res.status(400).json({ error: prog.error });
-  if (!prog.skip) data.programmeId = prog.value;
+  if (!prog.skip) data.courseId = prog.value;
   // cohort/term are set together (the UI picks a cohort then its term).
   if (req.body?.cohortId !== undefined || req.body?.termId !== undefined) {
     const ct = await resolveCohortTerm(req.body?.cohortId, req.body?.termId);
     if (ct.error) return res.status(400).json({ error: ct.error });
     data.cohortId = ct.cohortId; data.termId = ct.termId;
   }
-  const m = await prisma.hndModule.update({ where: { id: existing.id }, data });
-  res.json(sModule(m));
+  const m = await prisma.unit.update({ where: { id: existing.id }, data });
+  res.json(sUnit(m));
 });
 
-// Deleting a module cascades to its sessions, marks and enrolments (schema-level).
-router.delete("/modules/:id", requireAuth, requireAdmin, async (req, res) => {
-  try { await prisma.hndModule.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
-  catch (_e) { res.status(404).json({ error: "Module not found" }); }
+// Deleting a unit cascades to its sessions, marks and enrolments (schema-level).
+router.delete("/units/:id", requireAuth, requireAdmin, async (req, res) => {
+  try { await prisma.unit.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
+  catch (_e) { res.status(404).json({ error: "Unit not found" }); }
 });
 
-// Set which students are enrolled on a module — the module-side mirror of
+// Set which students are enrolled on a unit — the unit-side mirror of
 // PUT /students/:id/enrolments. Replaces the whole set; un-enrolling a student
 // deliberately KEEPS any marks they already have, so past registers still read
 // as they were taken.
-router.put("/modules/:id/enrolments", requireAuth, requireAdmin, async (req, res) => {
-  const mod = await prisma.hndModule.findUnique({ where: { id: req.params.id } });
-  if (!mod) return res.status(404).json({ error: "Module not found" });
+router.put("/units/:id/enrolments", requireAuth, requireAdmin, async (req, res) => {
+  const mod = await prisma.unit.findUnique({ where: { id: req.params.id } });
+  if (!mod) return res.status(404).json({ error: "Unit not found" });
   if (!Array.isArray(req.body?.studentIds)) return res.status(400).json({ error: "studentIds must be an array of student ids" });
   if (req.body.studentIds.some((x) => typeof x !== "string")) return res.status(400).json({ error: "studentIds must contain only student ids" });
   const studentIds = [...new Set(req.body.studentIds)];
@@ -345,15 +345,15 @@ router.put("/modules/:id/enrolments", requireAuth, requireAdmin, async (req, res
     if (found !== studentIds.length) return res.status(400).json({ error: "One or more students do not exist" });
   }
   await prisma.$transaction([
-    prisma.enrolment.deleteMany({ where: { moduleId: mod.id, studentId: { notIn: studentIds.length ? studentIds : ["__none__"] } } }),
+    prisma.enrolment.deleteMany({ where: { unitId: mod.id, studentId: { notIn: studentIds.length ? studentIds : ["__none__"] } } }),
     ...studentIds.map((studentId) => prisma.enrolment.upsert({
-      where: { studentId_moduleId: { studentId, moduleId: mod.id } },
-      create: { studentId, moduleId: mod.id },
+      where: { studentId_unitId: { studentId, unitId: mod.id } },
+      create: { studentId, unitId: mod.id },
       update: {},
     })),
   ]);
-  const m = await prisma.hndModule.findUnique({ where: { id: mod.id }, include: { _count: { select: { sessions: true, enrolments: true } } } });
-  res.json(sModule(m));
+  const m = await prisma.unit.findUnique({ where: { id: mod.id }, include: { _count: { select: { sessions: true, enrolments: true } } } });
+  res.json(sUnit(m));
 });
 
 /* ============================== students ============================== */
@@ -361,7 +361,7 @@ router.put("/modules/:id/enrolments", requireAuth, requireAdmin, async (req, res
 router.get("/students", requireAuth, async (_req, res) => {
   const rows = await prisma.student.findMany({
     orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
-    include: { enrolments: { select: { moduleId: true } } },
+    include: { enrolments: { select: { unitId: true } } },
   });
   res.json(rows.map(sStudent));
 });
@@ -382,11 +382,11 @@ router.post("/students", requireAuth, requireAdmin, async (req, res) => {
   const emailClash = await prisma.student.findUnique({ where: { email } });
   if (emailClash) return res.status(409).json({ error: `Email ${email} is already in use` });
 
-  // Validate enrolments up front so a bad moduleId can't blow up the nested create.
-  const moduleIds = Array.isArray(req.body?.moduleIds) ? [...new Set(req.body.moduleIds.filter((x) => typeof x === "string"))] : [];
-  if (moduleIds.length) {
-    const found = await prisma.hndModule.count({ where: { id: { in: moduleIds } } });
-    if (found !== moduleIds.length) return res.status(400).json({ error: "One or more modules do not exist" });
+  // Validate enrolments up front so a bad unitId can't blow up the nested create.
+  const unitIds = Array.isArray(req.body?.unitIds) ? [...new Set(req.body.unitIds.filter((x) => typeof x === "string"))] : [];
+  if (unitIds.length) {
+    const found = await prisma.unit.count({ where: { id: { in: unitIds } } });
+    if (found !== unitIds.length) return res.status(400).json({ error: "One or more units do not exist" });
   }
   const cohortId = str(req.body?.cohortId) || null;
   if (cohortId && !(await prisma.cohort.findUnique({ where: { id: cohortId } }))) return res.status(400).json({ error: "Unknown cohort" });
@@ -396,9 +396,9 @@ router.post("/students", requireAuth, requireAdmin, async (req, res) => {
       firstName, lastName, studentRef, email, cohortId,
       initials: initialsOf(firstName, lastName),
       colour: colourFor(studentRef + lastName),
-      enrolments: { create: moduleIds.map((moduleId) => ({ moduleId })) },
+      enrolments: { create: unitIds.map((unitId) => ({ unitId })) },
     },
-    include: { enrolments: { select: { moduleId: true } } },
+    include: { enrolments: { select: { unitId: true } } },
   });
   res.status(201).json(sStudent(s));
 });
@@ -444,7 +444,7 @@ router.put("/students/:id", requireAuth, requireAdmin, async (req, res) => {
 
   const s = await prisma.student.update({
     where: { id: existing.id }, data,
-    include: { enrolments: { select: { moduleId: true } } },
+    include: { enrolments: { select: { unitId: true } } },
   });
   res.json(sStudent(s));
 });
@@ -454,7 +454,7 @@ router.delete("/students/:id", requireAuth, requireAdmin, async (req, res) => {
   catch (_e) { res.status(404).json({ error: "Student not found" }); }
 });
 
-// Replace a student's module enrolments wholesale.
+// Replace a student's unit enrolments wholesale.
 // Un-enrolling drops the student from future registers but deliberately KEEPS
 // their existing marks, so past registers still read as they were taken.
 router.put("/students/:id/enrolments", requireAuth, requireAdmin, async (req, res) => {
@@ -463,54 +463,54 @@ router.put("/students/:id/enrolments", requireAuth, requireAdmin, async (req, re
   // This is the one call that can wipe a student's whole enrolment set, so malformed
   // input must NOT be read as "clear everything". Sending a string, or omitting the
   // field, previously dropped the student off every register with a cheerful 200.
-  if (!Array.isArray(req.body?.moduleIds)) return res.status(400).json({ error: "moduleIds must be an array of module ids" });
-  if (req.body.moduleIds.some((x) => typeof x !== "string")) return res.status(400).json({ error: "moduleIds must contain only module ids" });
-  const moduleIds = [...new Set(req.body.moduleIds)];
-  if (moduleIds.length) {
-    const found = await prisma.hndModule.count({ where: { id: { in: moduleIds } } });
-    if (found !== moduleIds.length) return res.status(400).json({ error: "One or more modules do not exist" });
+  if (!Array.isArray(req.body?.unitIds)) return res.status(400).json({ error: "unitIds must be an array of unit ids" });
+  if (req.body.unitIds.some((x) => typeof x !== "string")) return res.status(400).json({ error: "unitIds must contain only unit ids" });
+  const unitIds = [...new Set(req.body.unitIds)];
+  if (unitIds.length) {
+    const found = await prisma.unit.count({ where: { id: { in: unitIds } } });
+    if (found !== unitIds.length) return res.status(400).json({ error: "One or more units do not exist" });
   }
   await prisma.$transaction([
-    prisma.enrolment.deleteMany({ where: { studentId: student.id, moduleId: { notIn: moduleIds.length ? moduleIds : ["__none__"] } } }),
-    ...moduleIds.map((moduleId) => prisma.enrolment.upsert({
-      where: { studentId_moduleId: { studentId: student.id, moduleId } },
-      create: { studentId: student.id, moduleId },
+    prisma.enrolment.deleteMany({ where: { studentId: student.id, unitId: { notIn: unitIds.length ? unitIds : ["__none__"] } } }),
+    ...unitIds.map((unitId) => prisma.enrolment.upsert({
+      where: { studentId_unitId: { studentId: student.id, unitId } },
+      create: { studentId: student.id, unitId },
       update: {},
     })),
   ]);
-  const s = await prisma.student.findUnique({ where: { id: student.id }, include: { enrolments: { select: { moduleId: true } } } });
+  const s = await prisma.student.findUnique({ where: { id: student.id }, include: { enrolments: { select: { unitId: true } } } });
   res.json(sStudent(s));
 });
 
 /* ============================== sessions ============================== */
 
 router.get("/sessions", requireAuth, async (req, res) => {
-  const moduleId = str(req.query?.moduleId);
+  const unitId = str(req.query?.unitId);
   const [rows, agg] = await Promise.all([
     // Oldest first: the start-date register is on top, and within a day the earlier
     // block (e.g. 09:00 before 13:00) comes first.
-    prisma.hndSession.findMany({ where: moduleId ? { moduleId } : undefined, orderBy: [{ date: "asc" }, { startTime: "asc" }] }),
-    prisma.attendanceMark.groupBy({ by: ["sessionId"], _count: { _all: true }, where: moduleId ? { session: { moduleId } } : undefined }),
+    prisma.hndSession.findMany({ where: unitId ? { unitId } : undefined, orderBy: [{ date: "asc" }, { startTime: "asc" }] }),
+    prisma.attendanceMark.groupBy({ by: ["sessionId"], _count: { _all: true }, where: unitId ? { session: { unitId } } : undefined }),
   ]);
   const cMap = new Map(agg.map((a) => [a.sessionId, a._count._all]));
   res.json(rows.map((s) => ({ ...sSession(s), markedCount: cMap.get(s.id) || 0 })));
 });
 
 router.post("/sessions", requireAuth, requireAdmin, async (req, res) => {
-  const moduleId = str(req.body?.moduleId);
+  const unitId = str(req.body?.unitId);
   const date = str(req.body?.date);
   const start = str(req.body?.start);
   const end = str(req.body?.end);
-  if (!moduleId) return res.status(400).json({ error: "Module required" });
-  const mod = await prisma.hndModule.findUnique({ where: { id: moduleId } });
-  if (!mod) return res.status(400).json({ error: "Unknown module" });
+  if (!unitId) return res.status(400).json({ error: "Unit required" });
+  const mod = await prisma.unit.findUnique({ where: { id: unitId } });
+  if (!mod) return res.status(400).json({ error: "Unknown unit" });
   if (!isDate(date)) return res.status(400).json({ error: "Valid date required (YYYY-MM-DD)" });
   if (!isTime(start) || !isTime(end)) return res.status(400).json({ error: "Valid start and end times required (HH:MM)" });
   if (end <= start) return res.status(400).json({ error: "End time must be after the start time" });
 
   const s = await prisma.hndSession.create({
     data: {
-      moduleId, date, startTime: start, endTime: end,
+      unitId, date, startTime: start, endTime: end,
       description: str(req.body?.description) || mod.code,
       audience: str(req.body?.audience) || "All students",
       kind: str(req.body?.kind) || "",
@@ -550,15 +550,15 @@ router.delete("/sessions/:id", requireAuth, requireAdmin, async (req, res) => {
   catch (_e) { res.status(404).json({ error: "Session not found" }); }
 });
 
-// Generate one weekly session for a module across a date range — the same weekday
+// Generate one weekly session for a unit across a date range — the same weekday
 // as the start date, every 7 days up to and including the end date. Used when a
 // course is created with a term start/end so its whole register schedule appears
-// at once. Idempotent: dates that already have a session for this module are
+// at once. Idempotent: dates that already have a session for this unit are
 // skipped, so re-running never duplicates.
 const MAX_WEEKLY_SESSIONS = 60; // ~14 months of weeks — a safety cap, not a limit anyone hits
-router.post("/modules/:id/sessions/generate", requireAuth, requireAdmin, async (req, res) => {
-  const mod = await prisma.hndModule.findUnique({ where: { id: req.params.id } });
-  if (!mod) return res.status(404).json({ error: "Module not found" });
+router.post("/units/:id/sessions/generate", requireAuth, requireAdmin, async (req, res) => {
+  const mod = await prisma.unit.findUnique({ where: { id: req.params.id } });
+  if (!mod) return res.status(404).json({ error: "Unit not found" });
 
   const start = str(req.body?.start);
   const end = str(req.body?.end);
@@ -593,14 +593,14 @@ router.post("/modules/:id/sessions/generate", requireAuth, requireAdmin, async (
 
   // A register is unique per (date, block start-time), so we can add missing blocks
   // without duplicating ones already generated.
-  const existing = await prisma.hndSession.findMany({ where: { moduleId: mod.id, date: { in: dates } }, select: { date: true, startTime: true } });
+  const existing = await prisma.hndSession.findMany({ where: { unitId: mod.id, date: { in: dates } }, select: { date: true, startTime: true } });
   const have = new Set(existing.map((x) => `${x.date}|${x.startTime}`));
   // On a multi-register day the first block is Teaching, the second a Seminar.
   const KINDS = ["Teaching", "Seminar", "Teaching", "Seminar"];
   const toCreate = [];
   for (const date of dates) {
     blocks.forEach(([s, e], i) => {
-      if (!have.has(`${date}|${s}`)) toCreate.push({ moduleId: mod.id, date, startTime: s, endTime: e, description: mod.code, audience, kind: KINDS[i] || "" });
+      if (!have.has(`${date}|${s}`)) toCreate.push({ unitId: mod.id, date, startTime: s, endTime: e, description: mod.code, audience, kind: KINDS[i] || "" });
     });
   }
   if (toCreate.length) await prisma.hndSession.createMany({ data: toCreate });
@@ -614,12 +614,12 @@ router.post("/modules/:id/sessions/generate", requireAuth, requireAdmin, async (
 router.get("/sessions/:id/register", requireAuth, async (req, res) => {
   const session = await prisma.hndSession.findUnique({
     where: { id: req.params.id },
-    include: { module: true, marks: true },
+    include: { unit: true, marks: true },
   });
   if (!session) return res.status(404).json({ error: "Session not found" });
 
   const enrolments = await prisma.enrolment.findMany({
-    where: { moduleId: session.moduleId },
+    where: { unitId: session.unitId },
     include: { student: true },
   });
   const byStudent = new Map(session.marks.map((m) => [m.studentId, m]));
@@ -636,7 +636,7 @@ router.get("/sessions/:id/register", requireAuth, async (req, res) => {
 
   res.json({
     session: sSession(session),
-    module: sModule(session.module),
+    unit: sUnit(session.unit),
     rows: students.map((s) => {
       const mark = byStudent.get(s.id);
       return {
@@ -655,14 +655,14 @@ router.get("/sessions/:id/register", requireAuth, async (req, res) => {
 // body are written, so a half-finished register can be saved and resumed.
 // A row with status null/"" clears that student's mark.
 router.put("/sessions/:id/register", requireAuth, requireAdmin, async (req, res) => {
-  const session = await prisma.hndSession.findUnique({ where: { id: req.params.id }, include: { module: { include: { term: true } } } });
+  const session = await prisma.hndSession.findUnique({ where: { id: req.params.id }, include: { unit: { include: { term: true } } } });
   if (!session) return res.status(404).json({ error: "Session not found" });
 
   // Term gate: if the unit belongs to a term, only its ACTIVE window (today within
   // the term dates) accepts marks. A past or not-yet-started term is locked, so
   // attendance "pauses" when the term ends — unless an admin reopens it to fix a
   // mark (override:true). Units with no term are unaffected.
-  const term = session.module?.term;
+  const term = session.unit?.term;
   if (term && req.body?.override !== true) {
     const today = localDate();
     if (today < term.start || today > term.end) {
@@ -706,8 +706,8 @@ router.put("/sessions/:id/register", requireAuth, requireAdmin, async (req, res)
 
 /* ============================== percentages ============================== */
 
-// The attendance matrix: every student's percentage per module, their overall
-// percentage across all modules, and the cohort figures per module + overall.
+// The attendance matrix: every student's percentage per unit, their overall
+// percentage across all units, and the cohort figures per unit + overall.
 //
 // ?semesterId=<id>       -> only sessions dated inside that semester
 // ?semesterId=unassigned -> only sessions outside every semester
@@ -718,7 +718,7 @@ router.put("/sessions/:id/register", requireAuth, requireAdmin, async (req, res)
 // like the /attendance matrix. Powers the dashboards' "Attendance % by Year & Month".
 router.get("/attendance/monthly", requireAuth, async (req, res) => {
   const studentId = str(req.query?.studentId);
-  const moduleId = str(req.query?.moduleId);
+  const unitId = str(req.query?.unitId);
   const base = `
     SELECT left(se.date, 7) ym,
       count(*) FILTER (WHERE am.status='P')::int p,
@@ -729,7 +729,7 @@ router.get("/attendance/monthly", requireAuth, async (req, res) => {
   // Build WHERE from whichever filters are present, using parameterised values.
   const conds = [], params = [];
   if (studentId) { params.push(studentId); conds.push(`am."studentId" = $${params.length}`); }
-  if (moduleId) { params.push(moduleId); conds.push(`se."moduleId" = $${params.length}`); }
+  if (unitId) { params.push(unitId); conds.push(`se."unitId" = $${params.length}`); }
   const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
   const rows = await prisma.$queryRawUnsafe(`${base}${where} GROUP BY 1 ORDER BY 1`, ...params);
   let P = 0, L = 0, E = 0, A = 0;
@@ -769,31 +769,31 @@ router.get("/attendance", requireAuth, async (req, res) => {
     return "TRUE";
   };
 
-  const [modules, students, perSM, sessAgg, enrolAgg] = await Promise.all([
-    prisma.hndModule.findMany({ orderBy: { code: "asc" } }),
+  const [units, students, perSM, sessAgg, enrolAgg] = await Promise.all([
+    prisma.unit.findMany({ orderBy: { code: "asc" } }),
     prisma.student.findMany({
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
-      include: { enrolments: { select: { moduleId: true } } },
+      include: { enrolments: { select: { unitId: true } } },
     }),
-    // One aggregate row per (student, module): the four status counts, scoped by date.
+    // One aggregate row per (student, unit): the four status counts, scoped by date.
     prisma.$queryRawUnsafe(`
-      SELECT am."studentId" sid, se."moduleId" mid,
+      SELECT am."studentId" sid, se."unitId" mid,
         count(*) FILTER (WHERE am.status='P')::int p,
         count(*) FILTER (WHERE am.status='L')::int l,
         count(*) FILTER (WHERE am.status='E')::int e,
         count(*) FILTER (WHERE am.status='A')::int a
       FROM "AttendanceMark" am JOIN "HndSession" se ON se.id = am."sessionId"
       WHERE ${dateCond("se.date")}
-      GROUP BY am."studentId", se."moduleId"`),
-    // Session counts per module: all-time and scoped, in one pass.
+      GROUP BY am."studentId", se."unitId"`),
+    // Session counts per unit: all-time and scoped, in one pass.
     prisma.$queryRawUnsafe(`
-      SELECT "moduleId" mid, count(*)::int all_c,
+      SELECT "unitId" mid, count(*)::int all_c,
         count(*) FILTER (WHERE ${dateCond("date")})::int scoped_c
-      FROM "HndSession" GROUP BY "moduleId"`),
-    prisma.enrolment.groupBy({ by: ["moduleId"], _count: { _all: true } }),
+      FROM "HndSession" GROUP BY "unitId"`),
+    prisma.enrolment.groupBy({ by: ["unitId"], _count: { _all: true } }),
   ]);
 
-  // studentId -> Map(moduleId -> {P,L,E,A}); plus per-module and global totals.
+  // studentId -> Map(unitId -> {P,L,E,A}); plus per-unit and global totals.
   const index = new Map();
   const modTot = new Map();
   const gTot = { P: 0, L: 0, E: 0, A: 0 };
@@ -807,87 +807,87 @@ router.get("/attendance", requireAuth, async (req, res) => {
 
   const rows = students.map((s) => {
     const per = index.get(s.id) || new Map();
-    const enrolledIds = new Set(s.enrolments.map((e) => e.moduleId));
+    const enrolledIds = new Set(s.enrolments.map((e) => e.unitId));
     const relevant = new Set([...enrolledIds, ...per.keys()]);
-    const modulesOut = {};
+    const unitsOut = {};
     const acc = { P: 0, L: 0, E: 0, A: 0 };
     for (const modId of relevant) {
       const c = per.get(modId) || { p: 0, l: 0, e: 0, a: 0 };
-      modulesOut[modId] = { ...summariseCounts(c.p, c.l, c.e, c.a), enrolled: enrolledIds.has(modId) };
+      unitsOut[modId] = { ...summariseCounts(c.p, c.l, c.e, c.a), enrolled: enrolledIds.has(modId) };
       acc.P += c.p; acc.L += c.l; acc.E += c.e; acc.A += c.a;
     }
-    return { student: sStudent(s), modules: modulesOut, overall: summariseCounts(acc.P, acc.L, acc.E, acc.A) };
+    return { student: sStudent(s), units: unitsOut, overall: summariseCounts(acc.P, acc.L, acc.E, acc.A) };
   });
 
   const scopedSess = new Map(), allSess = new Map();
   for (const r of sessAgg) { scopedSess.set(r.mid, r.scoped_c); allSess.set(r.mid, r.all_c); }
-  const enrolCount = new Map(enrolAgg.map((e) => [e.moduleId, e._count._all]));
+  const enrolCount = new Map(enrolAgg.map((e) => [e.unitId, e._count._all]));
   const scopedSessionTotal = sessAgg.reduce((n, r) => n + r.scoped_c, 0);
 
-  const moduleTotals = {};
-  for (const mod of modules) {
+  const unitTotals = {};
+  for (const mod of units) {
     const mt = modTot.get(mod.id) || { P: 0, L: 0, E: 0, A: 0 };
-    moduleTotals[mod.id] = { ...summariseCounts(mt.P, mt.L, mt.E, mt.A), sessionCount: scopedSess.get(mod.id) || 0 };
+    unitTotals[mod.id] = { ...summariseCounts(mt.P, mt.L, mt.E, mt.A), sessionCount: scopedSess.get(mod.id) || 0 };
   }
 
   res.json({
-    modules: modules.map((m) => ({ ...sModule(m), studentCount: enrolCount.get(m.id) || 0, sessionCount: allSess.get(m.id) || 0 })),
+    units: units.map((m) => ({ ...sUnit(m), studentCount: enrolCount.get(m.id) || 0, sessionCount: allSess.get(m.id) || 0 })),
     rows,
-    moduleTotals,
+    unitTotals,
     overall: summariseCounts(gTot.P, gTot.L, gTot.E, gTot.A),
     scope: { semesterId: semesterId || "", sessionCount: scopedSessionTotal },
   });
 });
 
 // GET /api/hnd/students/:id/attendance-terms
-// A student's attendance split into CURRENT vs PREVIOUS modules by each module's own
-// end date. A module's end date is its last scheduled session (the "end date" set when
-// its registers were created). Once that date passes, the module has finished and drops
-// into "previous"; the overall % counts only the modules still running, so it rolls
-// over automatically as modules finish.
+// A student's attendance split into CURRENT vs PREVIOUS units by each unit's own
+// end date. A unit's end date is its last scheduled session (the "end date" set when
+// its registers were created). Once that date passes, the unit has finished and drops
+// into "previous"; the overall % counts only the units still running, so it rolls
+// over automatically as units finish.
 router.get("/students/:id/attendance-terms", requireAuth, async (req, res) => {
-  const student = await prisma.student.findUnique({ where: { id: req.params.id }, include: { enrolments: { select: { moduleId: true } } } });
+  const student = await prisma.student.findUnique({ where: { id: req.params.id }, include: { enrolments: { select: { unitId: true } } } });
   if (!student) return res.status(404).json({ error: "Student not found" });
-  const enrolledIds = student.enrolments.map((e) => e.moduleId);
+  const enrolledIds = student.enrolments.map((e) => e.unitId);
   const safeIds = enrolledIds.length ? enrolledIds : ["__none__"];
 
-  const [modules, marks, sessions] = await Promise.all([
-    prisma.hndModule.findMany({ where: { id: { in: safeIds } } }),
+  const [units, marks, sessions] = await Promise.all([
+    prisma.unit.findMany({ where: { id: { in: safeIds } } }),
     prisma.attendanceMark.findMany({ where: { studentId: student.id }, select: { status: true, sessionId: true } }),
-    prisma.hndSession.findMany({ where: { moduleId: { in: safeIds } }, select: { id: true, moduleId: true, date: true } }),
+    prisma.hndSession.findMany({ where: { unitId: { in: safeIds } }, select: { id: true, unitId: true, date: true } }),
   ]);
 
   const today = localDate();
 
-  // Each module's end date = the date of its last scheduled session.
-  const endByModule = new Map();
+  // Each unit's end date = the date of its last scheduled session.
+  const endByUnit = new Map();
   const sessMod = new Map();
   for (const s of sessions) {
-    sessMod.set(s.id, s.moduleId);
-    const cur = endByModule.get(s.moduleId);
-    if (!cur || s.date > cur) endByModule.set(s.moduleId, s.date);
+    sessMod.set(s.id, s.unitId);
+    const cur = endByUnit.get(s.unitId);
+    if (!cur || s.date > cur) endByUnit.set(s.unitId, s.date);
   }
 
-  const marksByModule = new Map();
-  for (const m of marks) { const mid = sessMod.get(m.sessionId); if (!mid) continue; if (!marksByModule.has(mid)) marksByModule.set(mid, []); marksByModule.get(mid).push(m); }
+  const marksByUnit = new Map();
+  for (const m of marks) { const mid = sessMod.get(m.sessionId); if (!mid) continue; if (!marksByUnit.has(mid)) marksByUnit.set(mid, []); marksByUnit.get(mid).push(m); }
 
-  // A module is "finished" once its last session date is in the past. Modules with no
+  // A unit is "finished" once its last session date is in the past. Units with no
   // sessions yet have no end date, so they stay current.
   const rowFor = (mod) => {
-    const endDate = endByModule.get(mod.id) || null;
-    return { module: sModule(mod), summary: summarise(marksByModule.get(mod.id) || []), endDate, finished: !!(endDate && endDate < today) };
+    const endDate = endByUnit.get(mod.id) || null;
+    return { unit: sUnit(mod), summary: summarise(marksByUnit.get(mod.id) || []), endDate, finished: !!(endDate && endDate < today) };
   };
-  const rows = modules.map(rowFor);
+  const rows = units.map(rowFor);
   const currentRows = rows.filter((r) => !r.finished).sort((a, b) => (a.endDate || "9999").localeCompare(b.endDate || "9999"));
   const previousRows = rows.filter((r) => r.finished).sort((a, b) => (b.endDate || "").localeCompare(a.endDate || ""));
 
-  const currentOverall = summarise(currentRows.flatMap((r) => marksByModule.get(r.module.id) || []));
+  const currentOverall = summarise(currentRows.flatMap((r) => marksByUnit.get(r.unit.id) || []));
 
   res.json({
     studentId: student.id,
     cohortId: student.cohortId || null,
     today,
-    current: { modules: currentRows, overall: currentOverall },
+    current: { units: currentRows, overall: currentOverall },
     previous: previousRows,
   });
 });

@@ -21,11 +21,11 @@ export function useApiStore(notify, user) {
   const [loaded, setLoaded] = useState(false);
   // HND registers. Loaded lazily by the admin page rather than on login —
   // staff users never open it, so there's no reason to fetch it for them.
-  const [modules, setModules] = useState([]);
+  const [units, setUnits] = useState([]);
   const [students, setStudents] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [semesters, setSemesters] = useState([]);
-  const [programmes, setProgrammes] = useState([]);
+  const [courses, setCourses] = useState([]);
   const [cohorts, setCohorts] = useState([]);
   const [terms, setTerms] = useState([]);
   const [unassignedSessions, setUnassignedSessions] = useState(0);
@@ -75,11 +75,11 @@ export function useApiStore(notify, user) {
   const refreshHnd = useCallback(async () => {
     try {
       const [ms, st, se, sem, pr, at] = await Promise.all([
-        api.listModules(), api.listStudents(), api.listSessions(), api.listSemesters(), api.listProgrammes(), api.getAttendance(semesterId),
+        api.listUnits(), api.listStudents(), api.listSessions(), api.listSemesters(), api.listCourses(), api.getAttendance(semesterId),
       ]);
-      setModules(ms); setStudents(st); setSessions(se);
+      setUnits(ms); setStudents(st); setSessions(se);
       setSemesters(sem.semesters); setUnassignedSessions(sem.unassignedSessions);
-      setProgrammes(pr);
+      setCourses(pr);
       setAttendance(at);
       // Cohorts & terms load tolerantly: if an endpoint lags behind on a deploy
       // (Vercel client ahead of the Render server), it must not break the rest.
@@ -279,10 +279,10 @@ export function useApiStore(notify, user) {
     addSemester: runHnd((data) => api.addSemester(data), (d) => `${d.name} added`),
     updateSemester: runHnd((id, data) => api.updateSemester(id, data), "Semester updated"),
     removeSemester: runHnd((id) => api.removeSemester(id), "Semester removed", "error"),
-    addProgramme: runHnd((data) => api.addProgramme(data), (d) => `${d.name} added`),
-    updateProgramme: runHnd((id, data) => api.updateProgramme(id, data), "Programme updated"),
-    removeProgramme: runHnd((id) => api.removeProgramme(id), "Programme removed", "error"),
-    // Cohorts (intakes under a programme)
+    addCourse: runHnd((data) => api.addCourse(data), (d) => `${d.name} added`),
+    updateCourse: runHnd((id, data) => api.updateCourse(id, data), "Course updated"),
+    removeCourse: runHnd((id) => api.removeCourse(id), "Course removed", "error"),
+    // Cohorts (intakes under a course)
     addCohort: runHnd((data) => api.addCohort(data), (d) => `Cohort ${d.name} added`),
     updateCohort: runHnd((id, data) => api.updateCohort(id, data), "Cohort updated"),
     removeCohort: runHnd((id) => api.removeCohort(id), "Cohort removed", "error"),
@@ -290,15 +290,15 @@ export function useApiStore(notify, user) {
     generateTerms: runHnd((cohortId, data) => api.generateTerms(cohortId, data), "6 terms created"),
     updateTerm: runHnd((id, data) => api.updateTerm(id, data), "Term updated"),
     removeTerm: runHnd((id) => api.removeTerm(id), "Term removed", "error"),
-    addModule: runHnd((data) => api.addModule(data), (d) => `Module ${String(d.code).toUpperCase()} added`),
-    updateModule: runHnd((id, data) => api.updateModule(id, data), "Module updated"),
-    removeModule: runHnd((id) => api.removeModule(id), "Module removed", "error"),
-    setModuleEnrolments: runHnd((id, studentIds) => api.setModuleEnrolments(id, studentIds), "Students enrolled"),
+    addUnit: runHnd((data) => api.addUnit(data), (d) => `Unit ${String(d.code).toUpperCase()} added`),
+    updateUnit: runHnd((id, data) => api.updateUnit(id, data), "Unit updated"),
+    removeUnit: runHnd((id) => api.removeUnit(id), "Unit removed", "error"),
+    setUnitEnrolments: runHnd((id, studentIds) => api.setUnitEnrolments(id, studentIds), "Students enrolled"),
     generateSessions: runHnd((id, data) => api.generateSessions(id, data), (id, data) => `Weekly registers created`),
     addStudent: runHnd((data) => api.addStudent(data), (d) => `Added ${d.firstName} ${d.lastName}`),
     updateStudent: runHnd((id, data) => api.updateStudent(id, data), "Student updated"),
     removeStudent: runHnd((id) => api.removeStudent(id), "Student removed", "error"),
-    setEnrolments: runHnd((id, moduleIds) => api.setEnrolments(id, moduleIds), "Enrolments updated"),
+    setEnrolments: runHnd((id, unitIds) => api.setEnrolments(id, unitIds), "Enrolments updated"),
     addSession: runHnd((data) => api.addSession(data), "Session added"),
     updateSession: runHnd((id, data) => api.updateSession(id, data), "Session updated"),
     removeSession: runHnd((id) => api.removeSession(id), "Session removed", "error"),
@@ -331,7 +331,7 @@ export function useApiStore(notify, user) {
 
   return {
     staff, leave, checkins, docs, adjustments, signups, studentQueries, timesheetsPending, loaded,
-    modules, students, sessions, semesters, programmes, cohorts, terms, unassignedSessions, semesterId, attendance, hndLoaded,
+    units, students, sessions, semesters, courses, cohorts, terms, unassignedSessions, semesterId, attendance, hndLoaded,
     interactions, interactionsLoaded,
     assessments, assessmentOverview, assessmentsLoaded,
     usedDays, adjDays, effectiveAllowance, bookableAllowance, remaining, chargeableDays,

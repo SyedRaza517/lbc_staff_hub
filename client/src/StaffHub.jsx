@@ -38,7 +38,7 @@ const NAVY_DARK = "#14306f";
 const MAROON = "#9e1b32";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
-// Combine several per-module attendance summaries into one overall (P/L/E/A + %),
+// Combine several per-unit attendance summaries into one overall (P/L/E/A + %),
 // re-deriving the percentage from summed earned/possible so it stays weighted by
 // sessions, not a naive average of percentages.
 const aggregateStats = (list) => {
@@ -1412,12 +1412,12 @@ function ExecutiveDashboard({ store }) {
   const [unit, setUnit] = useState("all");
 
   // exec-summary loads once; monthly attendance re-loads when the Unit filter changes.
-  const load = useCallback(async (moduleId, withExec) => {
+  const load = useCallback(async (unitId, withExec) => {
     setLoading(true);
     try {
       const [e, m] = await Promise.all([
         withExec ? api.execSummary() : Promise.resolve(null),
-        api.attendanceMonthly(moduleId && moduleId !== "all" ? { moduleId } : {}),
+        api.attendanceMonthly(unitId && unitId !== "all" ? { unitId } : {}),
       ]);
       if (withExec) setExec(e);
       setMonthly(m); setRefreshed(new Date());
@@ -1453,7 +1453,7 @@ function ExecutiveDashboard({ store }) {
       <div className="mb-4 flex flex-wrap gap-2">
         <FilterSelect label="Academic Year" value={year} onChange={setYear} options={[{ v: "all", l: "All years" }, ...years.map(y => ({ v: y, l: y }))]} />
         <FilterSelect label="Course" value={course} onChange={setCourse} options={[{ v: "all", l: "All courses" }, ...allCourses.map(c => ({ v: c.cohortId, l: c.code }))]} />
-        <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...store.modules.map(m => ({ v: m.id, l: m.code }))]} />
+        <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...store.units.map(m => ({ v: m.id, l: m.code }))]} />
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         <ExecKpi label="Total Students" value={shownStudents} />
@@ -2580,28 +2580,28 @@ function AdminSummaries({ store }) {
 
 /* ============================================================
    Dashboard: Attendance Registers — HND
-   Sessions per module -> take the register (P/L/E/A + remarks)
-   -> per-module and overall attendance percentages.
+   Sessions per unit -> take the register (P/L/E/A + remarks)
+   -> per-unit and overall attendance percentages.
    ============================================================ */
 function AdminHndRegisters({ store }) {
-  const { refreshHnd, hndLoaded, modules, students, attendance, semesters, semesterId } = store;
-  // Opens on Programmes — the top of the hierarchy. From a programme you drill
+  const { refreshHnd, hndLoaded, units, students, attendance, semesters, semesterId } = store;
+  // Opens on Courses — the top of the hierarchy. From a course you drill
   // into its Courses, and from a course into its sessions and registers.
-  const [view, setView] = useState("programmes"); // programmes | modules | sessions | percentages | students | semesters
-  const [moduleId, setModuleId] = useState("");
-  // Which programme the Courses gallery is filtered to ("" = all programmes).
-  const [courseProgramme, setCourseProgramme] = useState("");
+  const [view, setView] = useState("courses"); // courses | units | sessions | percentages | students | semesters
+  const [unitId, setUnitId] = useState("");
+  // Which course the Courses gallery is filtered to ("" = all courses).
+  const [courseCourse, setCourseCourse] = useState("");
   const [openRegister, setOpenRegister] = useState(null); // session id being marked
 
   // Loads on first open, and again whenever the semester picker changes
   // (refreshHnd depends on semesterId).
   useEffect(() => { refreshHnd(); }, [refreshHnd]);
-  // Default to the first module as soon as they arrive, and recover if the
-  // selected module is deleted underneath us.
+  // Default to the first unit as soon as they arrive, and recover if the
+  // selected unit is deleted underneath us.
   useEffect(() => {
-    if (!modules.length) { setModuleId(""); return; }
-    if (!moduleId || !modules.some(m => m.id === moduleId)) setModuleId(modules[0].id);
-  }, [modules, moduleId]);
+    if (!units.length) { setUnitId(""); return; }
+    if (!unitId || !units.some(m => m.id === unitId)) setUnitId(units[0].id);
+  }, [units, unitId]);
   // Fall back to "All semesters" if the scoped semester is deleted, or if the
   // last semester goes and leaves us stuck on "unassigned" with no picker.
   useEffect(() => {
@@ -2610,12 +2610,12 @@ function AdminHndRegisters({ store }) {
     if (orphaned) store.setSemesterId("");
   }, [semesters, semesterId, store]);
 
-  const selected = modules.find(m => m.id === moduleId) || null;
+  const selected = units.find(m => m.id === unitId) || null;
 
   if (!hndLoaded) {
     return (
       <>
-        <AdminHeader title="Attendance Registers — HND" subtitle="Loading modules, students and registers…" Icon={ClipboardList} />
+        <AdminHeader title="Attendance Registers — HND" subtitle="Loading units, students and registers…" Icon={ClipboardList} />
         <div className="space-y-3">{[0, 1, 2].map(i => <div key={i} className="skeleton h-20 rounded-2xl" />)}</div>
       </>
     );
@@ -2627,8 +2627,8 @@ function AdminHndRegisters({ store }) {
   }
 
   const tabs = [
-    { key: "programmes", label: "Programmes", I: Layers },
-    { key: "modules", label: "Courses", I: GraduationCap },
+    { key: "courses", label: "Courses", I: Layers },
+    { key: "units", label: "Units", I: GraduationCap },
     { key: "sessions", label: "Sessions & registers", I: ClipboardList },
     { key: "percentages", label: "Attendance %", I: Percent },
     { key: "students", label: "Students", I: Users },
@@ -2641,7 +2641,7 @@ function AdminHndRegisters({ store }) {
     <>
       <AdminHeader
         title="Attendance Registers — HND"
-        subtitle="Take module registers and track attendance across the programme"
+        subtitle="Take unit registers and track attendance across the course"
         Icon={ClipboardList}
         action={
           <div className="flex flex-wrap items-center gap-2">
@@ -2652,7 +2652,7 @@ function AdminHndRegisters({ store }) {
           </div>
         }
       />
-      <HndOverviewStats store={store} attendance={attendance} modules={modules} students={students} sessions={scoped} />
+      <HndOverviewStats store={store} attendance={attendance} units={units} students={students} sessions={scoped} />
       <div className="mb-4 mt-5 flex flex-wrap gap-1.5">
         {tabs.map(t => (
           <button key={t.key} onClick={() => setView(t.key)}
@@ -2664,9 +2664,9 @@ function AdminHndRegisters({ store }) {
           </button>
         ))}
       </div>
-      {view === "programmes" && <HndProgrammes store={store} onOpen={(pid) => { setCourseProgramme(pid); setView("modules"); }} />}
-      {view === "modules" && <HndModules store={store} programmeFilter={courseProgramme} setProgrammeFilter={setCourseProgramme} onView={(id) => { setModuleId(id); setView("sessions"); }} />}
-      {view === "sessions" && <HndSessions store={store} moduleId={moduleId} setModuleId={setModuleId} selected={selected} onTake={setOpenRegister} scoped={scoped} />}
+      {view === "courses" && <HndCourses store={store} onOpen={(pid) => { setCourseCourse(pid); setView("units"); }} />}
+      {view === "units" && <Units store={store} courseFilter={courseCourse} setCourseFilter={setCourseCourse} onView={(id) => { setUnitId(id); setView("sessions"); }} />}
+      {view === "sessions" && <HndSessions store={store} unitId={unitId} setUnitId={setUnitId} selected={selected} onTake={setOpenRegister} scoped={scoped} />}
       {view === "percentages" && <HndPercentages store={store} />}
       {view === "students" && <HndStudents store={store} />}
       {view === "semesters" && <HndSemesters store={store} />}
@@ -2695,33 +2695,33 @@ function HndSemesterPicker({ store }) {
 
 // The two headline figures the college cares about, plus supporting counts.
 // `sessions` arrives already scoped to the selected semester.
-function HndOverviewStats({ store, attendance, modules, students, sessions }) {
+function HndOverviewStats({ store, attendance, units, students, sessions }) {
   const overall = attendance?.overall;
   const untaken = sessions.filter(s => s.markedCount === 0 && s.date <= todayISO()).length;
   const tone = pctTone(overall?.pct ?? null);
-  const scopeNote = store.semesterId ? semesterLabel(store.semesterId, store.semesters) : "all modules combined";
+  const scopeNote = store.semesterId ? semesterLabel(store.semesterId, store.semesters) : "all units combined";
   return (
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
       <StatCard label="Overall attendance" value={fmtPct(overall?.pct ?? null)} sub={scopeNote} Icon={Percent} tone={tone.colour} delay={0} />
-      <StatCard label="Students" value={students.length} sub="on the HND programme" Icon={Users} tone={NAVY} delay={60} animate />
-      <StatCard label="Modules" value={modules.length} sub="running this year" Icon={BookOpen} tone="#6d28d9" delay={120} animate />
+      <StatCard label="Students" value={students.length} sub="on the HND course" Icon={Users} tone={NAVY} delay={60} animate />
+      <StatCard label="Units" value={units.length} sub="running this year" Icon={BookOpen} tone="#6d28d9" delay={120} animate />
       <StatCard label="Registers to take" value={untaken} sub={untaken === 1 ? "session not yet marked" : "sessions not yet marked"} Icon={AlertCircle} tone={untaken > 0 ? "#b45309" : "#059669"} delay={180} animate />
     </div>
   );
 }
 
-/* ----- Sessions list (per module) ----- */
+/* ----- Sessions list (per unit) ----- */
 // 24h "HH:MM" → compact 12h, e.g. "10:00" → "10AM", "13:30" → "1:30PM".
 const fmt12 = (t) => { if (!t) return ""; const [h, m] = String(t).split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; const hh = h % 12 || 12; return m ? `${hh}:${String(m).padStart(2, "0")}${ap}` : `${hh}${ap}`; };
 
-function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped }) {
+function HndSessions({ store, unitId, setUnitId, selected, onTake, scoped }) {
   const [filter, setFilter] = useState("all"); // all | past | upcoming
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
   const [form, setForm] = useState({ date: todayISO(), start: "10:00", end: "13:00", description: "", audience: "All students", kind: "Teaching" });
 
   const today = todayISO();
-  const mine = scoped.filter(s => s.moduleId === moduleId);
+  const mine = scoped.filter(s => s.unitId === unitId);
   // Number the registers that fall on the same day (a 6-hour day has two), so they
   // stay distinguishable now the time column is gone.
   const byDate = {};
@@ -2732,7 +2732,7 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
   const filtered = mine
     .filter(s => filter === "all" || (filter === "past" ? s.date <= today : s.date > today))
     .sort((a, b) => a.date.localeCompare(b.date) || (a.start || "").localeCompare(b.start || ""));
-  const paged = usePaged(filtered, 10, `${moduleId}|${filter}|${store.semesterId}`);
+  const paged = usePaged(filtered, 10, `${unitId}|${filter}|${store.semesterId}`);
   // Warn before a session is filed outside the semester currently being viewed —
   // it would save fine but immediately disappear from this list.
   const formSemester = semesterOf(form.date, store.semesters);
@@ -2743,7 +2743,7 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
   const save = async () => {
     try {
       if (edit) await store.updateSession(edit.id, form);
-      else await store.addSession({ ...form, moduleId });
+      else await store.addSession({ ...form, unitId });
       setModal(false);
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
   };
@@ -2758,23 +2758,23 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
     store.notify("Exported sessions CSV");
   };
 
-  if (!store.modules.length) {
-    return <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70"><EmptyState Icon={BookOpen} title="No modules yet" msg="Add a module on the Modules tab, then you can timetable sessions and take registers." /></div>;
+  if (!store.units.length) {
+    return <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70"><EmptyState Icon={BookOpen} title="No units yet" msg="Add a unit on the Units tab, then you can timetable sessions and take registers." /></div>;
   }
 
   return (
     <>
-      {/* Module picker */}
+      {/* Unit picker */}
       <div className="mb-4 flex flex-wrap gap-1.5">
-        {store.modules.map(m => {
-          // Session count for the semester in view, not the module's all-time total.
-          const count = store.attendance?.moduleTotals?.[m.id]?.sessionCount ?? m.sessionCount;
+        {store.units.map(m => {
+          // Session count for the semester in view, not the unit's all-time total.
+          const count = store.attendance?.unitTotals?.[m.id]?.sessionCount ?? m.sessionCount;
           return (
-            <button key={m.id} onClick={() => setModuleId(m.id)}
-              className={`press rounded-xl px-3.5 py-2 text-left text-xs font-bold shadow-sm ring-1 transition-all ${moduleId === m.id ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`}
-              style={moduleId === m.id ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}>
+            <button key={m.id} onClick={() => setUnitId(m.id)}
+              className={`press rounded-xl px-3.5 py-2 text-left text-xs font-bold shadow-sm ring-1 transition-all ${unitId === m.id ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`}
+              style={unitId === m.id ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}>
               <span className="block">{m.code}</span>
-              <span className={`block text-[10px] font-medium ${moduleId === m.id ? "text-white/60" : "text-slate-400"}`}>{m.studentCount} students · {count} session{count === 1 ? "" : "s"}</span>
+              <span className={`block text-[10px] font-medium ${unitId === m.id ? "text-white/60" : "text-slate-400"}`}>{m.studentCount} students · {count} session{count === 1 ? "" : "s"}</span>
             </button>
           );
         })}
@@ -2859,8 +2859,8 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
                 <tr><td colSpan={6} className="px-5 py-10">
                   <EmptyState Icon={CalendarDays} title="No sessions"
                     msg={store.semesterId
-                      ? `No sessions for this module in ${semesterLabel(store.semesterId, store.semesters)}. Switch the semester picker to "All semesters" to see the rest.`
-                      : filter === "all" ? "Add a session to start taking registers for this module." : "Try a different filter."} />
+                      ? `No sessions for this unit in ${semesterLabel(store.semesterId, store.semesters)}. Switch the semester picker to "All semesters" to see the rest.`
+                      : filter === "all" ? "Add a session to start taking registers for this unit." : "Try a different filter."} />
                 </td></tr>
               )}
             </tbody>
@@ -2890,7 +2890,7 @@ function HndSessions({ store, moduleId, setModuleId, selected, onTake, scoped })
               </span>
             </div>
           )}
-          <p className="text-xs text-slate-400">Module: {selected?.code} — {selected?.name}</p>
+          <p className="text-xs text-slate-400">Unit: {selected?.code} — {selected?.name}</p>
           <PrimaryBtn onClick={save} className="w-full"><Save size={16} /> {edit ? "Save changes" : "Add session"}</PrimaryBtn>
         </div>
       </Modal>
@@ -2921,11 +2921,11 @@ function HndRegister({ store, sessionId, onBack }) {
 
   if (!data) return <><AdminHeader title="Register" subtitle="Loading…" Icon={ClipboardList} /><div className="skeleton h-64 rounded-2xl" /></>;
 
-  const { session, module: mod, rows } = data;
+  const { session, unit: mod, rows } = data;
   // Term gate: a unit assigned to a term only accepts marks during that term's dates.
   // Outside it (past or not-yet-started) the register is read-only — "paused" — until
   // an admin reopens it for a correction. Units with no term are always editable.
-  const fullMod = store.modules.find(m => m.id === mod.id) || mod;
+  const fullMod = store.units.find(m => m.id === mod.id) || mod;
   const term = fullMod.termId ? (store.terms || []).find(t => t.id === fullMod.termId) : null;
   const today = todayISO();
   const termState = !term ? "none" : (today >= term.start && today <= term.end) ? "current" : (today > term.end ? "past" : "future");
@@ -2968,14 +2968,14 @@ function HndRegister({ store, sessionId, onBack }) {
     downloadCSV(
       `register-${mod.code}-${session.date}.csv`,
       [
-        { key: "date", label: "Date" }, { key: "time", label: "Time" }, { key: "module", label: "Module" },
+        { key: "date", label: "Date" }, { key: "time", label: "Time" }, { key: "unit", label: "Unit" },
         { key: "name", label: "Student" }, { key: "ref", label: "Student number" }, { key: "email", label: "Email" },
         { key: "status", label: "Status" }, { key: "meaning", label: "Status meaning" }, { key: "remark", label: "Remarks" },
       ],
       rows.map(r => {
         const st = draft[r.student.id]?.status || "";
         return {
-          date: session.date, time: `${session.start}–${session.end}`, module: mod.code,
+          date: session.date, time: `${session.start}–${session.end}`, unit: mod.code,
           name: r.student.name, ref: r.student.studentRef, email: r.student.email,
           status: st, meaning: st ? label[st] : "Unmarked", remark: draft[r.student.id]?.remark || "",
         };
@@ -3105,7 +3105,7 @@ function HndRegister({ store, sessionId, onBack }) {
                   </tr>
                 );
               })}
-              {visible.length === 0 && <tr><td colSpan={7} className="px-5 py-10"><EmptyState Icon={Users} title={rows.length === 0 ? "No students enrolled" : "No students match"} msg={rows.length === 0 ? "Enrol students onto this module before taking a register." : "Try a different search term."} /></td></tr>}
+              {visible.length === 0 && <tr><td colSpan={7} className="px-5 py-10"><EmptyState Icon={Users} title={rows.length === 0 ? "No students enrolled" : "No students match"} msg={rows.length === 0 ? "Enrol students onto this unit before taking a register." : "Try a different search term."} /></td></tr>}
             </tbody>
           </table>
         </div>
@@ -3124,14 +3124,14 @@ function HndRegister({ store, sessionId, onBack }) {
 // Small spinner used inside buttons (lucide's Loader2 with the shared spin class).
 function Loader({ size = 16 }) { return <RefreshCw size={size} className="animate-spin" />; }
 
-/* ----- Attendance percentages: per module + overall ----- */
+/* ----- Attendance percentages: per unit + overall ----- */
 function HndPercentages({ store }) {
   const { attendance } = store;
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("name"); // name | overall
   if (!attendance) return <div className="skeleton h-64 rounded-2xl" />;
 
-  const { modules, rows, moduleTotals, overall } = attendance;
+  const { units, rows, unitTotals, overall } = attendance;
   const ql = query.trim().toLowerCase();
   let list = rows.filter(r => !ql || r.student.name.toLowerCase().includes(ql) || r.student.studentRef.includes(ql) || r.student.email.toLowerCase().includes(ql));
   list = sort === "overall"
@@ -3145,11 +3145,11 @@ function HndPercentages({ store }) {
   const exportCSV = () => {
     downloadCSV(`hnd-attendance-${slug}.csv`, [
       { key: "name", label: "Student" }, { key: "ref", label: "Student number" }, { key: "email", label: "Email" },
-      ...modules.map(m => ({ key: m.id, label: `${m.code} %` })),
+      ...units.map(m => ({ key: m.id, label: `${m.code} %` })),
       { key: "overall", label: "Overall %" }, { key: "present", label: "Present" }, { key: "late", label: "Late" }, { key: "excused", label: "Excused" }, { key: "absent", label: "Absent" },
     ], rows.map(r => ({
       name: r.student.name, ref: r.student.studentRef, email: r.student.email,
-      ...Object.fromEntries(modules.map(m => [m.id, r.modules[m.id] ? r.modules[m.id].pct : ""])),
+      ...Object.fromEntries(units.map(m => [m.id, r.units[m.id] ? r.units[m.id].pct : ""])),
       overall: r.overall.pct ?? "", present: r.overall.P, late: r.overall.L, excused: r.overall.E, absent: r.overall.A,
     })));
     store.notify(`Exported attendance CSV — ${scopeName}`);
@@ -3175,21 +3175,21 @@ function HndPercentages({ store }) {
       )}
       <div className="mb-4 grid gap-4 lg:grid-cols-3">
         <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 fade-up lg:col-span-2">
-          <p className="mb-3 text-sm font-bold text-slate-700">Attendance by module</p>
+          <p className="mb-3 text-sm font-bold text-slate-700">Attendance by unit</p>
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={modules.map(m => ({ code: m.code, pct: moduleTotals[m.id]?.pct ?? 0 }))}>
+            <BarChart data={units.map(m => ({ code: m.code, pct: unitTotals[m.id]?.pct ?? 0 }))}>
               <CartesianGrid strokeDasharray="3 3" stroke="#eef1f6" vertical={false} />
               <XAxis dataKey="code" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
               <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 13 }} formatter={(v) => [`${v}%`, "Attendance"]} />
               <Bar dataKey="pct" radius={[6, 6, 0, 0]}>
-                {modules.map(m => <Cell key={m.id} fill={pctTone(moduleTotals[m.id]?.pct ?? null).colour} />)}
+                {units.map(m => <Cell key={m.id} fill={pctTone(unitTotals[m.id]?.pct ?? null).colour} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
         <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 fade-up">
-          <p className="mb-3 text-sm font-bold text-slate-700">Across all modules{store.semesterId ? ` · ${scopeName}` : ""}</p>
+          <p className="mb-3 text-sm font-bold text-slate-700">Across all units{store.semesterId ? ` · ${scopeName}` : ""}</p>
           <div className="flex items-center justify-center">
             <div className="relative h-36 w-36">
               <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
@@ -3235,7 +3235,7 @@ function HndPercentages({ store }) {
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
               <tr>
                 <th className="px-5 py-3">Student</th>
-                {modules.map(m => <th key={m.id} className="px-4 py-3 text-center" title={m.name}>{m.code}</th>)}
+                {units.map(m => <th key={m.id} className="px-4 py-3 text-center" title={m.name}>{m.code}</th>)}
                 <th className="px-5 py-3 text-center">Overall</th>
               </tr>
             </thead>
@@ -3248,8 +3248,8 @@ function HndPercentages({ store }) {
                       <div><p className="font-semibold text-slate-700">{r.student.name}</p><p className="text-[11px] text-slate-400">{r.student.studentRef}</p></div>
                     </div>
                   </td>
-                  {modules.map(m => {
-                    const cell = r.modules[m.id];
+                  {units.map(m => {
+                    const cell = r.units[m.id];
                     if (!cell) return <td key={m.id} className="px-4 py-3 text-center text-xs text-slate-300">not enrolled</td>;
                     const tone = pctTone(cell.pct);
                     return (
@@ -3268,15 +3268,15 @@ function HndPercentages({ store }) {
                   </td>
                 </tr>
               ))}
-              {paged.slice.length === 0 && <tr><td colSpan={modules.length + 2} className="px-5 py-10"><EmptyState Icon={Percent} title="Nothing to show" msg="No students match, or no registers have been taken yet." /></td></tr>}
+              {paged.slice.length === 0 && <tr><td colSpan={units.length + 2} className="px-5 py-10"><EmptyState Icon={Percent} title="Nothing to show" msg="No students match, or no registers have been taken yet." /></td></tr>}
             </tbody>
             {paged.slice.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-slate-200 bg-slate-50">
                   <td className="px-5 py-3 text-xs font-extrabold uppercase tracking-wide text-slate-500">Cohort average</td>
-                  {modules.map(m => (
+                  {units.map(m => (
                     <td key={m.id} className="px-4 py-3 text-center">
-                      <span className="text-xs font-extrabold" style={{ color: pctTone(moduleTotals[m.id]?.pct ?? null).colour }}>{fmtPct(moduleTotals[m.id]?.pct ?? null)}</span>
+                      <span className="text-xs font-extrabold" style={{ color: pctTone(unitTotals[m.id]?.pct ?? null).colour }}>{fmtPct(unitTotals[m.id]?.pct ?? null)}</span>
                     </td>
                   ))}
                   <td className="px-5 py-3 text-center"><span className="text-sm font-extrabold" style={{ color: pctTone(overall.pct).colour }}>{fmtPct(overall.pct)}</span></td>
@@ -3295,17 +3295,17 @@ function HndPercentages({ store }) {
 function HndStudents({ store }) {
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ firstName: "", lastName: "", studentRef: "", email: "", cohortId: "", moduleIds: [] });
+  const [form, setForm] = useState({ firstName: "", lastName: "", studentRef: "", email: "", cohortId: "", unitIds: [] });
   const [query, setQuery] = useState("");
 
-  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", cohortId: "", moduleIds: [] }); setModal(true); };
-  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, cohortId: s.cohortId || "", moduleIds: s.moduleIds || [] }); setModal(true); };
-  const toggleModule = (id) => setForm(f => ({ ...f, moduleIds: f.moduleIds.includes(id) ? f.moduleIds.filter(x => x !== id) : [...f.moduleIds, id] }));
+  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", cohortId: "", unitIds: [] }); setModal(true); };
+  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, cohortId: s.cohortId || "", unitIds: s.unitIds || [] }); setModal(true); };
+  const toggleUnit = (id) => setForm(f => ({ ...f, unitIds: f.unitIds.includes(id) ? f.unitIds.filter(x => x !== id) : [...f.unitIds, id] }));
   const save = async () => {
     try {
       if (edit) {
         await store.updateStudent(edit.id, { firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, cohortId: form.cohortId || null });
-        await store.setEnrolments(edit.id, form.moduleIds);
+        await store.setEnrolments(edit.id, form.unitIds);
       } else {
         await store.addStudent(form);
       }
@@ -3336,7 +3336,7 @@ function HndStudents({ store }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
-              <tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Number</th><th className="px-5 py-3">Email address</th><th className="px-5 py-3">Modules</th><th className="px-5 py-3 text-right">Actions</th></tr>
+              <tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Number</th><th className="px-5 py-3">Email address</th><th className="px-5 py-3">Units</th><th className="px-5 py-3 text-right">Actions</th></tr>
             </thead>
             <tbody>
               {paged.slice.map(s => (
@@ -3351,8 +3351,8 @@ function HndStudents({ store }) {
                   <td className="px-5 py-3 text-slate-500">{s.email}</td>
                   <td className="px-5 py-3">
                     <div className="flex flex-wrap gap-1">
-                      {(s.moduleIds || []).map(id => { const m = store.modules.find(x => x.id === id); return m ? <span key={id} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">{m.code}</span> : null; })}
-                      {(s.moduleIds || []).length === 0 && <span className="text-[11px] text-slate-300">none</span>}
+                      {(s.unitIds || []).map(id => { const m = store.units.find(x => x.id === id); return m ? <span key={id} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">{m.code}</span> : null; })}
+                      {(s.unitIds || []).length === 0 && <span className="text-[11px] text-slate-300">none</span>}
                     </div>
                   </td>
                   <td className="px-5 py-3">
@@ -3382,22 +3382,22 @@ function HndStudents({ store }) {
           <Field label="Cohort (intake)">
             <select value={form.cohortId} onChange={e => setForm(f => ({ ...f, cohortId: e.target.value }))} className={inputCls}>
               <option value="">— none —</option>
-              {store.cohorts.map(c => { const p = store.programmes.find(x => x.id === c.programmeId); return <option key={c.id} value={c.id}>{p ? `${p.name} — ${c.name}` : c.name}</option>; })}
+              {store.cohorts.map(c => { const p = store.courses.find(x => x.id === c.courseId); return <option key={c.id} value={c.id}>{p ? `${p.name} — ${c.name}` : c.name}</option>; })}
             </select>
           </Field>
-          <Field label="Modules">
+          <Field label="Units">
             <div className="grid grid-cols-2 gap-1.5">
-              {store.modules.map(m => (
-                <button key={m.id} onClick={() => toggleModule(m.id)} type="button"
-                  className={`press flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold ring-1 transition ${form.moduleIds.includes(m.id) ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`}
-                  style={form.moduleIds.includes(m.id) ? { background: NAVY } : {}}>
-                  <span className={`flex h-4 w-4 items-center justify-center rounded border-2 ${form.moduleIds.includes(m.id) ? "border-white bg-white/20" : "border-slate-300"}`}>
-                    {form.moduleIds.includes(m.id) && <Check size={10} className="text-white" />}
+              {store.units.map(m => (
+                <button key={m.id} onClick={() => toggleUnit(m.id)} type="button"
+                  className={`press flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold ring-1 transition ${form.unitIds.includes(m.id) ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`}
+                  style={form.unitIds.includes(m.id) ? { background: NAVY } : {}}>
+                  <span className={`flex h-4 w-4 items-center justify-center rounded border-2 ${form.unitIds.includes(m.id) ? "border-white bg-white/20" : "border-slate-300"}`}>
+                    {form.unitIds.includes(m.id) && <Check size={10} className="text-white" />}
                   </span>
                   {m.code}
                 </button>
               ))}
-              {store.modules.length === 0 && <p className="col-span-2 text-xs text-slate-400">No modules yet — add one on the Modules tab.</p>}
+              {store.units.length === 0 && <p className="col-span-2 text-xs text-slate-400">No units yet — add one on the Units tab.</p>}
             </div>
           </Field>
           <PrimaryBtn onClick={save} disabled={!form.firstName.trim() || !form.lastName.trim() || !form.studentRef.trim()} className="w-full">
@@ -3418,9 +3418,9 @@ function AdminStudents({ store }) {
   const { refreshHnd, hndLoaded } = store;
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ firstName: "", lastName: "", studentRef: "", email: "", active: true, cohortId: "", moduleIds: [] });
+  const [form, setForm] = useState({ firstName: "", lastName: "", studentRef: "", email: "", active: true, cohortId: "", unitIds: [] });
   const [query, setQuery] = useState("");
-  const [moduleFilter, setModuleFilter] = useState("");     // "" = any module
+  const [unitFilter, setUnitFilter] = useState("");     // "" = any unit
   const [statusFilter, setStatusFilter] = useState("all");  // all | active | inactive
   const [attnFor, setAttnFor] = useState(null);             // student whose breakdown is open
 
@@ -3428,38 +3428,38 @@ function AdminStudents({ store }) {
   // HND collections in on mount (refreshHnd is a no-op cost if already loaded).
   useEffect(() => { refreshHnd(); }, [refreshHnd]);
 
-  // Each student's overall attendance %, plus the full per-module row, from the
+  // Each student's overall attendance %, plus the full per-unit row, from the
   // same scoped figures the registers page shows.
   const attnRowById = Object.fromEntries((store.attendance?.rows || []).map(r => [r.student.id, r]));
-  const moduleById = Object.fromEntries(store.modules.map(m => [m.id, m]));
+  const unitById = Object.fromEntries(store.units.map(m => [m.id, m]));
 
-  // Each student's overall % counts only their CURRENT, still-enrolled modules. A module
+  // Each student's overall % counts only their CURRENT, still-enrolled units. A unit
   // finishes once its last session (endDate) has passed, so the figure rolls over
-  // automatically. We iterate the student's ENROLMENTS (s.moduleIds) — not every module
-  // in row.modules — so leftover marks from modules the student was un-enrolled from
+  // automatically. We iterate the student's ENROLMENTS (s.unitIds) — not every unit
+  // in row.units — so leftover marks from units the student was un-enrolled from
   // don't count. This matches the per-student breakdown modal exactly.
   const attnToday = todayISO();
-  const moduleEndById = {};
-  (store.sessions || []).forEach(se => { const cur = moduleEndById[se.moduleId]; if (!cur || se.date > cur) moduleEndById[se.moduleId] = se.date; });
-  const isCurrentModule = (mid) => { const end = moduleEndById[mid]; return !end || end >= attnToday; };
+  const unitEndById = {};
+  (store.sessions || []).forEach(se => { const cur = unitEndById[se.unitId]; if (!cur || se.date > cur) unitEndById[se.unitId] = se.date; });
+  const isCurrentUnit = (mid) => { const end = unitEndById[mid]; return !end || end >= attnToday; };
   const currentPctOf = (s) => {
     const row = attnRowById[s.id];
     if (!row) return null;
     let earned = 0, possible = 0;
-    (s.moduleIds || []).forEach(mid => { if (isCurrentModule(mid)) { const st = row.modules[mid]; if (st) { earned += st.earned || 0; possible += st.possible || 0; } } });
+    (s.unitIds || []).forEach(mid => { if (isCurrentUnit(mid)) { const st = row.units[mid]; if (st) { earned += st.earned || 0; possible += st.possible || 0; } } });
     return possible > 0 ? Math.round((earned / possible) * 1000) / 10 : null;
   };
 
-  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", active: true, cohortId: "", moduleIds: [] }); setModal(true); };
-  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, active: s.active !== false, cohortId: s.cohortId || "", moduleIds: s.moduleIds || [] }); setModal(true); };
-  const toggleModule = (id) => setForm(f => ({ ...f, moduleIds: f.moduleIds.includes(id) ? f.moduleIds.filter(x => x !== id) : [...f.moduleIds, id] }));
+  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", active: true, cohortId: "", unitIds: [] }); setModal(true); };
+  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, active: s.active !== false, cohortId: s.cohortId || "", unitIds: s.unitIds || [] }); setModal(true); };
+  const toggleUnit = (id) => setForm(f => ({ ...f, unitIds: f.unitIds.includes(id) ? f.unitIds.filter(x => x !== id) : [...f.unitIds, id] }));
   const save = async () => {
     try {
       if (edit) {
         await store.updateStudent(edit.id, { firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, active: form.active, cohortId: form.cohortId || null });
-        await store.setEnrolments(edit.id, form.moduleIds);
+        await store.setEnrolments(edit.id, form.unitIds);
       } else {
-        await store.addStudent({ firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, cohortId: form.cohortId || null, moduleIds: form.moduleIds });
+        await store.addStudent({ firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, cohortId: form.cohortId || null, unitIds: form.unitIds });
       }
       setModal(false);
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
@@ -3473,16 +3473,16 @@ function AdminStudents({ store }) {
   const filtered = store.students.filter(s => {
     if (statusFilter === "active" && s.active === false) return false;
     if (statusFilter === "inactive" && s.active !== false) return false;
-    if (moduleFilter && !(s.moduleIds || []).includes(moduleFilter)) return false;
+    if (unitFilter && !(s.unitIds || []).includes(unitFilter)) return false;
     return !ql || s.name.toLowerCase().includes(ql) || s.email.toLowerCase().includes(ql) || s.studentRef.includes(ql);
   });
-  const paged = usePaged(filtered, 12, `${ql}|${moduleFilter}|${statusFilter}`);
+  const paged = usePaged(filtered, 12, `${ql}|${unitFilter}|${statusFilter}`);
   const emailPreview = form.email || (form.studentRef ? `${form.studentRef}@londonbrookescollege.co.uk` : "");
 
   // Headline figures.
   const total = store.students.length;
   const activeCount = store.students.filter(s => s.active !== false).length;
-  const enrolledCount = store.students.filter(s => (s.moduleIds || []).length > 0).length;
+  const enrolledCount = store.students.filter(s => (s.unitIds || []).length > 0).length;
   const pcts = store.students.map(s => currentPctOf(s)).filter(v => v !== null && v !== undefined);
   const avgAtt = pcts.length ? Math.round((pcts.reduce((a, b) => a + b, 0) / pcts.length) * 10) / 10 : null;
 
@@ -3492,12 +3492,12 @@ function AdminStudents({ store }) {
       [
         { key: "firstName", label: "First name" }, { key: "lastName", label: "Last name" },
         { key: "studentRef", label: "Student number" }, { key: "email", label: "Email" },
-        { key: "status", label: "Status" }, { key: "modules", label: "Modules" }, { key: "attendance", label: "Overall attendance" },
+        { key: "status", label: "Status" }, { key: "units", label: "Units" }, { key: "attendance", label: "Overall attendance" },
       ],
       filtered.map(s => ({
         firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email,
         status: s.active === false ? "Inactive" : "Active",
-        modules: (s.moduleIds || []).map(id => moduleById[id]?.code).filter(Boolean).join(" "),
+        units: (s.unitIds || []).map(id => unitById[id]?.code).filter(Boolean).join(" "),
         attendance: currentPctOf(s) == null ? "" : `${currentPctOf(s)}%`,
       })),
     );
@@ -3528,9 +3528,9 @@ function AdminStudents({ store }) {
       />
 
       <div className="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Total students" value={total} sub="on the HND programme" Icon={Users} tone={NAVY} delay={0} animate />
+        <StatCard label="Total students" value={total} sub="on the HND course" Icon={Users} tone={NAVY} delay={0} animate />
         <StatCard label="Active" value={activeCount} sub={`${total - activeCount} inactive`} Icon={UserCheck} tone="#0d7a5f" delay={60} animate />
-        <StatCard label="On a course" value={enrolledCount} sub="enrolled on ≥1 module" Icon={BookOpen} tone="#6d28d9" delay={120} animate />
+        <StatCard label="On a course" value={enrolledCount} sub="enrolled on ≥1 unit" Icon={BookOpen} tone="#6d28d9" delay={120} animate />
         <StatCard label="Avg attendance" value={fmtPct(avgAtt)} sub="across all students" Icon={Percent} tone={pctTone(avgAtt).colour} delay={180} animate />
       </div>
 
@@ -3544,10 +3544,10 @@ function AdminStudents({ store }) {
             <button key={f.k} onClick={() => setStatusFilter(f.k)} className={`press rounded-lg px-2.5 py-1.5 text-xs font-bold transition ${statusFilter === f.k ? "text-white" : "text-slate-500 hover:bg-slate-100"}`} style={statusFilter === f.k ? { background: NAVY } : {}}>{f.l}</button>
           ))}
         </div>
-        {store.modules.length > 0 && (
-          <select value={moduleFilter} onChange={e => setModuleFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 outline-none">
-            <option value="">All modules</option>
-            {store.modules.map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}
+        {store.units.length > 0 && (
+          <select value={unitFilter} onChange={e => setUnitFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 outline-none">
+            <option value="">All units</option>
+            {store.units.map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}
           </select>
         )}
         <span className="ml-auto text-xs font-semibold text-slate-400">{filtered.length} of {total}</span>
@@ -3557,7 +3557,7 @@ function AdminStudents({ store }) {
         <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
           <table className="w-full min-w-[680px] text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
-              <tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Email address</th><th className="px-5 py-3 whitespace-nowrap">Status</th><th className="px-5 py-3">Modules</th><th className="px-5 py-3 text-center whitespace-nowrap">Attendance</th><th className="px-5 py-3 text-right">Actions</th></tr>
+              <tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Email address</th><th className="px-5 py-3 whitespace-nowrap">Status</th><th className="px-5 py-3">Units</th><th className="px-5 py-3 text-center whitespace-nowrap">Attendance</th><th className="px-5 py-3 text-right">Actions</th></tr>
             </thead>
             <tbody>
               {paged.slice.map(s => {
@@ -3582,8 +3582,8 @@ function AdminStudents({ store }) {
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex max-w-[200px] flex-wrap gap-1">
-                        {(s.moduleIds || []).map(id => { const m = moduleById[id]; return m ? <span key={id} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600" title={m.name}>{m.code}</span> : null; })}
-                        {(s.moduleIds || []).length === 0 && <span className="text-[11px] text-slate-300">none</span>}
+                        {(s.unitIds || []).map(id => { const m = unitById[id]; return m ? <span key={id} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600" title={m.name}>{m.code}</span> : null; })}
+                        {(s.unitIds || []).length === 0 && <span className="text-[11px] text-slate-300">none</span>}
                       </div>
                     </td>
                     <td className="px-5 py-3 text-center">
@@ -3618,7 +3618,7 @@ function AdminStudents({ store }) {
           <Field label="Cohort (intake)">
             <select value={form.cohortId} onChange={e => setForm(f => ({ ...f, cohortId: e.target.value }))} className={inputCls}>
               <option value="">— none —</option>
-              {store.cohorts.map(c => { const p = store.programmes.find(x => x.id === c.programmeId); return <option key={c.id} value={c.id}>{p ? `${p.name} — ${c.name}` : c.name}</option>; })}
+              {store.cohorts.map(c => { const p = store.courses.find(x => x.id === c.courseId); return <option key={c.id} value={c.id}>{p ? `${p.name} — ${c.name}` : c.name}</option>; })}
             </select>
           </Field>
           {edit && (
@@ -3630,19 +3630,19 @@ function AdminStudents({ store }) {
               </div>
             </Field>
           )}
-          <Field label={`Modules${form.moduleIds.length ? ` · ${form.moduleIds.length} selected` : ""}`}>
+          <Field label={`Units${form.unitIds.length ? ` · ${form.unitIds.length} selected` : ""}`}>
             <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-              {store.modules.map(m => (
-                <button key={m.id} onClick={() => toggleModule(m.id)} type="button"
-                  className={`press flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold ring-1 transition ${form.moduleIds.includes(m.id) ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`}
-                  style={form.moduleIds.includes(m.id) ? { background: NAVY } : {}} title={m.name}>
-                  <span className={`flex h-4 w-4 items-center justify-center rounded border-2 ${form.moduleIds.includes(m.id) ? "border-white bg-white/20" : "border-slate-300"}`}>
-                    {form.moduleIds.includes(m.id) && <Check size={10} className="text-white" />}
+              {store.units.map(m => (
+                <button key={m.id} onClick={() => toggleUnit(m.id)} type="button"
+                  className={`press flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold ring-1 transition ${form.unitIds.includes(m.id) ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`}
+                  style={form.unitIds.includes(m.id) ? { background: NAVY } : {}} title={m.name}>
+                  <span className={`flex h-4 w-4 items-center justify-center rounded border-2 ${form.unitIds.includes(m.id) ? "border-white bg-white/20" : "border-slate-300"}`}>
+                    {form.unitIds.includes(m.id) && <Check size={10} className="text-white" />}
                   </span>
                   {m.code}
                 </button>
               ))}
-              {store.modules.length === 0 && <p className="col-span-2 text-xs text-slate-400 sm:col-span-3">No courses yet — add one on the Courses tab.</p>}
+              {store.units.length === 0 && <p className="col-span-2 text-xs text-slate-400 sm:col-span-3">No units yet — add one on the Units tab.</p>}
             </div>
           </Field>
           <PrimaryBtn onClick={save} disabled={!form.firstName.trim() || !form.lastName.trim() || !form.studentRef.trim()} className="w-full">
@@ -3658,10 +3658,10 @@ function AdminStudents({ store }) {
   );
 }
 
-// One student's attendance, broken down per module and overall. Reads the same
+// One student's attendance, broken down per unit and overall. Reads the same
 // scoped figures as the registers page (row comes from store.attendance.rows).
 // Per-student attendance grouped BY TERM: the current (active) term's overall +
-// modules, then each previous term as its own collapsible record. The overall is
+// units, then each previous term as its own collapsible record. The overall is
 // scoped to the current term only, so it resets each term.
 function StudentAttendanceDetail({ student, store }) {
   const R = 42, CIRC = 2 * Math.PI * R;
@@ -3681,43 +3681,43 @@ function StudentAttendanceDetail({ student, store }) {
   }, [student.id]);
 
   // Computed entirely from data the Students tab already loads — no extra request,
-  // so it works instantly and doesn't depend on the API being redeployed. A module's
-  // end date is its last session (store.sessions); once that date passes the module is
-  // "finished" and drops into "previous", and the overall counts only current modules.
+  // so it works instantly and doesn't depend on the API being redeployed. A unit's
+  // end date is its last session (store.sessions); once that date passes the unit is
+  // "finished" and drops into "previous", and the overall counts only current units.
   const today = todayISO();
   const row = (store.attendance?.rows || []).find(r => r.student.id === student.id) || null;
-  const moduleById = Object.fromEntries((store.modules || []).map(m => [m.id, m]));
-  const endByModule = {};
-  (store.sessions || []).forEach(se => { const cur = endByModule[se.moduleId]; if (!cur || se.date > cur) endByModule[se.moduleId] = se.date; });
+  const unitById = Object.fromEntries((store.units || []).map(m => [m.id, m]));
+  const endByUnit = {};
+  (store.sessions || []).forEach(se => { const cur = endByUnit[se.unitId]; if (!cur || se.date > cur) endByUnit[se.unitId] = se.date; });
   const emptyStats = { P: 0, L: 0, E: 0, A: 0, marked: 0, earned: 0, possible: 0, pct: null };
-  const moduleRows = (student.moduleIds || []).map(mid => {
-    const mod = moduleById[mid] || { id: mid, code: "?", name: "Unknown module" };
-    const endDate = endByModule[mid] || null;
-    return { module: { id: mod.id, code: mod.code, name: mod.name }, summary: row?.modules?.[mid] || emptyStats, endDate, finished: !!(endDate && endDate < today) };
+  const unitRows = (student.unitIds || []).map(mid => {
+    const mod = unitById[mid] || { id: mid, code: "?", name: "Unknown unit" };
+    const endDate = endByUnit[mid] || null;
+    return { unit: { id: mod.id, code: mod.code, name: mod.name }, summary: row?.units?.[mid] || emptyStats, endDate, finished: !!(endDate && endDate < today) };
   });
-  const currentModules = moduleRows.filter(r => !r.finished).sort((a, b) => (a.endDate || "9999").localeCompare(b.endDate || "9999"));
-  const previous = moduleRows.filter(r => r.finished).sort((a, b) => (b.endDate || "").localeCompare(a.endDate || ""));
-  const overall = aggregateStats(currentModules.map(r => r.summary));
-  const current = { modules: currentModules, overall };
-  // Lifetime attendance across every module the student has studied (current + previous).
-  const allOverall = aggregateStats(moduleRows.map(r => r.summary));
+  const currentUnits = unitRows.filter(r => !r.finished).sort((a, b) => (a.endDate || "9999").localeCompare(b.endDate || "9999"));
+  const previous = unitRows.filter(r => r.finished).sort((a, b) => (b.endDate || "").localeCompare(a.endDate || ""));
+  const overall = aggregateStats(currentUnits.map(r => r.summary));
+  const current = { units: currentUnits, overall };
+  // Lifetime attendance across every unit the student has studied (current + previous).
+  const allOverall = aggregateStats(unitRows.map(r => r.summary));
 
   // ---- Dashboard metrics (results + attendance rating + charts) ----
   const gradedItems = (assess?.assessments || []).filter(a => a.pct != null);
   const avgMark = assess?.averagePct ?? null;                       // average graded %
   const passRate = gradedItems.length ? Math.round(gradedItems.filter(a => a.pct >= 40).length / gradedItems.length * 1000) / 10 : null;
-  const enrolledCount = (student.moduleIds || []).length;
-  const unitsWithMark = new Set(gradedItems.map(a => a.moduleId)).size; // "completed" = has a final mark
-  // Final mark by unit code = the student's average % per module (donut).
+  const enrolledCount = (student.unitIds || []).length;
+  const unitsWithMark = new Set(gradedItems.map(a => a.unitId)).size; // "completed" = has a final mark
+  // Final mark by unit code = the student's average % per unit (donut).
   const byUnit = (() => {
     const m = new Map();
-    for (const a of gradedItems) { const g = m.get(a.moduleCode) || { sum: 0, n: 0 }; g.sum += a.pct; g.n++; m.set(a.moduleCode, g); }
+    for (const a of gradedItems) { const g = m.get(a.unitCode) || { sum: 0, n: 0 }; g.sum += a.pct; g.n++; m.set(a.unitCode, g); }
     return [...m.entries()].map(([code, g]) => ({ code, mark: Math.round(g.sum / g.n) }));
   })();
-  // Attendance rating uses lifetime attendance across all modules.
+  // Attendance rating uses lifetime attendance across all units.
   const rating = riskBand(allOverall.pct);
   const monthData = (monthly?.months || []).map(m => ({ label: fmtMonth(m.month), pct: m.pct }));
-  const firstCourse = (() => { const c = (store.cohorts || []).find(c => c.id === student.cohortId); return c?.name || moduleRows[0]?.module.code || "—"; })();
+  const firstCourse = (() => { const c = (store.cohorts || []).find(c => c.id === student.cohortId); return c?.name || unitRows[0]?.unit.code || "—"; })();
 
   const header = (
     <div className="flex items-center gap-3">
@@ -3731,7 +3731,7 @@ function StudentAttendanceDetail({ student, store }) {
 
   const fmtDate = (iso) => { if (!iso) return null; const [y, m, d] = iso.split("-"); const mm = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1] || m; return `${Number(d)} ${mm} ${y}`; };
 
-  const ModuleRow = ({ mod, stats, i, end, ended }) => {
+  const UnitRow = ({ mod, stats, i, end, ended }) => {
     const t = pctTone(stats.pct ?? null);
     return (
       <div className={`flex items-center gap-3 px-3.5 py-2.5 ${i ? "border-t border-slate-100" : ""}`}>
@@ -3761,17 +3761,17 @@ function StudentAttendanceDetail({ student, store }) {
     <div className="space-y-4">
       {header}
 
-      {/* Two headline figures: current modules only, and lifetime across all modules. */}
+      {/* Two headline figures: current units only, and lifetime across all units. */}
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-2xl bg-white p-4 text-center shadow-sm ring-1 ring-slate-200/70">
           <p className="text-3xl font-extrabold tabular-nums" style={{ color: oTone.colour }}>{fmtPct(current.overall.pct ?? null)}</p>
-          <p className="mt-0.5 text-xs font-bold text-slate-600">Current modules</p>
-          <p className="text-[10px] text-slate-400">{current.overall.marked} marked · {current.modules.length} running</p>
+          <p className="mt-0.5 text-xs font-bold text-slate-600">Current units</p>
+          <p className="text-[10px] text-slate-400">{current.overall.marked} marked · {current.units.length} running</p>
         </div>
         <div className="rounded-2xl bg-white p-4 text-center shadow-sm ring-1 ring-slate-200/70">
           <p className="text-3xl font-extrabold tabular-nums" style={{ color: allTone.colour }}>{fmtPct(allOverall.pct ?? null)}</p>
-          <p className="mt-0.5 text-xs font-bold text-slate-600">All modules</p>
-          <p className="text-[10px] text-slate-400">{allOverall.marked} marked · {moduleRows.length} total</p>
+          <p className="mt-0.5 text-xs font-bold text-slate-600">All units</p>
+          <p className="text-[10px] text-slate-400">{allOverall.marked} marked · {unitRows.length} total</p>
         </div>
       </div>
 
@@ -3822,11 +3822,11 @@ function StudentAttendanceDetail({ student, store }) {
         </ChartCard>
       )}
 
-      {/* Current modules — the live overall that rolls over as modules finish */}
+      {/* Current units — the live overall that rolls over as units finish */}
       <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-emerald-200">
         <div className="mb-3 flex items-center gap-2">
-          <p className="text-sm font-extrabold text-slate-800">Current modules</p>
-          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">{current.modules.length} running</span>
+          <p className="text-sm font-extrabold text-slate-800">Current units</p>
+          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">{current.units.length} running</span>
         </div>
         <div className="flex items-center gap-4">
           <div className="min-w-0 flex-1">
@@ -3838,31 +3838,31 @@ function StudentAttendanceDetail({ student, store }) {
                 </div>
               ))}
             </div>
-            <p className="mt-2 text-[11px] text-slate-400">{current.overall.marked ?? 0} session{(current.overall.marked ?? 0) === 1 ? "" : "s"} marked across current modules</p>
+            <p className="mt-2 text-[11px] text-slate-400">{current.overall.marked ?? 0} session{(current.overall.marked ?? 0) === 1 ? "" : "s"} marked across current units</p>
           </div>
         </div>
         <div className="mt-3 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200/70">
-          {current.modules.map((mr, i) => <ModuleRow key={mr.module.id} mod={mr.module} stats={mr.summary} i={i} end={mr.endDate} ended={false} />)}
-          {current.modules.length === 0 && <div className="px-4 py-6"><EmptyState Icon={Percent} title="No current modules" msg="Every assigned module has finished, or none are assigned yet. Assign modules via Edit student → Modules." /></div>}
+          {current.units.map((mr, i) => <UnitRow key={mr.unit.id} mod={mr.unit} stats={mr.summary} i={i} end={mr.endDate} ended={false} />)}
+          {current.units.length === 0 && <div className="px-4 py-6"><EmptyState Icon={Percent} title="No current units" msg="Every assigned unit has finished, or none are assigned yet. Assign units via Edit student → Units." /></div>}
         </div>
       </div>
 
-      {/* Previous assigned modules — finished ones, moved here automatically */}
+      {/* Previous assigned units — finished ones, moved here automatically */}
       {previous.length > 0 && (
         <div>
-          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Previous assigned modules · {previous.length}</p>
+          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Previous assigned units · {previous.length}</p>
           <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200/70">
-            {previous.map((mr, i) => <ModuleRow key={mr.module.id} mod={mr.module} stats={mr.summary} i={i} end={mr.endDate} ended={true} />)}
+            {previous.map((mr, i) => <UnitRow key={mr.unit.id} mod={mr.unit} stats={mr.summary} i={i} end={mr.endDate} ended={true} />)}
           </div>
         </div>
       )}
 
-      <p className="text-[11px] text-slate-400">A module moves to “previous” automatically once its last session date has passed. “Current modules” counts only running modules; “All modules” is across everything the student has studied. P = Present (2) · L = Late (1) · E = Excused (1) · A = Absent (0). Only marked sessions count.</p>
+      <p className="text-[11px] text-slate-400">A unit moves to “previous” automatically once its last session date has passed. “Current units” counts only running units; “All units” is across everything the student has studied. P = Present (2) · L = Late (1) · E = Excused (1) · A = Absent (0). Only marked sessions count.</p>
     </div>
   );
 }
 
-/* ----- Modules ----- */
+/* ----- Units ----- */
 // A deterministic seed from a string, so a course keeps the same banner colour
 // and pattern every time the gallery renders.
 const hashStr = (s) => { let h = 0; for (const c of String(s || "")) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); };
@@ -3954,20 +3954,20 @@ function CourseMenu({ onEdit, onDelete, onCohorts, editLabel = "Edit course", de
   );
 }
 
-/* ----- Programmes: the top of the hierarchy — HND Business, HND Computing… ----- */
-// Swatches offered when creating a programme, so its cards and its courses share
+/* ----- Courses: the top of the hierarchy — HND Business, HND Computing… ----- */
+// Swatches offered when creating a course, so its cards and its courses share
 // a colour. Kept in sync with the register palette for a coherent look.
 const PROGRAMME_COLOURS = ["#1a3a8f", "#0d7a5f", "#6d28d9", "#b45309", "#0e7490", "#9e1b32", "#2563eb", "#5b6472"];
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-function HndProgrammes({ store, onOpen }) {
+function HndCourses({ store, onOpen }) {
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
   const nowYear = new Date().getFullYear();
-  // cohortMonth/cohortYear seed the programme's FIRST intake when adding.
+  // cohortMonth/cohortYear seed the course's FIRST intake when adding.
   const [form, setForm] = useState({ name: "", colour: PROGRAMME_COLOURS[0], cohortMonth: 9, cohortYear: nowYear });
-  const [cohortProg, setCohortProg] = useState(null); // the programme whose cohorts are being managed
+  const [cohortProg, setCohortProg] = useState(null); // the course whose cohorts are being managed
   const YEARS = Array.from({ length: 7 }, (_, i) => nowYear - 2 + i);
 
   const openAdd = () => { setEdit(null); setForm({ name: "", colour: PROGRAMME_COLOURS[0], cohortMonth: 9, cohortYear: nowYear }); setModal(true); };
@@ -3975,56 +3975,56 @@ function HndProgrammes({ store, onOpen }) {
   const save = async () => {
     try {
       if (edit) {
-        await store.updateProgramme(edit.id, { name: form.name, colour: form.colour });
+        await store.updateCourse(edit.id, { name: form.name, colour: form.colour });
       } else {
-        const prog = await store.addProgramme({ name: form.name, colour: form.colour });
+        const prog = await store.addCourse({ name: form.name, colour: form.colour });
         // Seed the first cohort (intake) from the chosen month + year, e.g. "Sep 2025".
         if (prog?.id) {
-          await store.addCohort({ programmeId: prog.id, name: `${MONTHS[form.cohortMonth - 1]} ${form.cohortYear}`, startDate: `${form.cohortYear}-${String(form.cohortMonth).padStart(2, "0")}-01` });
+          await store.addCohort({ courseId: prog.id, name: `${MONTHS[form.cohortMonth - 1]} ${form.cohortYear}`, startDate: `${form.cohortYear}-${String(form.cohortMonth).padStart(2, "0")}-01` });
         }
       }
       setModal(false);
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
   };
   const remove = async (p) => {
-    const n = p.moduleCount || 0;
-    if (!window.confirm(`Delete the programme "${p.name}"?\n\n${n ? `Its ${n} course${n === 1 ? "" : "s"} will be kept but left unassigned — no sessions or registers are deleted.` : "It has no courses."}`)) return;
-    await store.removeProgramme(p.id);
+    const n = p.unitCount || 0;
+    if (!window.confirm(`Delete the course "${p.name}"?\n\n${n ? `Its ${n} unit${n === 1 ? "" : "s"} will be kept but left unassigned — no sessions or registers are deleted.` : "It has no units."}`)) return;
+    await store.removeCourse(p.id);
   };
 
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <p className="max-w-2xl text-xs text-slate-500">
-          A programme groups the courses taught under it — e.g. <span className="font-semibold">HND Business</span>.
-          Add your programmes here, then open one to add its courses.
+          A course groups the units taught under it — e.g. <span className="font-semibold">HND Business</span>.
+          Add your courses here, then open one to add its units.
         </p>
-        <PrimaryBtn onClick={openAdd}><Plus size={16} /> Add programme</PrimaryBtn>
+        <PrimaryBtn onClick={openAdd}><Plus size={16} /> Add course</PrimaryBtn>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {store.programmes.map((p, i) => {
+        {store.courses.map((p, i) => {
           const colour = p.colour || NAVY;
           const seed = hashStr(p.name);
           return (
             <div key={p.id} className="fade-up flex flex-col overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md hover:ring-slate-300/80" style={{ animationDelay: `${i * 45}ms` }}>
               <div className="relative h-24">
                 <CoursePattern seed={seed} colour={colour} />
-                <div className="absolute right-3 top-3"><CourseMenu onEdit={() => openEdit(p)} onDelete={() => remove(p)} onCohorts={() => setCohortProg(p)} editLabel="Edit programme" deleteLabel="Delete programme" /></div>
-                <span className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-md bg-white/95 px-2.5 py-1 text-xs font-extrabold text-slate-800 shadow-sm"><Layers size={12} /> Programme</span>
+                <div className="absolute right-3 top-3"><CourseMenu onEdit={() => openEdit(p)} onDelete={() => remove(p)} onCohorts={() => setCohortProg(p)} editLabel="Edit course" deleteLabel="Delete course" /></div>
+                <span className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-md bg-white/95 px-2.5 py-1 text-xs font-extrabold text-slate-800 shadow-sm"><Layers size={12} /> Course</span>
               </div>
               <div className="flex flex-1 flex-col p-4">
                 <h3 className="text-base font-extrabold leading-snug" style={{ color: NAVY_DARK }}>{p.name}</h3>
-                <p className="mt-1 text-xs font-semibold text-slate-400">{p.moduleCount || 0} course{(p.moduleCount || 0) === 1 ? "" : "s"}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-400">{p.unitCount || 0} unit{(p.unitCount || 0) === 1 ? "" : "s"}</p>
                 {(() => {
-                  const cs = (store.cohorts || []).filter(c => c.programmeId === p.id);
+                  const cs = (store.cohorts || []).filter(c => c.courseId === p.id);
                   return cs.length > 0
                     ? <div className="mt-1.5 flex flex-wrap gap-1">{cs.map(c => <span key={c.id} className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 ring-1 ring-indigo-100">{c.name}</span>)}</div>
                     : <p className="mt-1 text-[11px] font-semibold text-slate-300">No cohorts yet</p>;
                 })()}
                 <div className="mt-4 flex gap-2">
                   <button onClick={() => onOpen(p.id)} className="press flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-slate-200 py-2.5 text-sm font-bold transition hover:border-indigo-300 hover:bg-indigo-50" style={{ color: NAVY }}>
-                    View courses <ArrowRight size={15} />
+                    View units <ArrowRight size={15} />
                   </button>
                   <button onClick={() => setCohortProg(p)} title="Manage cohorts" className="press flex shrink-0 items-center justify-center gap-1.5 rounded-xl border-2 border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-500 transition hover:border-indigo-300 hover:bg-indigo-50">
                     <Layers size={15} />
@@ -4034,16 +4034,16 @@ function HndProgrammes({ store, onOpen }) {
             </div>
           );
         })}
-        {store.programmes.length === 0 && (
+        {store.courses.length === 0 && (
           <div className="sm:col-span-2 lg:col-span-3">
-            <Card><EmptyState Icon={Layers} title="No programmes yet" msg="Add your first programme — e.g. HND Business — then add its courses." /></Card>
+            <Card><EmptyState Icon={Layers} title="No courses yet" msg="Add your first course — e.g. HND Business — then add its units." /></Card>
           </div>
         )}
       </div>
 
-      <Modal open={modal} onClose={() => setModal(false)} title={edit ? "Edit programme" : "Add programme"}>
+      <Modal open={modal} onClose={() => setModal(false)} title={edit ? "Edit course" : "Add course"}>
         <div className="space-y-3">
-          <Field label="Programme name"><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. HND Business" className={inputCls} /></Field>
+          <Field label="Course name"><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. HND Business" className={inputCls} /></Field>
           <Field label="Colour">
             <div className="flex flex-wrap gap-2">
               {PROGRAMME_COLOURS.map(c => (
@@ -4065,22 +4065,22 @@ function HndProgrammes({ store, onOpen }) {
               <p className="mt-1 text-[11px] text-slate-400">Creates the first intake — <b>{MONTHS[form.cohortMonth - 1]} {form.cohortYear}</b>. You can add more later via Manage cohorts.</p>
             </Field>
           )}
-          <PrimaryBtn onClick={save} disabled={!form.name.trim()} className="w-full"><Save size={16} /> {edit ? "Save changes" : "Add programme"}</PrimaryBtn>
+          <PrimaryBtn onClick={save} disabled={!form.name.trim()} className="w-full"><Save size={16} /> {edit ? "Save changes" : "Add course"}</PrimaryBtn>
         </div>
       </Modal>
 
-      {cohortProg && <CohortManager store={store} programme={cohortProg} onClose={() => setCohortProg(null)} />}
+      {cohortProg && <CohortManager store={store} course={cohortProg} onClose={() => setCohortProg(null)} />}
     </>
   );
 }
 
-/* ----- Cohorts & terms: intakes (e.g. "SEP 2025") under one programme ----- */
-function CohortManager({ store, programme, onClose }) {
+/* ----- Cohorts & terms: intakes (e.g. "SEP 2025") under one course ----- */
+function CohortManager({ store, course, onClose }) {
   const [name, setName] = useState("");
   const [start, setStart] = useState("");
   const [busy, setBusy] = useState(false);
   const [termCohort, setTermCohort] = useState(null); // cohort whose terms are being edited
-  const list = (store.cohorts || []).filter(c => c.programmeId === programme.id);
+  const list = (store.cohorts || []).filter(c => c.courseId === course.id);
   const termsOf = (cid) => (store.terms || []).filter(t => t.cohortId === cid).sort((a, b) => a.year - b.year || a.index - b.index);
   const today = todayISO();
   const isActiveTerm = (t) => today >= t.start && today <= t.end;
@@ -4088,7 +4088,7 @@ function CohortManager({ store, programme, onClose }) {
   const add = async () => {
     if (!name.trim()) return;
     setBusy(true);
-    try { await store.addCohort({ programmeId: programme.id, name: name.trim(), startDate: start || null }); setName(""); setStart(""); }
+    try { await store.addCohort({ courseId: course.id, name: name.trim(), startDate: start || null }); setName(""); setStart(""); }
     catch (_) { /* store toasts the error (e.g. duplicate name) */ }
     finally { setBusy(false); }
   };
@@ -4135,9 +4135,9 @@ function CohortManager({ store, programme, onClose }) {
 
   // ---- Cohort list ----
   return (
-    <Modal open onClose={onClose} title={`Cohorts — ${programme.name}`}>
+    <Modal open onClose={onClose} title={`Cohorts — ${course.name}`}>
       <div className="space-y-3">
-        <p className="text-[11px] text-slate-500">An intake of students on this programme — e.g. <b>SEP 2025</b>, <b>Jan 2024</b>. Each cohort runs its own 6 terms.</p>
+        <p className="text-[11px] text-slate-500">An intake of students on this course — e.g. <b>SEP 2025</b>, <b>Jan 2024</b>. Each cohort runs its own 6 terms.</p>
 
         <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-100">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
@@ -4170,12 +4170,12 @@ function CohortManager({ store, programme, onClose }) {
   );
 }
 
-/* ----- Courses: the module gallery, add / edit / delete + open registers ----- */
-function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter }) {
+/* ----- Courses: the unit gallery, add / edit / delete + open registers ----- */
+function Units({ store, onView, courseFilter = "", setCourseFilter }) {
   const [modal, setModal] = useState(false);
   const [step, setStep] = useState("details");       // details -> schedule (new courses only)
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ code: "", name: "", tutor: "", programmeId: "", cohortId: "", termId: "" });
+  const [form, setForm] = useState({ code: "", name: "", tutor: "", courseId: "", cohortId: "", termId: "" });
   const [picked, setPicked] = useState([]);           // studentIds enrolled on this course
   const [pickQuery, setPickQuery] = useState("");     // search within the student picker
   const [sched, setSched] = useState({ start: todayISO(), end: "", hours: 3 });
@@ -4183,22 +4183,22 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
 
-  const programmeById = Object.fromEntries(store.programmes.map(p => [p.id, p]));
-  const hasUnassigned = store.modules.some(m => !m.programmeId);
+  const courseById = Object.fromEntries(store.courses.map(p => [p.id, p]));
+  const hasUnassigned = store.units.some(m => !m.courseId);
 
-  // New courses default into the programme currently being filtered, so opening a
-  // programme and hitting "Add course" files it in the right place automatically.
-  const defaultProgramme = programmeFilter && programmeFilter !== "none" ? programmeFilter : "";
-  const enrolledIds = (moduleId) => store.students.filter(s => (s.moduleIds || []).includes(moduleId)).map(s => s.id);
+  // New courses default into the course currently being filtered, so opening a
+  // course and hitting "Add course" files it in the right place automatically.
+  const defaultCourse = courseFilter && courseFilter !== "none" ? courseFilter : "";
+  const enrolledIds = (unitId) => store.students.filter(s => (s.unitIds || []).includes(unitId)).map(s => s.id);
   const openAdd = () => {
     setEdit(null); setStep("details"); setSavedId(null); setPicked([]); setPickQuery("");
-    setForm({ code: "", name: "", tutor: "", programmeId: defaultProgramme, cohortId: "", termId: "" });
+    setForm({ code: "", name: "", tutor: "", courseId: defaultCourse, cohortId: "", termId: "" });
     setSched({ start: todayISO(), end: "", hours: 3 });
     setModal(true);
   };
   const openEdit = (m) => {
     setEdit(m); setStep("details"); setSavedId(m.id); setPicked(enrolledIds(m.id)); setPickQuery("");
-    setForm({ code: m.code, name: m.name, tutor: m.tutor || "", programmeId: m.programmeId || "", cohortId: m.cohortId || "", termId: m.termId || "" });
+    setForm({ code: m.code, name: m.name, tutor: m.tutor || "", courseId: m.courseId || "", cohortId: m.cohortId || "", termId: m.termId || "" });
     setModal(true);
   };
   const togglePick = (id) => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
@@ -4209,12 +4209,12 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
     setBusy(true);
     try {
       if (edit) {
-        await store.updateModule(edit.id, form);
-        await store.setModuleEnrolments(edit.id, picked);
+        await store.updateUnit(edit.id, form);
+        await store.setUnitEnrolments(edit.id, picked);
         setModal(false);
       } else {
-        const created = await store.addModule(form);
-        if (picked.length) await store.setModuleEnrolments(created.id, picked);
+        const created = await store.addUnit(form);
+        if (picked.length) await store.setUnitEnrolments(created.id, picked);
         setSavedId(created.id);
         setStep("schedule");
       }
@@ -4234,29 +4234,29 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
 
   const remove = async (m) => {
     if (!window.confirm(`Delete ${m.code} — ${m.name}?\n\nIts ${m.sessionCount} session${m.sessionCount === 1 ? "" : "s"} and all their attendance marks will be deleted. This cannot be undone.`)) return;
-    await store.removeModule(m.id);
+    await store.removeUnit(m.id);
   };
 
   const ql = query.trim().toLowerCase();
-  const list = store.modules.filter(m => {
-    if (programmeFilter === "none" && m.programmeId) return false;
-    if (programmeFilter && programmeFilter !== "none" && m.programmeId !== programmeFilter) return false;
+  const list = store.units.filter(m => {
+    if (courseFilter === "none" && m.courseId) return false;
+    if (courseFilter && courseFilter !== "none" && m.courseId !== courseFilter) return false;
     return !ql || m.code.toLowerCase().includes(ql) || m.name.toLowerCase().includes(ql) || (m.tutor || "").toLowerCase().includes(ql);
   });
 
-  // The programme filter pills: All, each programme, then "No programme" if needed.
-  const chips = [{ id: "", label: "All programmes" },
-    ...store.programmes.map(p => ({ id: p.id, label: p.name, colour: p.colour })),
-    ...(hasUnassigned ? [{ id: "none", label: "No programme" }] : [])];
+  // The course filter pills: All, each course, then "No course" if needed.
+  const chips = [{ id: "", label: "All courses" },
+    ...store.courses.map(p => ({ id: p.id, label: p.name, colour: p.colour })),
+    ...(hasUnassigned ? [{ id: "none", label: "No course" }] : [])];
 
   return (
     <>
       {chips.length > 1 && (
         <div className="mb-4 flex flex-wrap gap-1.5">
           {chips.map(c => {
-            const active = programmeFilter === c.id;
+            const active = courseFilter === c.id;
             return (
-              <button key={c.id || "all"} onClick={() => setProgrammeFilter?.(c.id)}
+              <button key={c.id || "all"} onClick={() => setCourseFilter?.(c.id)}
                 className={`press flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold shadow-sm ring-1 transition-all ${active ? "text-white ring-transparent" : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50"}`}
                 style={active ? { background: c.colour || NAVY } : {}}>
                 {c.colour && !active && <span className="h-2 w-2 rounded-full" style={{ background: c.colour }} />}
@@ -4270,7 +4270,7 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
           <Search size={15} className="text-slate-400" />
-          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search courses…" className="w-40 bg-transparent text-sm outline-none sm:w-56" />
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search units…" className="w-40 bg-transparent text-sm outline-none sm:w-56" />
         </div>
         <PrimaryBtn onClick={openAdd}><Plus size={16} /> Add course</PrimaryBtn>
       </div>
@@ -4278,13 +4278,13 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {list.map((m, i) => {
           const seed = hashStr(m.code);
-          const prog = m.programmeId ? programmeById[m.programmeId] : null;
-          // A course wears its programme's colour, so the gallery reads as groups.
+          const prog = m.courseId ? courseById[m.courseId] : null;
+          // A course wears its course's colour, so the gallery reads as groups.
           const colour = prog?.colour || courseColour(seed);
-          const totals = store.attendance?.moduleTotals?.[m.id];
+          const totals = store.attendance?.unitTotals?.[m.id];
           const pct = totals?.pct ?? null;
           // Session count follows the semester picker; enrolment isn't dated, so
-          // the student count is the module's all-time total.
+          // the student count is the unit's all-time total.
           const sessionCount = totals?.sessionCount ?? m.sessionCount;
           const tone = pctTone(pct);
           // Cohort/term this unit runs in, and whether that term is current (open),
@@ -4305,7 +4305,7 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
               <div className="flex flex-1 flex-col p-4">
                 {prog
                   ? <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide" style={{ color: prog.colour }}><Layers size={11} /> {prog.name}</p>
-                  : <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-300">No programme</p>}
+                  : <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-300">No course</p>}
                 {(uCohort || uTerm) && (
                   <p className="mb-1 flex flex-wrap items-center gap-1 text-[10px] font-bold">
                     {uCohort && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">{uCohort.name}</span>}
@@ -4328,34 +4328,34 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
             </div>
           );
         })}
-        {store.modules.length === 0 && (
+        {store.units.length === 0 && (
           <div className="sm:col-span-2 lg:col-span-3 xl:col-span-4">
-            <Card><EmptyState Icon={BookOpen} title="No courses yet" msg="Add your first HND course to start timetabling sessions and taking registers." /></Card>
+            <Card><EmptyState Icon={BookOpen} title="No units yet" msg="Add your first HND unit to start timetabling sessions and taking registers." /></Card>
           </div>
         )}
-        {store.modules.length > 0 && list.length === 0 && (
+        {store.units.length > 0 && list.length === 0 && (
           <div className="sm:col-span-2 lg:col-span-3 xl:col-span-4">
-            <Card><EmptyState Icon={Search} title="No matching courses" msg={query ? `Nothing matches "${query}".` : "No courses in this programme yet — use “Add course” to create one."} /></Card>
+            <Card><EmptyState Icon={Search} title="No matching courses" msg={query ? `Nothing matches "${query}".` : "No courses in this course yet — use “Add course” to create one."} /></Card>
           </div>
         )}
       </div>
 
-      <Modal open={modal} onClose={() => setModal(false)} title={step === "schedule" ? "Weekly registers" : edit ? "Edit course" : "Add course"} width={520}>
+      <Modal open={modal} onClose={() => setModal(false)} title={step === "schedule" ? "Weekly registers" : edit ? "Edit unit" : "Add unit"} width={520}>
         {step === "details" ? (
           <div className="space-y-3">
-            <Field label="Programme">
-              <select value={form.programmeId} onChange={e => setForm(f => ({ ...f, programmeId: e.target.value, cohortId: "", termId: "" }))} className={inputCls}>
+            <Field label="Course">
+              <select value={form.courseId} onChange={e => setForm(f => ({ ...f, courseId: e.target.value, cohortId: "", termId: "" }))} className={inputCls}>
                 <option value="">— none —</option>
-                {store.programmes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {store.courses.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </Field>
             {/* Which intake + term this unit runs in. Optional, but needed for the
                 term-based attendance pause/activate. Term list follows the cohort. */}
             <div className="grid grid-cols-2 gap-3">
               <Field label="Cohort">
-                <select value={form.cohortId} onChange={e => setForm(f => ({ ...f, cohortId: e.target.value, termId: "" }))} disabled={!form.programmeId} className={inputCls}>
+                <select value={form.cohortId} onChange={e => setForm(f => ({ ...f, cohortId: e.target.value, termId: "" }))} disabled={!form.courseId} className={inputCls}>
                   <option value="">— none —</option>
-                  {store.cohorts.filter(c => c.programmeId === form.programmeId).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {store.cohorts.filter(c => c.courseId === form.courseId).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </Field>
               <Field label="Term">
@@ -4366,13 +4366,13 @@ function HndModules({ store, onView, programmeFilter = "", setProgrammeFilter })
               </Field>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Course code"><input value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))} placeholder="e.g. OBM" className={inputCls} /></Field>
+              <Field label="Unit code"><input value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))} placeholder="e.g. OBM" className={inputCls} /></Field>
               <Field label="Tutor"><select value={form.tutor} onChange={e => setForm(f => ({ ...f, tutor: e.target.value }))} className={inputCls}><option value="">— none —</option>{store.staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></Field>
             </div>
             <Field label="Course name"><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Organisational Behaviour Management" className={inputCls} /></Field>
 
             {/* Enrol students onto this unit, straight from the student list */}
-            <Field label={`Students on this course${picked.length ? ` · ${picked.length} selected` : ""}`}>
+            <Field label={`Students on this unit${picked.length ? ` · ${picked.length} selected` : ""}`}>
               <StudentPicker students={store.students} picked={picked} onToggle={togglePick} query={pickQuery} setQuery={setPickQuery}
                 onAll={() => setPicked(store.students.map(s => s.id))} onNone={() => setPicked([])} />
             </Field>
@@ -4442,7 +4442,7 @@ function ScheduleStep({ sched, setSched, busy, onCreate, onSkip }) {
     <div className="space-y-3">
       <div className="flex items-start gap-2.5 rounded-xl bg-emerald-50 px-3.5 py-3 text-xs ring-1 ring-emerald-200">
         <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" />
-        <p className="font-semibold text-emerald-800">Course saved. Set its dates and taught hours — one register is created per 3 hours, every week.</p>
+        <p className="font-semibold text-emerald-800">Unit saved. Set its dates and taught hours — one register is created per 3 hours, every week.</p>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Start date"><input type="date" value={sched.start} onChange={e => setSched(s => ({ ...s, start: e.target.value }))} className={inputCls} /></Field>
@@ -4623,7 +4623,7 @@ function AdminAssessments({ store }) {
   ];
   return (
     <>
-      <AdminHeader title="Assessments" subtitle="Marks, grades and averages across every course" Icon={Award}
+      <AdminHeader title="Assessments" subtitle="Marks, grades and averages across every unit" Icon={Award}
         action={<button onClick={() => refreshAssessments()} className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><RefreshCw size={14} /> Refresh</button>} />
       <div className="mb-4 flex flex-wrap gap-1.5">
         {tabs.map(t => (
@@ -4645,19 +4645,19 @@ function AssessmentsOverview({ store }) {
   if (!ov) return <div className="skeleton h-64 rounded-2xl" />;
   const o = ov.overall;
   const ql = query.trim().toLowerCase();
-  const rows = ov.modules.filter(m => !ql || m.code.toLowerCase().includes(ql) || m.name.toLowerCase().includes(ql));
+  const rows = ov.units.filter(m => !ql || m.code.toLowerCase().includes(ql) || m.name.toLowerCase().includes(ql));
   const exportCSV = () => {
     downloadCSV("assessment-averages.csv", [
       { key: "code", label: "Course code" }, { key: "name", label: "Course" }, { key: "students", label: "Students" },
       { key: "assessments", label: "Assessments" }, { key: "graded", label: "Graded" }, { key: "avg", label: "Average %" },
       ...GRADE_BANDS.map(b => ({ key: b, label: b })),
-    ], ov.modules.map(m => ({ code: m.code, name: m.name, students: m.students, assessments: m.assessmentCount, graded: m.gradedCount, avg: m.avgPct ?? "", ...Object.fromEntries(GRADE_BANDS.map(b => [b, m.dist[b] || 0])) })));
+    ], ov.units.map(m => ({ code: m.code, name: m.name, students: m.students, assessments: m.assessmentCount, graded: m.gradedCount, avg: m.avgPct ?? "", ...Object.fromEntries(GRADE_BANDS.map(b => [b, m.dist[b] || 0])) })));
     store.notify("Exported averages CSV");
   };
   return (
     <>
       <div className="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Assessments" value={o.assessments} sub="defined across courses" Icon={ClipboardList} tone={NAVY} delay={0} animate />
+        <StatCard label="Assessments" value={o.assessments} sub="defined across units" Icon={ClipboardList} tone={NAVY} delay={0} animate />
         <StatCard label="Average mark" value={fmtPct(o.avgPct)} sub="across all grades" Icon={Percent} tone={pctTone(o.avgPct).colour} delay={60} animate />
         <StatCard label="Pass rate" value={fmtPct(o.passRate)} sub="graded at 40%+" Icon={Award} tone={pctTone(o.passRate).colour} delay={120} animate />
         <StatCard label="Grades entered" value={o.gradedSubmissions} sub="marked submissions" Icon={CheckCircle2} tone="#0d7a5f" delay={180} animate />
@@ -4675,7 +4675,7 @@ function AssessmentsOverview({ store }) {
         <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
           <table className="w-full min-w-[760px] text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
-              <tr><th className="px-5 py-3">Course</th><th className="px-5 py-3 text-center whitespace-nowrap">Students</th><th className="px-5 py-3 text-center whitespace-nowrap">Assessments</th><th className="px-5 py-3 text-center whitespace-nowrap">Graded</th><th className="px-5 py-3 whitespace-nowrap">Grade spread</th><th className="px-5 py-3 text-center whitespace-nowrap">Average</th></tr>
+              <tr><th className="px-5 py-3">Unit</th><th className="px-5 py-3 text-center whitespace-nowrap">Students</th><th className="px-5 py-3 text-center whitespace-nowrap">Assessments</th><th className="px-5 py-3 text-center whitespace-nowrap">Graded</th><th className="px-5 py-3 whitespace-nowrap">Grade spread</th><th className="px-5 py-3 text-center whitespace-nowrap">Average</th></tr>
             </thead>
             <tbody>
               {rows.map(m => (
@@ -4688,7 +4688,7 @@ function AssessmentsOverview({ store }) {
                   <td className="px-5 py-3 text-center"><span className={`rounded-lg px-2 py-1 text-xs font-extrabold tabular-nums ${pctTone(m.avgPct).bg} ${pctTone(m.avgPct).text}`}>{fmtPct(m.avgPct)}</span></td>
                 </tr>
               ))}
-              {rows.length === 0 && <tr><td colSpan={6} className="px-5 py-10"><EmptyState Icon={Award} title="No courses" msg="Add courses and assessments to see averages here." /></td></tr>}
+              {rows.length === 0 && <tr><td colSpan={6} className="px-5 py-10"><EmptyState Icon={Award} title="No units" msg="Add units and assessments to see averages here." /></td></tr>}
             </tbody>
           </table>
         </div>
@@ -4699,18 +4699,18 @@ function AssessmentsOverview({ store }) {
 
 /* ----- Manage assessments per course + open grade entry ----- */
 function AssessmentsManage({ store, onGrade }) {
-  const [moduleId, setModuleId] = useState("");
+  const [unitId, setUnitId] = useState("");
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
   const [form, setForm] = useState({ title: "", type: "Assignment", maxMarks: 100, weight: 0, dueDate: "" });
 
   useEffect(() => {
-    if (!store.modules.length) { setModuleId(""); return; }
-    if (!moduleId || !store.modules.some(m => m.id === moduleId)) setModuleId(store.modules[0].id);
-  }, [store.modules, moduleId]);
+    if (!store.units.length) { setUnitId(""); return; }
+    if (!unitId || !store.units.some(m => m.id === unitId)) setUnitId(store.units[0].id);
+  }, [store.units, unitId]);
 
-  const selected = store.modules.find(m => m.id === moduleId) || null;
-  const list = store.assessments.filter(a => a.moduleId === moduleId);
+  const selected = store.units.find(m => m.id === unitId) || null;
+  const list = store.assessments.filter(a => a.unitId === unitId);
 
   const openAdd = () => { setEdit(null); setForm({ title: "", type: "Assignment", maxMarks: 100, weight: 0, dueDate: "" }); setModal(true); };
   const openEdit = (a) => { setEdit(a); setForm({ title: a.title, type: a.type, maxMarks: a.maxMarks, weight: a.weight, dueDate: a.dueDate || "" }); setModal(true); };
@@ -4718,7 +4718,7 @@ function AssessmentsManage({ store, onGrade }) {
     try {
       const data = { ...form, maxMarks: Number(form.maxMarks), weight: Number(form.weight) };
       if (edit) await store.updateAssessment(edit.id, data);
-      else await store.addAssessment({ ...data, moduleId });
+      else await store.addAssessment({ ...data, unitId });
       setModal(false);
     } catch (_e) { /* toast shown by store */ }
   };
@@ -4727,13 +4727,13 @@ function AssessmentsManage({ store, onGrade }) {
     await store.removeAssessment(a.id);
   };
 
-  if (!store.modules.length) return <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70"><EmptyState Icon={BookOpen} title="No courses yet" msg="Add a course first, then define its assessments." /></div>;
+  if (!store.units.length) return <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70"><EmptyState Icon={BookOpen} title="No units yet" msg="Add a unit first, then define its assessments." /></div>;
 
   return (
     <>
       <div className="mb-4 flex flex-wrap gap-1.5">
-        {store.modules.map(m => (
-          <button key={m.id} onClick={() => setModuleId(m.id)} className={`press rounded-xl px-3.5 py-2 text-left text-xs font-bold shadow-sm ring-1 transition-all ${moduleId === m.id ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`} style={moduleId === m.id ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}>{m.code}</button>
+        {store.units.map(m => (
+          <button key={m.id} onClick={() => setUnitId(m.id)} className={`press rounded-xl px-3.5 py-2 text-left text-xs font-bold shadow-sm ring-1 transition-all ${unitId === m.id ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`} style={unitId === m.id ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}>{m.code}</button>
         ))}
       </div>
       {selected && (
@@ -4759,7 +4759,7 @@ function AssessmentsManage({ store, onGrade }) {
             </Card>
           );
         })}
-        {list.length === 0 && <div className="sm:col-span-2 lg:col-span-3"><Card><EmptyState Icon={ClipboardList} title="No assessments for this course" msg="Add an assessment, then enter students' marks." /></Card></div>}
+        {list.length === 0 && <div className="sm:col-span-2 lg:col-span-3"><Card><EmptyState Icon={ClipboardList} title="No assessments for this unit" msg="Add an assessment, then enter students' marks." /></Card></div>}
       </div>
 
       <Modal open={modal} onClose={() => setModal(false)} title={edit ? "Edit assessment" : "Add assessment"}>
@@ -4795,7 +4795,7 @@ function GradeEntry({ store, assessment, onBack }) {
   useEffect(() => { load(); }, [load]);
   if (!data) return <><AdminHeader title="Grades" subtitle="Loading…" Icon={Award} /><div className="skeleton h-64 rounded-2xl" /></>;
 
-  const { assessment: a, module: mod, rows } = data;
+  const { assessment: a, unit: mod, rows } = data;
   const max = a.maxMarks;
   const setMark = (id, v) => { if (v === "" || /^\d{1,4}$/.test(v)) setDraft(d => ({ ...d, [id]: v })); };
   const dirty = rows.some(r => (draft[r.student.id] ?? "") !== (saved[r.student.id] ?? ""));
@@ -4854,7 +4854,7 @@ function GradeEntry({ store, assessment, onBack }) {
                   </tr>
                 );
               })}
-              {paged.slice.length === 0 && <tr><td colSpan={4} className="px-5 py-10"><EmptyState Icon={Users} title={rows.length === 0 ? "No students enrolled" : "No students match"} msg={rows.length === 0 ? "Enrol students onto this course first." : "Try a different search."} /></td></tr>}
+              {paged.slice.length === 0 && <tr><td colSpan={4} className="px-5 py-10"><EmptyState Icon={Users} title={rows.length === 0 ? "No students enrolled" : "No students match"} msg={rows.length === 0 ? "Enrol students onto this unit first." : "Try a different search."} /></td></tr>}
             </tbody>
           </table>
         </div>
@@ -4877,8 +4877,8 @@ function StudentAssessments({ store }) {
     return () => { live = false; };
   }, [studentId, store]);
 
-  const byModule = {};
-  (data?.assessments || []).forEach(a => { (byModule[a.moduleId] = byModule[a.moduleId] || { code: a.moduleCode, name: a.moduleName, items: [] }).items.push(a); });
+  const byUnit = {};
+  (data?.assessments || []).forEach(a => { (byUnit[a.unitId] = byUnit[a.unitId] || { code: a.unitCode, name: a.unitName, items: [] }).items.push(a); });
 
   return (
     <>
@@ -4888,12 +4888,12 @@ function StudentAssessments({ store }) {
       {studentId && data && !loading && (
         <>
           <div className="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <StatCard label="Assessments" value={data.count} sub="on their courses" Icon={ClipboardList} tone={NAVY} delay={0} animate />
+            <StatCard label="Assessments" value={data.count} sub="on their units" Icon={ClipboardList} tone={NAVY} delay={0} animate />
             <StatCard label="Graded" value={data.graded} sub={`${data.count - data.graded} outstanding`} Icon={CheckCircle2} tone="#0d7a5f" delay={60} animate />
             <StatCard label="Average mark" value={fmtPct(data.averagePct)} sub="across graded work" Icon={Percent} tone={pctTone(data.averagePct).colour} delay={120} animate />
             <StatCard label="Overall grade" value={data.averageGrade || "—"} sub="based on average" Icon={Award} tone={gradeTone(data.averageGrade).colour} delay={180} animate />
           </div>
-          {Object.entries(byModule).map(([mid, m]) => (
+          {Object.entries(byUnit).map(([mid, m]) => (
             <div key={mid} className="mb-4">
               <p className="mb-1.5 flex items-center gap-2 text-sm font-bold text-slate-700"><span className="flex h-6 w-9 items-center justify-center rounded text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{m.code.slice(0, 5)}</span>{m.name}</p>
               <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
@@ -4912,33 +4912,33 @@ function StudentAssessments({ store }) {
               </div>
             </div>
           ))}
-          {data.count === 0 && <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70"><EmptyState Icon={ClipboardList} title="No assessments" msg="This student's courses don't have any assessments defined yet." /></div>}
+          {data.count === 0 && <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70"><EmptyState Icon={ClipboardList} title="No assessments" msg="This student's units don't have any assessments defined yet." /></div>}
         </>
       )}
     </>
   );
 }
 
-/* ----- Grade records: record-level CRUD (programme → course → assessment → student → marks) ----- */
+/* ----- Grade records: record-level CRUD (course → course → assessment → student → marks) ----- */
 function AssessmentRecords({ store }) {
-  const programmeById = useMemo(() => Object.fromEntries(store.programmes.map(p => [p.id, p])), [store.programmes]);
-  const [fProgramme, setFProgramme] = useState("");
-  const [fModule, setFModule] = useState("");
+  const courseById = useMemo(() => Object.fromEntries(store.courses.map(p => [p.id, p])), [store.courses]);
+  const [fCourse, setFCourse] = useState("");
+  const [fUnit, setFUnit] = useState("");
   const [query, setQuery] = useState("");
   const [records, setRecords] = useState([]);
   const [meta, setMeta] = useState({ total: 0, capped: false });
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ programmeId: "", moduleId: "", assessmentId: "", studentId: "", marks: "" });
+  const [form, setForm] = useState({ courseId: "", unitId: "", assessmentId: "", studentId: "", marks: "" });
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { if (!fProgramme && store.programmes.length) setFProgramme(store.programmes[0].id); }, [store.programmes, fProgramme]);
+  useEffect(() => { if (!fCourse && store.courses.length) setFCourse(store.courses[0].id); }, [store.courses, fCourse]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = fModule ? { moduleId: fModule } : fProgramme ? { programmeId: fProgramme } : {};
+      const params = fUnit ? { unitId: fUnit } : fCourse ? { courseId: fCourse } : {};
       const res = await store.listGrades(params);
       // Endpoint returns { records, total, capped }. Tolerate an array too, for safety.
       const rows = Array.isArray(res) ? res : (res.records || []);
@@ -4946,17 +4946,17 @@ function AssessmentRecords({ store }) {
       setMeta({ total: Array.isArray(res) ? rows.length : (res.total ?? rows.length), capped: !Array.isArray(res) && !!res.capped });
     } catch (e) { store.notify?.(e.message || "Could not load records", "error"); }
     setLoading(false);
-  }, [fProgramme, fModule, store]);
+  }, [fCourse, fUnit, store]);
   useEffect(() => { load(); }, [load]);
 
-  const coursesInProg = (pid) => store.modules.filter(m => m.programmeId === pid);
-  const assessmentsInCourse = (mid) => store.assessments.filter(a => a.moduleId === mid);
-  const studentsInCourse = (mid) => store.students.filter(s => (s.moduleIds || []).includes(mid));
+  const coursesInProg = (pid) => store.units.filter(m => m.courseId === pid);
+  const assessmentsInCourse = (mid) => store.assessments.filter(a => a.unitId === mid);
+  const studentsInCourse = (mid) => store.students.filter(s => (s.unitIds || []).includes(mid));
   const selectedAssessment = store.assessments.find(a => a.id === form.assessmentId);
   const maxMarks = selectedAssessment?.maxMarks ?? 100;
 
-  const openAdd = () => { setEdit(null); setForm({ programmeId: fProgramme || "", moduleId: fModule || "", assessmentId: "", studentId: "", marks: "" }); setModal(true); };
-  const openEdit = (r) => { setEdit(r); setForm({ programmeId: r.module.programmeId || "", moduleId: r.module.id, assessmentId: r.assessmentId, studentId: r.studentId, marks: String(r.marks) }); setModal(true); };
+  const openAdd = () => { setEdit(null); setForm({ courseId: fCourse || "", unitId: fUnit || "", assessmentId: "", studentId: "", marks: "" }); setModal(true); };
+  const openEdit = (r) => { setEdit(r); setForm({ courseId: r.unit.courseId || "", unitId: r.unit.id, assessmentId: r.assessmentId, studentId: r.studentId, marks: String(r.marks) }); setModal(true); };
   const save = async () => {
     setBusy(true);
     try { await store.saveGrade(form.assessmentId, form.studentId, form.marks === "" ? null : Number(form.marks)); setModal(false); await load(); }
@@ -4964,26 +4964,26 @@ function AssessmentRecords({ store }) {
     setBusy(false);
   };
   const remove = async (r) => {
-    if (!window.confirm(`Delete ${r.student.name}'s mark for ${r.module.code} — ${r.assessment.title}? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete ${r.student.name}'s mark for ${r.unit.code} — ${r.assessment.title}? This cannot be undone.`)) return;
     await store.saveGrade(r.assessmentId, r.studentId, null); await load();
   };
 
   const ql = query.trim().toLowerCase();
   const list = records.filter(r => !ql || r.student.name.toLowerCase().includes(ql) || r.student.studentRef.includes(ql) || r.assessment.title.toLowerCase().includes(ql));
-  const paged = usePaged(list, 15, `${fProgramme}|${fModule}|${ql}`);
+  const paged = usePaged(list, 15, `${fCourse}|${fUnit}|${ql}`);
   const editStudent = edit ? store.students.find(s => s.id === edit.studentId) || edit.student : null;
-  const formValid = form.programmeId && form.moduleId && form.assessmentId && form.studentId && form.marks !== "" && Number(form.marks) >= 0 && Number(form.marks) <= maxMarks;
+  const formValid = form.courseId && form.unitId && form.assessmentId && form.studentId && form.marks !== "" && Number(form.marks) >= 0 && Number(form.marks) <= maxMarks;
 
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <select value={fProgramme} onChange={e => { setFProgramme(e.target.value); setFModule(""); }} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 outline-none">
-          <option value="">All programmes</option>
-          {store.programmes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        <select value={fCourse} onChange={e => { setFCourse(e.target.value); setFUnit(""); }} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 outline-none">
+          <option value="">All courses</option>
+          {store.courses.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
-        <select value={fModule} onChange={e => setFModule(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 outline-none">
-          <option value="">All courses{fProgramme ? " in programme" : ""}</option>
-          {(fProgramme ? coursesInProg(fProgramme) : store.modules).map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}
+        <select value={fUnit} onChange={e => setFUnit(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 outline-none">
+          <option value="">All courses{fCourse ? " in course" : ""}</option>
+          {(fCourse ? coursesInProg(fCourse) : store.units).map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}
         </select>
         <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200"><Search size={15} className="text-slate-400" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search student or assessment…" className="w-40 bg-transparent text-sm outline-none sm:w-52" /></div>
         <PrimaryBtn className="ml-auto" onClick={openAdd}><Plus size={16} /> Add grade record</PrimaryBtn>
@@ -4992,7 +4992,7 @@ function AssessmentRecords({ store }) {
       {meta.capped && (
         <div className="mb-3 flex items-start gap-2 rounded-xl bg-amber-50 px-3.5 py-2.5 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
           <AlertCircle size={15} className="mt-0.5 shrink-0 text-amber-600" />
-          Showing the most recent <b>{records.length.toLocaleString()}</b> of <b>{meta.total.toLocaleString()}</b> records. Filter by programme or course to see the rest.
+          Showing the most recent <b>{records.length.toLocaleString()}</b> of <b>{meta.total.toLocaleString()}</b> records. Filter by course or course to see the rest.
         </div>
       )}
 
@@ -5000,15 +5000,15 @@ function AssessmentRecords({ store }) {
         <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
           <table className="w-full min-w-[860px] text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
-              <tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Programme</th><th className="px-5 py-3">Course</th><th className="px-5 py-3">Assessment</th><th className="px-5 py-3 whitespace-nowrap">Marks</th><th className="px-5 py-3 text-center">%</th><th className="px-5 py-3 text-center">Grade</th><th className="px-5 py-3 text-right">Actions</th></tr>
+              <tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Course</th><th className="px-5 py-3">Course</th><th className="px-5 py-3">Assessment</th><th className="px-5 py-3 whitespace-nowrap">Marks</th><th className="px-5 py-3 text-center">%</th><th className="px-5 py-3 text-center">Grade</th><th className="px-5 py-3 text-right">Actions</th></tr>
             </thead>
             <tbody>
               {loading && <tr><td colSpan={8} className="px-5 py-10 text-center text-sm text-slate-400">Loading…</td></tr>}
-              {!loading && paged.slice.map(r => { const gt = gradeTone(r.grade); const prog = programmeById[r.module.programmeId]; return (
+              {!loading && paged.slice.map(r => { const gt = gradeTone(r.grade); const prog = courseById[r.unit.courseId]; return (
                 <tr key={r.id} className="border-t border-slate-100 transition-colors hover:bg-blue-50/30">
                   <td className="px-5 py-3"><div className="flex items-center gap-2.5"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-sm" style={{ background: r.student.colour }}>{r.student.initials}</span><div className="min-w-0"><p className="font-semibold text-slate-700">{r.student.name}</p><p className="text-[11px] tabular-nums text-slate-400">{r.student.studentRef}</p></div></div></td>
                   <td className="px-5 py-3"><span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: (prog?.colour || "#64748b") + "1a", color: prog?.colour || "#64748b" }}>{prog?.name || "—"}</span></td>
-                  <td className="px-5 py-3"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold text-slate-600" title={r.module.name}>{r.module.code}</span></td>
+                  <td className="px-5 py-3"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold text-slate-600" title={r.unit.name}>{r.unit.code}</span></td>
                   <td className="px-5 py-3 text-slate-600"><p className="font-medium">{r.assessment.title}</p><p className="text-[11px] text-slate-400">{r.assessment.type}</p></td>
                   <td className="px-5 py-3 font-bold tabular-nums text-slate-700">{r.marks}<span className="text-slate-300">/{r.assessment.maxMarks}</span></td>
                   <td className="px-5 py-3 text-center tabular-nums text-slate-500">{r.pct == null ? "—" : `${r.pct}%`}</td>
@@ -5022,20 +5022,20 @@ function AssessmentRecords({ store }) {
         </div>
       </div>
       <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
-      <p className="mt-3 text-[11px] text-slate-400">{list.length.toLocaleString()} record{list.length === 1 ? "" : "s"}{query ? " matching" : ""}{fModule ? " for this course" : fProgramme ? " for this programme" : ""}{meta.capped ? ` (of ${meta.total.toLocaleString()} total — narrow the filter to load all)` : ""}. Grades: 70%+ Distinction · 60–69 Merit · 40–59 Pass · below 40 Fail.</p>
+      <p className="mt-3 text-[11px] text-slate-400">{list.length.toLocaleString()} record{list.length === 1 ? "" : "s"}{query ? " matching" : ""}{fUnit ? " for this course" : fCourse ? " for this course" : ""}{meta.capped ? ` (of ${meta.total.toLocaleString()} total — narrow the filter to load all)` : ""}. Grades: 70%+ Distinction · 60–69 Merit · 40–59 Pass · below 40 Fail.</p>
 
       <Modal open={modal} onClose={() => !busy && setModal(false)} title={edit ? "Edit grade record" : "Add grade record"} width={520}>
         <div className="space-y-3">
           {edit ? (
             <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200/70">
-              <div className="flex items-center gap-2.5"><span className="flex h-9 w-9 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: editStudent?.colour }}>{editStudent?.initials}</span><div><p className="text-sm font-bold text-slate-700">{editStudent?.name}</p><p className="text-[11px] text-slate-400">{edit.module.code} · {edit.assessment.title} · {programmeById[edit.module.programmeId]?.name || ""}</p></div></div>
+              <div className="flex items-center gap-2.5"><span className="flex h-9 w-9 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: editStudent?.colour }}>{editStudent?.initials}</span><div><p className="text-sm font-bold text-slate-700">{editStudent?.name}</p><p className="text-[11px] text-slate-400">{edit.unit.code} · {edit.assessment.title} · {courseById[edit.unit.courseId]?.name || ""}</p></div></div>
             </div>
           ) : (
             <>
-              <Field label="Programme"><select value={form.programmeId} onChange={e => setForm(f => ({ ...f, programmeId: e.target.value, moduleId: "", assessmentId: "", studentId: "" }))} className={inputCls}><option value="">Choose…</option>{store.programmes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
-              <Field label="Course"><select value={form.moduleId} onChange={e => setForm(f => ({ ...f, moduleId: e.target.value, assessmentId: "", studentId: "" }))} disabled={!form.programmeId} className={inputCls}><option value="">Choose…</option>{coursesInProg(form.programmeId).map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}</select></Field>
-              <Field label="Assessment"><select value={form.assessmentId} onChange={e => setForm(f => ({ ...f, assessmentId: e.target.value }))} disabled={!form.moduleId} className={inputCls}><option value="">Choose…</option>{assessmentsInCourse(form.moduleId).map(a => <option key={a.id} value={a.id}>{a.title} — out of {a.maxMarks}</option>)}</select>{form.moduleId && assessmentsInCourse(form.moduleId).length === 0 && <p className="mt-1 text-[11px] text-amber-600">This course has no assessments — add one on the “Assessments &amp; grades” tab first.</p>}</Field>
-              <Field label="Student"><StudentCombo students={studentsInCourse(form.moduleId)} value={form.studentId} onChange={id => setForm(f => ({ ...f, studentId: id }))} /></Field>
+              <Field label="Course"><select value={form.courseId} onChange={e => setForm(f => ({ ...f, courseId: e.target.value, unitId: "", assessmentId: "", studentId: "" }))} className={inputCls}><option value="">Choose…</option>{store.courses.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
+              <Field label="Course"><select value={form.unitId} onChange={e => setForm(f => ({ ...f, unitId: e.target.value, assessmentId: "", studentId: "" }))} disabled={!form.courseId} className={inputCls}><option value="">Choose…</option>{coursesInProg(form.courseId).map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}</select></Field>
+              <Field label="Assessment"><select value={form.assessmentId} onChange={e => setForm(f => ({ ...f, assessmentId: e.target.value }))} disabled={!form.unitId} className={inputCls}><option value="">Choose…</option>{assessmentsInCourse(form.unitId).map(a => <option key={a.id} value={a.id}>{a.title} — out of {a.maxMarks}</option>)}</select>{form.unitId && assessmentsInCourse(form.unitId).length === 0 && <p className="mt-1 text-[11px] text-amber-600">This course has no assessments — add one on the “Assessments &amp; grades” tab first.</p>}</Field>
+              <Field label="Student"><StudentCombo students={studentsInCourse(form.unitId)} value={form.studentId} onChange={id => setForm(f => ({ ...f, studentId: id }))} /></Field>
             </>
           )}
           <Field label={`Total marks (out of ${maxMarks})`}><input type="number" min={0} max={maxMarks} value={form.marks} onChange={e => setForm(f => ({ ...f, marks: e.target.value }))} placeholder={`0–${maxMarks}`} className={inputCls} /></Field>
@@ -5129,12 +5129,12 @@ function AdminPAT({ store }) {
   useEffect(() => { refreshHnd(); refreshInteractions(); }, [refreshHnd, refreshInteractions]);
 
   const studentsById = useMemo(() => Object.fromEntries(store.students.map(s => [s.id, s])), [store.students]);
-  const programmeById = useMemo(() => Object.fromEntries(store.programmes.map(p => [p.id, p])), [store.programmes]);
-  const moduleById = useMemo(() => Object.fromEntries(store.modules.map(m => [m.id, m])), [store.modules]);
+  const courseById = useMemo(() => Object.fromEntries(store.courses.map(p => [p.id, p])), [store.courses]);
+  const unitById = useMemo(() => Object.fromEntries(store.units.map(m => [m.id, m])), [store.units]);
   const courseOf = (studentId) => {
     const s = studentsById[studentId];
-    const modId = (s?.moduleIds || [])[0];
-    const prog = modId ? programmeById[moduleById[modId]?.programmeId] : null;
+    const modId = (s?.unitIds || [])[0];
+    const prog = modId ? courseById[unitById[modId]?.courseId] : null;
     return prog?.name || "—";
   };
 
@@ -5318,7 +5318,7 @@ const ON_TIME_BY = "09:00"; // check-in at/before this counts as on time
 
 function computeStaffKpis(store) {
   const today = todayISO();
-  const moduleTotals = store.attendance?.moduleTotals || {};
+  const unitTotals = store.attendance?.unitTotals || {};
   return store.staff.map(s => {
     // 1) Own attendance — from their check-in log
     const cis = store.checkins.filter(c => c.staffId === s.id);
@@ -5327,17 +5327,17 @@ function computeStaffKpis(store) {
     const punctuality = days ? Math.round((onTime / days) * 100) : null;
 
     // 2) Teaching load — courses this person tutors
-    const mods = store.modules.filter(m => m.tutor && m.tutor === s.name);
+    const mods = store.units.filter(m => m.tutor && m.tutor === s.name);
     const courses = mods.length;
     const studentsTaught = mods.reduce((a, m) => a + (m.studentCount || 0), 0);
 
     // 3) Register submission — past sessions in their courses that have a register taken
-    const due = store.sessions.filter(x => x.date <= today && mods.some(m => m.id === x.moduleId));
+    const due = store.sessions.filter(x => x.date <= today && mods.some(m => m.id === x.unitId));
     const taken = due.filter(x => (x.markedCount || 0) > 0).length;
     const submission = due.length ? Math.round((taken / due.length) * 100) : null;
 
     // 4) Student attendance they achieve — mean cohort % across their courses
-    const pcts = mods.map(m => moduleTotals[m.id]?.pct).filter(v => v != null);
+    const pcts = mods.map(m => unitTotals[m.id]?.pct).filter(v => v != null);
     const cohort = pcts.length ? Math.round((pcts.reduce((a, b) => a + b, 0) / pcts.length) * 10) / 10 : null;
 
     // 5) Leave use
@@ -5370,7 +5370,7 @@ function AdminKPI({ store }) {
   const [sort, setSort] = useState("score");   // score | submission | cohort | punctuality | name
   useEffect(() => { refreshHnd(); }, [refreshHnd]);
 
-  const kpis = useMemo(() => computeStaffKpis(store), [store.staff, store.checkins, store.modules, store.sessions, store.attendance, store.leave, store.adjustments]);
+  const kpis = useMemo(() => computeStaffKpis(store), [store.staff, store.checkins, store.units, store.sessions, store.attendance, store.leave, store.adjustments]);
 
   const avg = (key) => { const v = kpis.map(k => k[key]).filter(x => x != null); return v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 10) / 10 : null; };
   const tutors = kpis.filter(k => k.courses > 0);
@@ -5501,7 +5501,7 @@ function AdminKPI({ store }) {
 
 function StaffKpiDetail({ k, store }) {
   const today = todayISO();
-  const moduleTotals = store.attendance?.moduleTotals || {};
+  const unitTotals = store.attendance?.unitTotals || {};
   const metrics = [
     { label: "Register submission", value: k.submission, hint: `${k.taken}/${k.due} past registers taken` },
     { label: "Student attendance", value: k.cohort, hint: "mean across taught classes" },
@@ -5535,8 +5535,8 @@ function StaffKpiDetail({ k, store }) {
           <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Courses tutored</p>
           <div className="rounded-2xl ring-1 ring-slate-200/70">
             {k.mods.map((m, i) => {
-              const mt = moduleTotals[m.id];
-              const due = store.sessions.filter(x => x.moduleId === m.id && x.date <= today);
+              const mt = unitTotals[m.id];
+              const due = store.sessions.filter(x => x.unitId === m.id && x.date <= today);
               const taken = due.filter(x => (x.markedCount || 0) > 0).length;
               const subPct = due.length ? Math.round((taken / due.length) * 100) : null;
               return (

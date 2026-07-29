@@ -1,8 +1,8 @@
-// Assessments & grades (a gradebook for HND modules).
+// Assessments & grades (a gradebook for HND units).
 // Reads require a signed-in user; every mutation is admin-only.
 const router = require("express").Router();
 const prisma = require("../db");
-const { sAssessment, sGrade, sStudent, sModule } = require("../serializers");
+const { sAssessment, sGrade, sStudent, sUnit } = require("../serializers");
 const { requireAuth, requireAdmin, requirePage } = require("../auth");
 const { isRealDate } = require("../validate");
 
@@ -19,13 +19,13 @@ const pctOf = (marks, max) => (max > 0 ? Math.round((marks / max) * 1000) / 10 :
 
 /* ============================== assessments ============================== */
 
-// GET /assessments?moduleId=  — assessments with graded count + average mark.
+// GET /assessments?unitId=  — assessments with graded count + average mark.
 router.get("/", requireAuth, async (req, res) => {
-  const moduleId = str(req.query?.moduleId);
+  const unitId = str(req.query?.unitId);
   const rows = await prisma.assessment.findMany({
-    where: moduleId ? { moduleId } : undefined,
-    orderBy: [{ moduleId: "asc" }, { createdAt: "asc" }],
-    include: { module: { select: { code: true, name: true } }, _count: { select: { grades: true } } },
+    where: unitId ? { unitId } : undefined,
+    orderBy: [{ unitId: "asc" }, { createdAt: "asc" }],
+    include: { unit: { select: { code: true, name: true } }, _count: { select: { grades: true } } },
   });
   // Average mark per assessment, in one grouped query.
   const agg = await prisma.assessmentGrade.groupBy({ by: ["assessmentId"], _avg: { marks: true } });
@@ -39,12 +39,12 @@ router.get("/", requireAuth, async (req, res) => {
 async function validateAssessment(body, partial) {
   const data = {};
   const need = (k) => !partial || body?.[k] !== undefined;
-  if (need("moduleId")) {
-    const moduleId = str(body?.moduleId);
-    if (!moduleId) return { error: "Course (module) is required" };
-    const m = await prisma.hndModule.findUnique({ where: { id: moduleId } });
-    if (!m) return { error: "Unknown course" };
-    data.moduleId = moduleId;
+  if (need("unitId")) {
+    const unitId = str(body?.unitId);
+    if (!unitId) return { error: "Unit is required" };
+    const m = await prisma.unit.findUnique({ where: { id: unitId } });
+    if (!m) return { error: "Unknown unit" };
+    data.unitId = unitId;
   }
   if (need("title")) {
     const title = str(body?.title);
@@ -77,7 +77,7 @@ async function validateAssessment(body, partial) {
 router.post("/", requireAuth, requireAdmin, async (req, res) => {
   const v = await validateAssessment(req.body, false);
   if (v.error) return res.status(400).json({ error: v.error });
-  const a = await prisma.assessment.create({ data: { type: "Assignment", maxMarks: 100, ...v.data }, include: { module: { select: { code: true, name: true } }, _count: { select: { grades: true } } } });
+  const a = await prisma.assessment.create({ data: { type: "Assignment", maxMarks: 100, ...v.data }, include: { unit: { select: { code: true, name: true } }, _count: { select: { grades: true } } } });
   res.status(201).json(sAssessment(a));
 });
 
@@ -86,7 +86,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   if (!existing) return res.status(404).json({ error: "Assessment not found" });
   const v = await validateAssessment(req.body, true);
   if (v.error) return res.status(400).json({ error: v.error });
-  const a = await prisma.assessment.update({ where: { id: existing.id }, data: v.data, include: { module: { select: { code: true, name: true } }, _count: { select: { grades: true } } } });
+  const a = await prisma.assessment.update({ where: { id: existing.id }, data: v.data, include: { unit: { select: { code: true, name: true } }, _count: { select: { grades: true } } } });
   res.json(sAssessment(a));
 });
 
@@ -95,17 +95,17 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   catch (_e) { res.status(404).json({ error: "Assessment not found" }); }
 });
 
-// GET /assessments/grades?programmeId=&moduleId=&studentId=
+// GET /assessments/grades?courseId=&unitId=&studentId=
 // A flat, filterable list of individual grade records for the record-level CRUD
 // view. Capped so an unfiltered call can't return the entire gradebook at once.
 router.get("/grades", requireAuth, async (req, res) => {
-  const programmeId = str(req.query?.programmeId);
-  const moduleId = str(req.query?.moduleId);
+  const courseId = str(req.query?.courseId);
+  const unitId = str(req.query?.unitId);
   const studentId = str(req.query?.studentId);
   const where = {};
   if (studentId) where.studentId = studentId;
-  if (moduleId) where.assessment = { moduleId };
-  else if (programmeId) where.assessment = { is: { module: { is: { programmeId } } } };
+  if (unitId) where.assessment = { unitId };
+  else if (courseId) where.assessment = { is: { unit: { is: { courseId } } } };
   // DEF-06: report the true total and whether the result was truncated, so the UI
   // can tell the user to narrow the filter instead of silently hiding records.
   const LIMIT = 2000;
@@ -113,7 +113,7 @@ router.get("/grades", requireAuth, async (req, res) => {
     prisma.assessmentGrade.count({ where }),
     prisma.assessmentGrade.findMany({
       where,
-      include: { student: true, assessment: { include: { module: { select: { code: true, name: true, programmeId: true } } } } },
+      include: { student: true, assessment: { include: { unit: { select: { code: true, name: true, courseId: true } } } } },
       orderBy: { gradedAt: "desc" },
       take: LIMIT,
     }),
@@ -126,7 +126,7 @@ router.get("/grades", requireAuth, async (req, res) => {
         id: g.id, assessmentId: g.assessmentId, studentId: g.studentId, marks: g.marks, pct, grade: bandOf(pct),
         student: { id: g.student.id, name: `${g.student.firstName} ${g.student.lastName}`, studentRef: g.student.studentRef, initials: g.student.initials, colour: g.student.colour },
         assessment: { id: g.assessment.id, title: g.assessment.title, type: g.assessment.type, maxMarks: g.assessment.maxMarks },
-        module: { id: g.assessment.moduleId, code: g.assessment.module.code, name: g.assessment.module.name, programmeId: g.assessment.module.programmeId },
+        unit: { id: g.assessment.unitId, code: g.assessment.unit.code, name: g.assessment.unit.name, courseId: g.assessment.unit.courseId },
       };
     }),
   });
@@ -136,16 +136,16 @@ router.get("/grades", requireAuth, async (req, res) => {
 
 // GET /assessments/:id/grades — every enrolled student with their mark (if any).
 router.get("/:id/grades", requireAuth, async (req, res) => {
-  const a = await prisma.assessment.findUnique({ where: { id: req.params.id }, include: { module: true, grades: true } });
+  const a = await prisma.assessment.findUnique({ where: { id: req.params.id }, include: { unit: true, grades: true } });
   if (!a) return res.status(404).json({ error: "Assessment not found" });
-  const enrolments = await prisma.enrolment.findMany({ where: { moduleId: a.moduleId }, include: { student: true } });
+  const enrolments = await prisma.enrolment.findMany({ where: { unitId: a.unitId }, include: { student: true } });
   const byStudent = new Map(a.grades.map((g) => [g.studentId, g]));
   // Keep a graded student who has since been un-enrolled.
   const extraIds = a.grades.filter((g) => !enrolments.some((e) => e.studentId === g.studentId)).map((g) => g.studentId);
   const extra = extraIds.length ? await prisma.student.findMany({ where: { id: { in: extraIds } } }) : [];
   const students = [...enrolments.map((e) => e.student), ...extra].sort((x, y) => x.lastName.localeCompare(y.lastName) || x.firstName.localeCompare(y.firstName));
   res.json({
-    assessment: sAssessment(a), module: sModule(a.module),
+    assessment: sAssessment(a), unit: sUnit(a.unit),
     rows: students.map((s) => {
       const g = byStudent.get(s.id);
       const pct = g ? pctOf(g.marks, a.maxMarks) : null;
@@ -192,26 +192,26 @@ router.put("/:id/grades", requireAuth, requireAdmin, async (req, res) => {
 
 /* ============================== analytics ============================== */
 
-// GET /assessments/overview — per-module averages + distribution + overall.
+// GET /assessments/overview — per-unit averages + distribution + overall.
 router.get("/overview", requireAuth, async (_req, res) => {
-  const [assessments, modules, allGrades] = await Promise.all([
-    prisma.assessment.findMany({ select: { id: true, moduleId: true, maxMarks: true } }),
-    prisma.hndModule.findMany({ orderBy: { code: "asc" }, include: { _count: { select: { enrolments: true, assessments: true } } } }),
+  const [assessments, units, allGrades] = await Promise.all([
+    prisma.assessment.findMany({ select: { id: true, unitId: true, maxMarks: true } }),
+    prisma.unit.findMany({ orderBy: { code: "asc" }, include: { _count: { select: { enrolments: true, assessments: true } } } }),
     prisma.assessmentGrade.findMany({ select: { assessmentId: true, marks: true } }),
   ]);
   const aMap = new Map(assessments.map((a) => [a.id, a]));
-  const perModule = new Map(modules.map((m) => [m.id, { sum: 0, n: 0, dist: { Distinction: 0, Merit: 0, Pass: 0, Fail: 0 } }]));
+  const perUnit = new Map(units.map((m) => [m.id, { sum: 0, n: 0, dist: { Distinction: 0, Merit: 0, Pass: 0, Fail: 0 } }]));
   let sumAll = 0, nAll = 0, passAll = 0;
   const distAll = { Distinction: 0, Merit: 0, Pass: 0, Fail: 0 };
   for (const g of allGrades) {
     const a = aMap.get(g.assessmentId); if (!a) continue;
     const pct = pctOf(g.marks, a.maxMarks); if (pct == null) continue;
     const band = bandOf(pct);
-    const pm = perModule.get(a.moduleId); if (pm) { pm.sum += pct; pm.n++; pm.dist[band]++; }
+    const pm = perUnit.get(a.unitId); if (pm) { pm.sum += pct; pm.n++; pm.dist[band]++; }
     sumAll += pct; nAll++; distAll[band]++; if (pct >= 40) passAll++;
   }
-  const modulesOut = modules.map((m) => {
-    const pm = perModule.get(m.id);
+  const unitsOut = units.map((m) => {
+    const pm = perUnit.get(m.id);
     return {
       id: m.id, code: m.code, name: m.name,
       students: m._count.enrolments, assessmentCount: m._count.assessments,
@@ -225,19 +225,19 @@ router.get("/overview", requireAuth, async (_req, res) => {
       passRate: nAll ? Math.round((passAll / nAll) * 1000) / 10 : null,
       dist: distAll,
     },
-    modules: modulesOut,
+    units: unitsOut,
   });
 });
 
 // GET /assessments/student/:id — one student's assessments, marks, grades + average.
 router.get("/student/:id", requireAuth, async (req, res) => {
-  const student = await prisma.student.findUnique({ where: { id: req.params.id }, include: { enrolments: { select: { moduleId: true } } } });
+  const student = await prisma.student.findUnique({ where: { id: req.params.id }, include: { enrolments: { select: { unitId: true } } } });
   if (!student) return res.status(404).json({ error: "Student not found" });
-  const moduleIds = student.enrolments.map((e) => e.moduleId);
+  const unitIds = student.enrolments.map((e) => e.unitId);
   const assessments = await prisma.assessment.findMany({
-    where: { moduleId: { in: moduleIds.length ? moduleIds : ["__none__"] } },
-    include: { module: { select: { code: true, name: true } } },
-    orderBy: [{ moduleId: "asc" }, { createdAt: "asc" }],
+    where: { unitId: { in: unitIds.length ? unitIds : ["__none__"] } },
+    include: { unit: { select: { code: true, name: true } } },
+    orderBy: [{ unitId: "asc" }, { createdAt: "asc" }],
   });
   const grades = await prisma.assessmentGrade.findMany({ where: { studentId: student.id } });
   const gMap = new Map(grades.map((g) => [g.assessmentId, g]));
@@ -246,7 +246,7 @@ router.get("/student/:id", requireAuth, async (req, res) => {
     const g = gMap.get(a.id);
     const pct = g ? pctOf(g.marks, a.maxMarks) : null;
     if (pct != null) { sum += pct; n++; }
-    return { id: a.id, title: a.title, type: a.type, maxMarks: a.maxMarks, weight: a.weight, dueDate: a.dueDate, moduleCode: a.module.code, moduleName: a.module.name, moduleId: a.moduleId, marks: g ? g.marks : null, pct, grade: bandOf(pct) };
+    return { id: a.id, title: a.title, type: a.type, maxMarks: a.maxMarks, weight: a.weight, dueDate: a.dueDate, unitCode: a.unit.code, unitName: a.unit.name, unitId: a.unitId, marks: g ? g.marks : null, pct, grade: bandOf(pct) };
   });
   res.json({
     student: sStudent(student),
@@ -262,12 +262,12 @@ router.get("/student/:id", requireAuth, async (req, res) => {
 // grouped by cohort (the "course"), plus per-course pass-rate. Heavy per-student
 // aggregation done here (server-side) so the client never fetches 100s of students.
 router.get("/exec-summary", requireAuth, async (req, res) => {
-  const [students, assessments, grades, cohorts, programmes] = await Promise.all([
+  const [students, assessments, grades, cohorts, courseList] = await Promise.all([
     prisma.student.findMany({ select: { id: true, cohortId: true } }),
     prisma.assessment.findMany({ select: { id: true, maxMarks: true } }),
     prisma.assessmentGrade.findMany({ select: { studentId: true, assessmentId: true, marks: true } }),
-    prisma.cohort.findMany({ select: { id: true, name: true, programmeId: true } }),
-    prisma.programme.findMany({ select: { id: true, name: true } }),
+    prisma.cohort.findMany({ select: { id: true, name: true, courseId: true } }),
+    prisma.course.findMany({ select: { id: true, name: true } }),
   ]);
   const aMax = new Map(assessments.map((a) => [a.id, a.maxMarks]));
   // Average graded % per student.
@@ -278,8 +278,8 @@ router.get("/exec-summary", requireAuth, async (req, res) => {
     const s = perStudent.get(g.studentId) || { sum: 0, n: 0 };
     s.sum += pct; s.n += 1; perStudent.set(g.studentId, s);
   }
-  const progName = new Map(programmes.map((p) => [p.id, p.name]));
-  const cohortMeta = new Map(cohorts.map((c) => [c.id, { name: c.name, prog: progName.get(c.programmeId) || "" }]));
+  const progName = new Map(courseList.map((p) => [p.id, p.name]));
+  const cohortMeta = new Map(cohorts.map((c) => [c.id, { name: c.name, prog: progName.get(c.courseId) || "" }]));
   const byCohort = new Map();
   let totalPassed = 0, totalGraded = 0;
   for (const st of students) {

@@ -13,7 +13,7 @@ const NAVY = "#1a3a8f", NAVY_DARK = "#14306f", MAROON = "#9e1b32";
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-transparent focus:ring-2 disabled:opacity-60";
 
-// Module scope, NOT inside the component. A component declared inside another
+// Unit scope, NOT inside the component. A component declared inside another
 // component's body is a new type on every render, so React unmounts and remounts
 // its whole subtree — which destroyed the focused password field on every
 // keystroke. Verified on real WebKit: typing 13 characters left "N" in the field.

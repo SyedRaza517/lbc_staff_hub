@@ -218,8 +218,8 @@ model Document {
 
 // ============================================================
 // HND student attendance registers
-// A module runs many timetabled sessions; students enrol on
-// modules; each session has one mark per enrolled student.
+// A unit runs many timetabled sessions; students enrol on
+// units; each session has one mark per enrolled student.
 // ============================================================
 
 // A teaching period, e.g. "Semester 2" running 01 Feb -> 30 Jun.
@@ -234,37 +234,37 @@ model Semester {
   createdAt DateTime @default(now())
 }
 
-// A programme of study, e.g. "HND Business". Groups the modules (courses) taught
-// under it. A module belongs to at most one programme; deleting a programme leaves
-// its modules intact but unassigned (onDelete: SetNull), so registers never vanish.
-model Programme {
+// A course of study, e.g. "HND Business". Groups the units (courses) taught
+// under it. A unit belongs to at most one course; deleting a course leaves
+// its units intact but unassigned (onDelete: SetNull), so registers never vanish.
+model Course {
   id        String   @id @default(cuid())
   name      String   @unique
   colour    String   @default("#1a3a8f")
   createdAt DateTime @default(now())
 
-  modules HndModule[]
+  units Unit[]
   cohorts Cohort[]
 }
 
-// An intake of students on a programme, e.g. "SEP 2025" or "June 2023". The same
-// programme runs many cohorts over time; each is a separate group (later, its own
-// units and students). Belongs to exactly one programme and goes with it if the
-// programme is deleted.
+// An intake of students on a course, e.g. "SEP 2025" or "June 2023". The same
+// course runs many cohorts over time; each is a separate group (later, its own
+// units and students). Belongs to exactly one course and goes with it if the
+// course is deleted.
 model Cohort {
   id          String    @id @default(cuid())
   name        String    // intake label, e.g. "SEP 2025"
-  programme   Programme @relation(fields: [programmeId], references: [id], onDelete: Cascade)
-  programmeId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId String
   startDate   String?   // optional YYYY-MM-DD — when the intake begins
   createdAt   DateTime  @default(now())
 
   terms    Term[]
-  modules  HndModule[]
+  units  Unit[]
   students Student[]
 
-  @@unique([programmeId, name]) // no duplicate intake names within one programme
-  @@index([programmeId])
+  @@unique([courseId, name]) // no duplicate intake names within one course
+  @@index([courseId])
 }
 
 // One teaching term within a cohort. An HND cohort runs 6: Year 1 Terms 1-3 and
@@ -281,22 +281,22 @@ model Term {
   end       String   // YYYY-MM-DD, inclusive
   createdAt DateTime @default(now())
 
-  modules HndModule[]
+  units Unit[]
 
   @@unique([cohortId, year, index]) // one of each term per cohort
   @@index([cohortId])
 }
 
-// A taught HND module, e.g. code "OBM" / name "Organisational Behaviour Management".
-model HndModule {
+// A taught HND unit, e.g. code "OBM" / name "Organisational Behaviour Management".
+model Unit {
   id          String     @id @default(cuid())
   code        String     @unique
   name        String
   tutor       String     @default("")
-  programme   Programme? @relation(fields: [programmeId], references: [id], onDelete: SetNull)
-  programmeId String?
+  course   Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  courseId String?
   // A unit can belong to a specific cohort + term (the intake and teaching term it
-  // runs in). Nullable so existing units and the "just a module" case still work;
+  // runs in). Nullable so existing units and the "just a unit" case still work;
   // set-null on delete keeps registers if a cohort/term is removed.
   cohort      Cohort?    @relation(fields: [cohortId], references: [id], onDelete: SetNull)
   cohortId    String?
@@ -308,27 +308,27 @@ model HndModule {
   enrolments  Enrolment[]
   assessments Assessment[]
 
-  @@index([programmeId])
+  @@index([courseId])
   @@index([cohortId])
   @@index([termId])
 }
 
-// An assessment belonging to a module (course) — e.g. "Assignment 1" worth 40%.
+// An assessment belonging to a unit (course) — e.g. "Assignment 1" worth 40%.
 // Enrolled students each receive a mark (AssessmentGrade).
 model Assessment {
   id        String   @id @default(cuid())
-  module    HndModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  moduleId  String
+  unit    Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  unitId  String
   title     String
   type      String   @default("Assignment") // Assignment | Exam | Presentation | Project | Portfolio
   maxMarks  Int      @default(100)
-  weight    Int      @default(0)  // percentage weighting toward the module (0 = unset)
+  weight    Int      @default(0)  // percentage weighting toward the unit (0 = unset)
   dueDate   String?               // YYYY-MM-DD
   createdAt DateTime @default(now())
 
   grades AssessmentGrade[]
 
-  @@index([moduleId])
+  @@index([unitId])
 }
 
 // One student's mark for one assessment. marks is 0..assessment.maxMarks.
@@ -347,7 +347,7 @@ model AssessmentGrade {
   @@index([studentId])
 }
 
-// A student on the HND programme. studentRef is the college number used in
+// A student on the HND course. studentRef is the college number used in
 // their email (e.g. 100121 -> 100121@londonbrookescollege.co.uk).
 model Student {
   id         String   @id @default(cuid())
@@ -419,25 +419,25 @@ model Interaction {
   @@index([followUpRequired])
 }
 
-// Links a student to a module. A student is only listed on a module's
+// Links a student to a unit. A student is only listed on a unit's
 // register while this row exists.
 model Enrolment {
   id        String    @id @default(cuid())
   student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
   studentId String
-  module    HndModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  moduleId  String
+  unit    Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  unitId  String
   createdAt DateTime  @default(now())
 
-  @@unique([studentId, moduleId])
-  @@index([moduleId])
+  @@unique([studentId, unitId])
+  @@index([unitId])
 }
 
-// One timetabled class for a module — the row shown in the sessions list.
+// One timetabled class for a unit — the row shown in the sessions list.
 model HndSession {
   id          String    @id @default(cuid())
-  module      HndModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  moduleId    String
+  unit      Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  unitId    String
   date        String    // YYYY-MM-DD
   startTime   String    // HH:MM
   endTime     String    // HH:MM
@@ -450,7 +450,7 @@ model HndSession {
 
   marks AttendanceMark[]
 
-  @@index([moduleId, date])
+  @@index([unitId, date])
 }
 
 // One student's mark for one session. status is P | L | E | A
@@ -486,7 +486,7 @@ model TimesheetEntry {
   minutes     Int      // duration in minutes (endTime - startTime), stored for aggregation
   mode        String   @default("campus") // campus | online
   title       String   // what it was, e.g. "Unit 4 — Database Design (Group A)"
-  moduleId    String?  // optional free link to an HND module (no FK: keeps it flexible)
+  unitId    String?  // optional free link to an HND unit (no FK: keeps it flexible)
   note        String   @default("")
   // Approval workflow: draft → submitted → (finance) approved | changes_requested.
   // "changes_requested" bounces the month back to the staff member with reviewNote

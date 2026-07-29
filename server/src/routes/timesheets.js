@@ -29,7 +29,7 @@ const minutesBetween = (start, end) => {
 
 // Validate + normalise a create/update body. Returns { data } or { error }.
 function parseBody(body) {
-  const { date, start, end, mode, title, moduleId, note } = body || {};
+  const { date, start, end, mode, title, unitId, note } = body || {};
   if (!isDate(date)) return { error: "date must be a valid YYYY-MM-DD" };
   if (!isTime(start)) return { error: "start must be a time in HH:MM format" };
   if (!isTime(end)) return { error: "end must be a time in HH:MM format" };
@@ -39,13 +39,13 @@ function parseBody(body) {
   if (!VALID_MODES.includes(mode)) return { error: "mode must be 'campus' or 'online'" };
   if (typeof title !== "string" || !title.trim()) return { error: "title is required" };
   if (title.length > 200) return { error: "title is too long (200 characters maximum)" };
-  if (moduleId != null && typeof moduleId !== "string") return { error: "moduleId must be a string" };
+  if (unitId != null && typeof unitId !== "string") return { error: "unitId must be a string" };
   if (note != null && typeof note !== "string") return { error: "note must be text" };
   if (typeof note === "string" && note.length > 1000) return { error: "note is too long (1000 characters maximum)" };
   return {
     data: {
       date, startTime: start, endTime: end, minutes, mode,
-      title: title.trim(), moduleId: moduleId || null, note: (note || "").trim(),
+      title: title.trim(), unitId: unitId || null, note: (note || "").trim(),
     },
   };
 }

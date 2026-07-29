@@ -94,7 +94,7 @@ function Header({ title, screen, setScreen, user }) {
 
 function Home({ setScreen, user, newReplies = 0 }) {
   const tiles = [
-    { key: "attendance", label: "My Attendance", sub: "Your attendance by module", Icon: Percent, c: NAVY },
+    { key: "attendance", label: "My Attendance", sub: "Your attendance by unit", Icon: Percent, c: NAVY },
     { key: "assessments", label: "My Results", sub: "Assessments & grades", Icon: Award, c: "#0d7a5f" },
     { key: "query", label: "Ask the College", sub: newReplies > 0 ? `${newReplies} new repl${newReplies === 1 ? "y" : "ies"}` : "Send a query to admin", Icon: MessageSquare, c: MAROON, badge: newReplies },
     { key: "more", label: "More", sub: "Password, account & sign out", Icon: Settings, c: "#5b6472" },
@@ -119,13 +119,13 @@ function Home({ setScreen, user, newReplies = 0 }) {
 }
 
 /* -------- Attendance -------- */
-function ModuleAtt({ mr, ended }) {
+function UnitAtt({ mr, ended }) {
   const s = mr.summary; const t = pctTone(s.pct);
   return (
     <div className="flex items-center gap-3 border-t border-slate-100 px-3.5 py-2.5 first:border-t-0">
-      <span className="flex h-8 w-11 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{(mr.module.code || "?").slice(0, 5)}</span>
+      <span className="flex h-8 w-11 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{(mr.unit.code || "?").slice(0, 5)}</span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-bold text-slate-700" title={mr.module.name}>{mr.module.name}</p>
+        <p className="truncate text-xs font-bold text-slate-700" title={mr.unit.name}>{mr.unit.name}</p>
         {ended
           ? <p className="mt-0.5 text-[10px] font-medium text-slate-400">Ended {fmtDate(mr.endDate)}</p>
           : <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${s.pct ?? 0}%`, background: t.colour }} /></div>}
@@ -140,13 +140,13 @@ function AttendanceScreen() {
   useEffect(() => { let off = false; api.studentAttendance().then(d => !off && setData(d)).catch(e => !off && setErr(e.message || "Could not load attendance")); return () => { off = true; }; }, []);
   if (err) return <Screen><ErrBox>{err}</ErrBox></Screen>;
   if (!data) return <Loading />;
-  const cur = data.current || { modules: [], overall: {} };
+  const cur = data.current || { units: [], overall: {} };
   const o = cur.overall || {}; const tone = pctTone(o.pct);
   const R = 42, C = 2 * Math.PI * R;
   return (
     <Screen>
       <Card className="!bg-slate-50 ring-emerald-200">
-        <p className="mb-3 text-sm font-extrabold text-slate-800">Current modules · overall</p>
+        <p className="mb-3 text-sm font-extrabold text-slate-800">Current units · overall</p>
         <div className="flex items-center gap-4">
           <div className="relative h-24 w-24 shrink-0">
             <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90"><circle cx="60" cy="60" r={R} fill="none" stroke="#e2e8f0" strokeWidth="12" /><circle cx="60" cy="60" r={R} fill="none" stroke={tone.colour} strokeWidth="12" strokeLinecap="round" strokeDasharray={`${C}`} strokeDashoffset={`${C * (1 - (o.pct ?? 0) / 100)}`} style={{ transition: "stroke-dashoffset 1s ease" }} /></svg>
@@ -157,14 +157,14 @@ function AttendanceScreen() {
           </div>
         </div>
         <div className="mt-3 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200/70">
-          {cur.modules.map(mr => <ModuleAtt key={mr.module.id} mr={mr} />)}
-          {cur.modules.length === 0 && <p className="px-4 py-6 text-center text-xs text-slate-400">No current modules yet.</p>}
+          {cur.units.map(mr => <UnitAtt key={mr.unit.id} mr={mr} />)}
+          {cur.units.length === 0 && <p className="px-4 py-6 text-center text-xs text-slate-400">No current units yet.</p>}
         </div>
       </Card>
       {data.previous && data.previous.length > 0 && (
         <div>
-          <p className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">Previous modules · {data.previous.length}</p>
-          <Card className="!p-0 overflow-hidden">{data.previous.map(mr => <ModuleAtt key={mr.module.id} mr={mr} ended />)}</Card>
+          <p className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">Previous units · {data.previous.length}</p>
+          <Card className="!p-0 overflow-hidden">{data.previous.map(mr => <UnitAtt key={mr.unit.id} mr={mr} ended />)}</Card>
         </div>
       )}
       <p className="px-1 text-[11px] text-slate-400">P = Present (2) · L = Late (1) · E = Excused (1) · A = Absent (0). Only marked sessions count.</p>
@@ -191,10 +191,10 @@ function AssessmentsScreen() {
         {data.assessments.map(a => { const t = pctTone(a.pct); return (
           <Card key={a.id} className="!p-3.5">
             <div className="flex items-start gap-2">
-              <span className="mt-0.5 flex h-7 w-11 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{(a.moduleCode || "?").slice(0, 5)}</span>
+              <span className="mt-0.5 flex h-7 w-11 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{(a.unitCode || "?").slice(0, 5)}</span>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-slate-700">{a.title}</p>
-                <p className="truncate text-[11px] text-slate-400">{a.moduleName} · {a.type}{a.dueDate ? ` · due ${fmtDate(a.dueDate)}` : ""}</p>
+                <p className="truncate text-[11px] text-slate-400">{a.unitName} · {a.type}{a.dueDate ? ` · due ${fmtDate(a.dueDate)}` : ""}</p>
               </div>
               {a.marks == null
                 ? <span className="shrink-0 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-400">Pending</span>

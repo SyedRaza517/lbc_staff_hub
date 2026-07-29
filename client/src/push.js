@@ -6,7 +6,7 @@
 import { api } from "./api";
 import { isNativeApp } from "./PhoneShell";
 
-// The plugin is imported lazily. Importing it at module scope would pull native
+// The plugin is imported lazily. Importing it at unit scope would pull native
 // bindings into the web bundle for no reason.
 async function plugin() {
   if (!isNativeApp()) return null;
