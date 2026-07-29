@@ -1390,11 +1390,14 @@ function MiniKpi({ label, value, tone = NAVY }) {
 }
 // Distinct segment colours for the donut charts.
 const DONUT_COLOURS = ["#1a3a8f", "#9e1b32", "#0d7a5f", "#d97706", "#6d28d9", "#0891b2", "#be123c", "#4d7c0f", "#7c3aed", "#0369a1", "#b45309", "#0f766e"];
-// Attendance risk band from a percentage: <40 High Risk, 40–70 At Risk, 70+ Good.
+// Attendance rating bands: <40 High Risk, 40–50 Monitor, 50–70 Good,
+// 70–90 Excellent, 90+ Perfect. Upper bound is exclusive (70 → Excellent).
 const riskBand = (pct) => pct == null ? { label: "No data", colour: "#94a3b8", bg: "#f1f5f9" }
   : pct < 40 ? { label: "High Risk", colour: "#dc2626", bg: "#fef2f2" }
-  : pct < 70 ? { label: "At Risk", colour: "#d97706", bg: "#fffbeb" }
-  : { label: "Good", colour: "#0d7a5f", bg: "#ecfdf5" };
+  : pct < 50 ? { label: "Monitor", colour: "#ea580c", bg: "#fff7ed" }
+  : pct < 70 ? { label: "Good", colour: "#ca8a04", bg: "#fefce8" }
+  : pct < 90 ? { label: "Excellent", colour: "#16a34a", bg: "#f0fdf4" }
+  : { label: "Perfect", colour: "#6d28d9", bg: "#f5f3ff" };
 
 /* ----- Executive Dashboard (admin) ----- */
 function ExecutiveDashboard({ store }) {
