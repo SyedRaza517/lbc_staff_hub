@@ -7,9 +7,13 @@ import App from "./App";
 // Catches any render/runtime error in the tree so a single crashing component
 // shows a friendly, recoverable screen instead of a blank white page.
 class ErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { error: null }; }
+  constructor(props) { super(props); this.state = { error: null, info: null }; }
   static getDerivedStateFromError(error) { return { error }; }
-  componentDidCatch(error, info) { console.error("App crashed:", error, info); }
+  componentDidCatch(error, info) {
+    console.error("App crashed:", error, info);
+    // Keep the component stack so the details panel can name the screen that failed.
+    this.setState({ info: (info?.componentStack || "").split("\n").slice(0, 8).join("\n").trim() });
+  }
   render() {
     if (!this.state.error) return this.props.children;
     return (
@@ -19,6 +23,15 @@ class ErrorBoundary extends React.Component {
           <h1 style={{ margin: "0 0 6px", fontSize: 19, fontWeight: 800 }}>Something went wrong</h1>
           <p style={{ margin: "0 0 20px", fontSize: 14, color: "#64748b", lineHeight: 1.5 }}>The app hit an unexpected error on this screen. Reloading usually fixes it.</p>
           <button onClick={() => window.location.reload()} style={{ background: "#1a3a8f", color: "#fff", border: 0, borderRadius: 12, padding: "12px 22px", fontSize: 14, fontWeight: 700, cursor: "pointer", width: "100%" }}>Reload the app</button>
+          {/* The message itself, collapsed. Without it a crash report is just "something
+              went wrong", which is impossible to act on — this makes it reportable. */}
+          <details style={{ marginTop: 14, textAlign: "left" }}>
+            <summary style={{ fontSize: 12, color: "#94a3b8", cursor: "pointer" }}>Show technical details</summary>
+            <pre style={{ marginTop: 8, maxHeight: 180, overflow: "auto", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, fontSize: 11, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word", color: "#475569" }}>
+              {String(this.state.error?.message || this.state.error)}
+              {this.state.info ? `\n\n${this.state.info}` : ""}
+            </pre>
+          </details>
         </div>
       </div>
     );

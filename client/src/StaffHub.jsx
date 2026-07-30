@@ -1590,7 +1590,9 @@ function ExecutiveDashboard({ store }) {
 
 export function AdminDashboard({ store, onExitToStaffApp }) {
   const me = store.currentUser;
-  if (!store.isAdmin) return <div className="p-4 text-slate-400">Access denied</div>;
+  // NOTE: the isAdmin guard is deliberately below the hooks (see the return further
+  // down). Returning before them would change the hook count if the flag ever flipped
+  // while mounted, which React rejects and turns into an app-wide crash.
   const allNav = [
     { key: "executive", label: "Executive Dashboard", I: BarChart3 },
     { key: "overview", label: "Overview", I: LayoutDashboard },
@@ -1630,6 +1632,8 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
   const pendingSignups = (store.signups || []).filter(s => s.status === "pending").length;
   const openQueries = (store.studentQueries || []).filter(q => q.status === "open").length;
   const timesheetsPending = store.timesheetsPending || 0;
+  // Guard placed after every hook above, for the reason noted at the top.
+  if (!store.isAdmin) return <div className="p-4 text-slate-400">Access denied</div>;
   return (
     <div className="flex min-h-[calc(100vh-40px)]">
       <aside className="hidden w-60 flex-col bg-white px-4 py-5 ring-1 ring-slate-200 md:flex">
@@ -3245,15 +3249,18 @@ function HndPercentages({ store }) {
   const { attendance } = store;
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("name"); // name | overall
-  if (!attendance) return <div className="skeleton h-64 rounded-2xl" />;
-
-  const { units, rows, unitTotals, overall } = attendance;
+  // Everything derived here runs BEFORE the loading guard below, because usePaged is a
+  // hook: skipping it on the first (attendance === null) render and calling it once the
+  // data arrived changed the hook count between renders, which React rejects outright
+  // ("Rendered more hooks than during the previous render") and crashes the whole app.
+  const { units = [], rows = [], unitTotals = {}, overall = {} } = attendance || {};
   const ql = query.trim().toLowerCase();
   let list = rows.filter(r => !ql || r.student.name.toLowerCase().includes(ql) || r.student.studentRef.includes(ql) || r.student.email.toLowerCase().includes(ql));
   list = sort === "overall"
     ? [...list].sort((a, b) => (a.overall.pct ?? 101) - (b.overall.pct ?? 101)) // lowest first — those needing chasing
     : list;
   const paged = usePaged(list, 12, `${ql}|${sort}`);
+  if (!attendance) return <div className="skeleton h-64 rounded-2xl" />;
 
   const atRisk = rows.filter(r => r.overall.pct !== null && r.overall.pct < 70).length;
   const scopeName = semesterLabel(store.semesterId, store.semesters);
@@ -5225,16 +5232,37 @@ function GradeEntry({ store, assessment, onBack }) {
   const [saved, setSaved] = useState({});
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
+  const [loadError, setLoadError] = useState("");
   const load = useCallback(async () => {
-    try { const d = await store.getGrades(assessment.id); const snap = Object.fromEntries(d.rows.map(r => [r.student.id, r.marks == null ? "" : String(r.marks)])); setData(d); setDraft(snap); setSaved(snap); }
-    catch (e) { store.notify?.(e.message || "Could not load grades", "error"); }
+    setLoadError("");
+    try {
+      const d = await store.getGrades(assessment.id);
+      const snap = Object.fromEntries((d.rows || []).map(r => [r.student.id, r.marks == null ? "" : String(r.marks)]));
+      setData(d); setDraft(snap); setSaved(snap);
+    } catch (e) {
+      setLoadError(e.message || "Could not load grades");
+      store.notify?.(e.message || "Could not load grades", "error");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assessment.id]);
   useEffect(() => { load(); }, [load]);
-  if (!data) return <><AdminHeader title="Grades" subtitle="Loading…" Icon={Award} /><div className="skeleton h-64 rounded-2xl" /></>;
 
-  const { assessment: a, unit: mod, rows } = data;
-  const max = a.maxMarks;
+  // EVERY hook must run on every render, so all of this is computed BEFORE the early
+  // returns below. usePaged used to sit after them: on the first render `data` was null
+  // so it never ran, then the fetch resolved and it did — React saw the hook count
+  // change and threw "Rendered more hooks than during the previous render", which is
+  // what crashed the whole app the moment this screen was opened.
+  //
+  // Response shapes are tolerated either way: `unit` is current, `module` is what an
+  // older API build sends.
+  const a = data?.assessment || assessment || {};
+  const mod = data?.unit || data?.module || {};
+  const rows = data?.rows || [];
+  const max = a.maxMarks || assessment.maxMarks || 100;
+  const ql = query.trim().toLowerCase();
+  const visible = rows.filter(r => !ql || r.student.name.toLowerCase().includes(ql) || r.student.studentRef.includes(ql));
+  const paged = usePaged(visible, 25, `${assessment.id}|${ql}`);
+
   const setMark = (id, v) => { if (v === "" || /^\d{1,4}$/.test(v)) setDraft(d => ({ ...d, [id]: v })); };
   const dirty = rows.some(r => (draft[r.student.id] ?? "") !== (saved[r.student.id] ?? ""));
   const marked = rows.map(r => draft[r.student.id]).filter(v => v !== "" && v != null && !isNaN(Number(v))).map(Number);
@@ -5250,9 +5278,15 @@ function GradeEntry({ store, assessment, onBack }) {
     catch (_e) { /* store toasted */ }
     setSaving(false);
   };
-  const ql = query.trim().toLowerCase();
-  const visible = rows.filter(r => !ql || r.student.name.toLowerCase().includes(ql) || r.student.studentRef.includes(ql));
-  const paged = usePaged(visible, 25, `${assessment.id}|${ql}`);
+
+  // A failed load used to leave the skeleton up for ever with no way back.
+  if (loadError) return (
+    <>
+      <div className="mb-4"><button onClick={onBack} className="press flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><ChevronLeft size={15} /> Back to assessments</button></div>
+      <Card><EmptyState Icon={AlertCircle} title="Couldn't load these grades" msg={loadError} /><PrimaryBtn onClick={load} className="mx-auto mt-3"><RefreshCw size={15} /> Try again</PrimaryBtn></Card>
+    </>
+  );
+  if (!data) return <><AdminHeader title="Grades" subtitle="Loading…" Icon={Award} /><div className="skeleton h-64 rounded-2xl" /></>;
 
   return (
     <>
@@ -5260,7 +5294,7 @@ function GradeEntry({ store, assessment, onBack }) {
         <button onClick={onBack} className="press flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><ChevronLeft size={15} /> Back to assessments</button>
         {dirty && <span className="pop flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 ring-1 ring-amber-200"><AlertCircle size={13} /> Unsaved changes</span>}
       </div>
-      <AdminHeader title={`${mod.code} — ${a.title}`} subtitle={`${a.type} · out of ${max}${a.weight ? ` · ${a.weight}%` : ""}${a.dueDate ? ` · due ${fmtDate(a.dueDate)}` : ""}`} Icon={Award}
+      <AdminHeader title={`${mod.code ? mod.code + " — " : ""}${a.title || "Assessment"}`} subtitle={`${a.type} · out of ${max}${a.weight ? ` · ${a.weight}%` : ""}${a.dueDate ? ` · due ${fmtDate(a.dueDate)}` : ""}`} Icon={Award}
         action={<PrimaryBtn onClick={save} disabled={!dirty || saving || overMax} colour={dirty && !overMax ? NAVY : "#94a3b8"}>{saving ? <><Loader size={16} /> Saving…</> : <><Save size={16} /> Save grades</>}</PrimaryBtn>} />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
