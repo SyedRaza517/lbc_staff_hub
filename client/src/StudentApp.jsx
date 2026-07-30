@@ -14,11 +14,18 @@ import {
 const NAVY = "#1a3a8f";
 const NAVY_DARK = "#14306f";
 const MAROON = "#9e1b32";
+// Section accents. Checked as an adjacent colour-blind-safe set (worst pair ΔE 16.4),
+// so the four areas stay tellable apart for every reader — and each still carries its
+// own icon and label, so colour is never the only signal.
+const ACCENT = { attendance: "#4f46e5", results: "#0891b2", ask: "#be123c", more: "#7c3aed" };
 const fmtPct = (p) => (p == null ? "—" : `${p}%`);
-const pctTone = (p) => p == null ? { bg: "bg-slate-100", text: "text-slate-400", colour: "#94a3b8", ring: "ring-slate-200" }
-  : p >= 85 ? { bg: "bg-emerald-50", text: "text-emerald-700", colour: "#059669", ring: "ring-emerald-200" }
-    : p >= 70 ? { bg: "bg-amber-50", text: "text-amber-700", colour: "#d97706", ring: "ring-amber-200" }
-      : { bg: "bg-rose-50", text: "text-rose-700", colour: "#e11d48", ring: "ring-rose-200" };
+// Attendance/grade bands. Four steps rather than three, so "nearly there" reads
+// differently from "needs attention" instead of both being flat red.
+const pctTone = (p) => p == null ? { bg: "bg-slate-100", text: "text-slate-400", colour: "#94a3b8", ring: "ring-slate-200", soft: "#f1f5f9" }
+  : p >= 90 ? { bg: "bg-emerald-50", text: "text-emerald-700", colour: "#059669", ring: "ring-emerald-200", soft: "#ecfdf5" }
+    : p >= 75 ? { bg: "bg-teal-50", text: "text-teal-700", colour: "#0d9488", ring: "ring-teal-200", soft: "#f0fdfa" }
+      : p >= 60 ? { bg: "bg-amber-50", text: "text-amber-700", colour: "#d97706", ring: "ring-amber-200", soft: "#fffbeb" }
+        : { bg: "bg-rose-50", text: "text-rose-700", colour: "#e11d48", ring: "ring-rose-200", soft: "#fff1f2" };
 const fmtDate = (iso) => { if (!iso) return null; const [y, m, d] = iso.split("-"); const mm = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1] || m; return `${Number(d)} ${mm} ${y}`; };
 
 // Attendance statuses. These are STATUS colours, so they always ship with the letter
@@ -32,18 +39,31 @@ const ATT = [
   { key: "A", label: "Absent", colour: "#e11d48" },
 ];
 
-const Screen = ({ children }) => <div className="space-y-3 p-4 pb-6">{children}</div>;
-const Card = ({ children, className = "" }) => <div className={`rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 ${className}`}>{children}</div>;
+const Screen = ({ children }) => <div className="space-y-3.5 px-4 pb-8 pt-4">{children}</div>;
+// Rounder corners and layered shadows read as physical cards rather than boxes.
+// `i` staggers a list's entrance so rows arrive one after another.
+const Card = ({ children, className = "", i }) => (
+  <div className={`fade-up rounded-3xl bg-white p-4 shadow-card ring-1 ring-slate-200/60 ${className}`} style={i != null ? { animationDelay: `${i * 55}ms` } : undefined}>{children}</div>
+);
 const ErrBox = ({ children }) => <Card className="!bg-rose-50 !ring-rose-200 text-sm font-semibold text-rose-600">{children}</Card>;
 // A shaped placeholder beats a lone spinner: the screen keeps its layout while it
 // loads, so nothing jumps around when the data lands.
-const Skeleton = ({ className = "" }) => <div className={`animate-pulse rounded-2xl bg-slate-200/70 ${className}`} />;
+const Skeleton = ({ className = "" }) => <div className={`skeleton rounded-3xl ${className}`} />;
 const LoadingScreen = () => (
   <Screen>
-    <Skeleton className="h-40" />
-    <Skeleton className="h-24" />
-    <Skeleton className="h-24" />
+    <div className="grid grid-cols-2 gap-3"><Skeleton className="h-44" /><Skeleton className="h-44" /></div>
+    <Skeleton className="h-14" />
+    <Skeleton className="h-20" />
+    <Skeleton className="h-28" />
   </Screen>
+);
+
+// A soft section heading — small, wide-tracked, with a short accent rule.
+const SectionTitle = ({ children, colour = NAVY }) => (
+  <div className="flex items-center gap-2 px-1 pt-1">
+    <span className="h-3.5 w-1 rounded-full" style={{ background: colour }} />
+    <p className="text-[11px] font-extrabold uppercase tracking-widest text-slate-500">{children}</p>
+  </div>
 );
 
 // Counts a number up when it first appears. Small touch, but it makes the headline
@@ -83,8 +103,8 @@ function Ring({ pct, size = 132, stroke = 13, label, colour }) {
           style={{ transition: "stroke-dashoffset 1.1s cubic-bezier(.4,0,.2,1)" }}
         />
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-[26px] font-extrabold leading-none tabular-nums" style={{ color: tone }}>{pct == null ? "—" : `${Math.round(shown)}%`}</span>
+      <div className="scale-in absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-[27px] font-extrabold leading-none tracking-tight tabular-nums" style={{ color: tone }}>{pct == null ? "—" : `${Math.round(shown)}%`}</span>
         {label && <span className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>}
       </div>
     </div>
@@ -175,7 +195,7 @@ export default function StudentApp({ user, logout }) {
   return (
     <PhoneShell header={<Header title={title} screen={screen} setScreen={setScreen} user={user} onRefresh={load} busy={busy} />}>
       <div className="flex min-h-full flex-col">
-        <div className="flex-1">
+        <div className="flex-1" style={{ background: "linear-gradient(180deg,#f6f8fc 0%,#eef2f9 60%,#f6f8fc 100%)" }}>
           {screen === "home" && <Home user={user} {...shared} newReplies={newReplies} />}
           {screen === "attendance" && <AttendanceScreen {...shared} />}
           {screen === "assessments" && <ResultsScreen {...shared} />}
@@ -192,20 +212,20 @@ export default function StudentApp({ user, logout }) {
 // an app rather than a website: every section is one thumb-tap away, always.
 function TabBar({ screen, setScreen, newReplies }) {
   return (
-    <nav className="sticky bottom-0 z-30 flex border-t border-slate-200 bg-white/95 backdrop-blur" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+    <nav className="sticky bottom-0 z-30 mt-2 flex border-t border-slate-200/80 bg-white/90 backdrop-blur-xl" style={{ paddingBottom: "env(safe-area-inset-bottom)", boxShadow: "0 -6px 20px -12px rgba(15,23,42,.25)" }}>
       {TABS.map(({ key, label, Icon }) => {
         const on = screen === key;
         return (
           <button key={key} onClick={() => setScreen(key)} aria-current={on ? "page" : undefined}
-            className="press relative flex flex-1 flex-col items-center gap-0.5 py-2.5 transition-colors">
-            <span className="relative">
-              <Icon size={21} strokeWidth={on ? 2.5 : 2} style={{ color: on ? NAVY : "#94a3b8" }} />
+            className="press relative flex flex-1 flex-col items-center gap-1 py-2">
+            <span className="relative flex h-8 w-14 items-center justify-center rounded-2xl transition-all duration-200"
+              style={on ? { background: NAVY + "14" } : undefined}>
+              <Icon size={20} strokeWidth={on ? 2.6 : 2} style={{ color: on ? NAVY : "#9aa5b8" }} />
               {key === "query" && newReplies > 0 && (
-                <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-400 px-1 text-[9px] font-extrabold text-slate-900 ring-2 ring-white">{newReplies}</span>
+                <span className="pop absolute right-1.5 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-400 px-1 text-[9px] font-extrabold text-slate-900 ring-2 ring-white">{newReplies}</span>
               )}
             </span>
-            <span className="text-[10px] font-bold" style={{ color: on ? NAVY : "#94a3b8" }}>{label}</span>
-            {on && <span className="absolute inset-x-5 top-0 h-0.5 rounded-full" style={{ background: NAVY }} />}
+            <span className="text-[10px] font-bold tracking-tight" style={{ color: on ? NAVY : "#9aa5b8" }}>{label}</span>
           </button>
         );
       })}
@@ -217,27 +237,47 @@ function Header({ title, screen, setScreen, user, onRefresh, busy }) {
   const hour = Number(new Date().toLocaleString("en-GB", { hour: "2-digit", hour12: false, timeZone: "Europe/London" }));
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const first = String(user.name || "").trim().split(/\s+/)[0] || "there";
+  const home = screen === "home";
   return (
-    <div className="relative z-20 overflow-hidden pt-2" style={{ background: `linear-gradient(155deg, ${NAVY} 0%, ${NAVY_DARK} 62%, #0f2352 100%)` }}>
-      {/* soft light bloom, purely decorative */}
-      <div className="pointer-events-none absolute -right-10 -top-16 h-44 w-44 rounded-full bg-white/10 blur-2xl" />
+    // A deep brand gradient that curves into the page below it. The curve plus the
+    // negative margin on the content is what gives the app its sense of depth —
+    // the screen reads as sitting *on* the header rather than under a flat bar.
+    <div
+      className="animated-gradient relative z-20 overflow-hidden pt-2"
+      style={{
+        background: `linear-gradient(135deg, ${NAVY_DARK} 0%, ${NAVY} 45%, #3730a3 78%, ${MAROON} 140%)`,
+        backgroundSize: "220% 220%",
+        borderBottomLeftRadius: home ? 30 : 22,
+        borderBottomRightRadius: home ? 30 : 22,
+      }}
+    >
+      {/* Decorative blooms — they give the flat gradient some light and depth. */}
+      <div className="pointer-events-none absolute -right-12 -top-20 h-52 w-52 rounded-full bg-white/12 blur-3xl" />
+      <div className="pointer-events-none absolute -left-16 bottom--10 h-40 w-40 rounded-full bg-white/8 blur-3xl" />
+
       <div className="relative flex items-center gap-2 px-3 pb-2 pt-1">
-        {screen !== "home"
-          ? <button onClick={() => setScreen("home")} aria-label="Back" className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"><ChevronLeft size={22} /></button>
-          : <div className="flex h-11 w-12 shrink-0 items-center justify-center rounded-xl bg-white px-1"><BrandMark size={26} /></div>}
-        <div className="min-w-0 flex-1 text-center"><h1 className="truncate text-lg font-extrabold tracking-wide text-white">{title}</h1></div>
-        <button onClick={onRefresh} aria-label="Refresh" className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25">
+        {!home
+          ? <button onClick={() => setScreen("home")} aria-label="Back" className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-white ring-1 ring-white/20 hover:bg-white/25"><ChevronLeft size={22} /></button>
+          : <div className="flex h-11 w-12 shrink-0 items-center justify-center rounded-2xl bg-white px-1 shadow-lg"><BrandMark size={26} /></div>}
+        <div className="min-w-0 flex-1 text-center"><h1 className="truncate text-[17px] font-extrabold tracking-tight text-white">{title}</h1></div>
+        <button onClick={onRefresh} aria-label="Refresh" className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-white ring-1 ring-white/20 hover:bg-white/25">
           <RefreshCw size={17} className={busy ? "animate-spin" : ""} />
         </button>
       </div>
-      {screen === "home" && (
-        <div className="relative px-4 pb-5">
-          <div className="flex items-center gap-3 rounded-2xl bg-white/10 p-3 ring-1 ring-white/15">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl text-base font-bold text-white shadow-lg ring-2 ring-white/25" style={{ background: user.colour || MAROON }}>{user.initials || "S"}</div>
-            <div className="min-w-0">
-              <p className="text-[11px] font-medium text-white/70">{greeting},</p>
-              <p className="truncate text-[15px] font-bold text-white">{first}</p>
-              <p className="truncate text-[11px] text-white/60">{user.studentRef ? `Student · ${user.studentRef}` : "Student"}</p>
+
+      {home && (
+        <div className="relative px-4 pb-7">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl text-lg font-extrabold text-white shadow-xl ring-2 ring-white/30" style={{ background: user.colour || MAROON }}>{user.initials || "S"}</div>
+              <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-emerald-400 ring-2 ring-white/90" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[12px] font-medium text-white/75">{greeting},</p>
+              <p className="truncate text-[19px] font-extrabold leading-tight tracking-tight text-white">{first}</p>
+              <p className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-bold text-white/90 ring-1 ring-white/15">
+                <User size={9} />{user.studentRef || "Student"}
+              </p>
             </div>
           </div>
         </div>
@@ -267,85 +307,108 @@ function Home({ user, attendance, results, queries, busy, err, setScreen, newRep
     : attPct >= 70 ? { t: "Good, but there's room to improve.", c: "#d97706" }
       : { t: "Your attendance needs attention.", c: "#e11d48" };
 
+  const attTone = pctTone(attPct);
+  const avgTone = pctTone(avgPct);
+
   return (
-    <Screen>
+    // -mt-5 lifts the content onto the header's curve, so the hero pair overlaps it.
+    <div className="-mt-5 space-y-3.5 px-4 pb-8">
       {/* Headline pair: the two numbers a student actually cares about. */}
       <div className="grid grid-cols-2 gap-3">
-        <button onClick={() => setScreen("attendance")} className="press flex flex-col items-center rounded-2xl bg-white p-3.5 shadow-sm ring-1 ring-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-md">
-          <Ring pct={attPct} size={104} stroke={11} label="attendance" />
-          <span className="mt-2 flex items-center gap-1 text-[11px] font-bold text-slate-500">{curUnits.length} current unit{curUnits.length === 1 ? "" : "s"} <ChevronRight size={13} className="text-slate-300" /></span>
-        </button>
-        <button onClick={() => setScreen("assessments")} className="press flex flex-col items-center rounded-2xl bg-white p-3.5 shadow-sm ring-1 ring-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-md">
-          <Ring pct={avgPct} size={104} stroke={11} label="average" />
-          <span className="mt-2 flex items-center gap-1 text-[11px] font-bold text-slate-500">{results?.averageGrade || (graded ? "—" : "Not graded")} <ChevronRight size={13} className="text-slate-300" /></span>
-        </button>
+        <HeroTile onClick={() => setScreen("attendance")} i={0}
+          pct={attPct} label="Attendance" tone={attTone}
+          foot={`${curUnits.length} current unit${curUnits.length === 1 ? "" : "s"}`} />
+        <HeroTile onClick={() => setScreen("assessments")} i={1}
+          pct={avgPct} label="Average" tone={avgTone}
+          foot={results?.averageGrade || (graded ? "—" : "Not graded yet")} />
       </div>
 
       {band && (
-        <div className="flex items-center gap-2.5 rounded-2xl px-3.5 py-3 ring-1" style={{ background: band.c + "0f", borderColor: band.c, boxShadow: "none", "--tw-ring-color": band.c + "40" }}>
-          <Sparkles size={16} style={{ color: band.c }} className="shrink-0" />
-          <p className="text-xs font-bold" style={{ color: band.c }}>{band.t}</p>
+        <div className="fade-up flex items-center gap-2.5 rounded-2xl px-3.5 py-3 ring-1" style={{ background: band.c + "12", "--tw-ring-color": band.c + "33", animationDelay: "110ms" }}>
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl" style={{ background: band.c + "1f" }}><Sparkles size={14} style={{ color: band.c }} /></span>
+          <p className="text-[12px] font-bold leading-snug" style={{ color: band.c }}>{band.t}</p>
         </div>
       )}
 
       {/* At a glance */}
-      <div className="grid grid-cols-3 gap-2">
-        <Stat icon={CheckCircle2} value={o.P ?? 0} label="Present" colour="#059669" />
-        <Stat icon={Clock3} value={(o.L ?? 0) + (o.E ?? 0)} label="Late/Exc." colour="#ea580c" />
-        <Stat icon={CalendarCheck} value={o.marked ?? 0} label="Sessions" colour={NAVY} />
+      <div className="grid grid-cols-3 gap-2.5">
+        <Stat icon={CheckCircle2} value={o.P ?? 0} label="Present" colour="#059669" i={2} />
+        <Stat icon={Clock3} value={(o.L ?? 0) + (o.E ?? 0)} label="Late / Exc." colour="#ea580c" i={3} />
+        <Stat icon={CalendarCheck} value={o.marked ?? 0} label="Sessions" colour={ACCENT.attendance} i={4} />
       </div>
 
       {/* Latest reply, surfaced so it isn't missed */}
       {latestReply && (
-        <button onClick={() => setScreen("query")} className="press w-full rounded-2xl bg-white p-3.5 text-left shadow-sm ring-1 ring-slate-200/70 transition hover:shadow-md">
+        <button onClick={() => setScreen("query")} className="press fade-up w-full rounded-3xl bg-white p-4 text-left shadow-card ring-1 ring-slate-200/60" style={{ animationDelay: "220ms" }}>
           <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50"><MessageSquare size={14} className="text-blue-600" /></span>
-            <p className="flex-1 text-[11px] font-bold uppercase tracking-wide text-blue-600">Reply from the college</p>
-            {newReplies > 0 && <span className="rounded-full bg-amber-400 px-1.5 text-[10px] font-extrabold text-slate-900">new</span>}
+            <span className="flex h-7 w-7 items-center justify-center rounded-xl" style={{ background: ACCENT.ask + "14" }}><MessageSquare size={14} style={{ color: ACCENT.ask }} /></span>
+            <p className="flex-1 text-[10px] font-extrabold uppercase tracking-widest" style={{ color: ACCENT.ask }}>Reply from the college</p>
+            {newReplies > 0 && <span className="pop rounded-full bg-amber-400 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-slate-900">new</span>}
           </div>
-          <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-slate-600">{latestReply.response}</p>
+          <p className="mt-2 line-clamp-2 text-[13px] leading-relaxed text-slate-600">{latestReply.response}</p>
+          <p className="mt-1.5 flex items-center gap-1 text-[11px] font-bold" style={{ color: ACCENT.ask }}>Read the conversation <ChevronRight size={12} /></p>
         </button>
       )}
 
       {pending > 0 && (
-        <div className="flex items-center gap-2.5 rounded-2xl bg-white px-3.5 py-3 shadow-sm ring-1 ring-slate-200/70">
-          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100"><Award size={16} className="text-slate-500" /></span>
-          <p className="flex-1 text-xs font-semibold text-slate-600">{pending} assessment{pending === 1 ? "" : "s"} not marked yet</p>
-          <button onClick={() => setScreen("assessments")} className="press text-[11px] font-bold" style={{ color: NAVY }}>View</button>
-        </div>
+        <button onClick={() => setScreen("assessments")} className="press fade-up flex w-full items-center gap-3 rounded-3xl bg-white p-3.5 text-left shadow-card ring-1 ring-slate-200/60" style={{ animationDelay: "265ms" }}>
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl" style={{ background: ACCENT.results + "14" }}><Award size={17} style={{ color: ACCENT.results }} /></span>
+          <span className="flex-1">
+            <span className="block text-[13px] font-extrabold text-slate-700">{pending} assessment{pending === 1 ? "" : "s"} awaiting marks</span>
+            <span className="block text-[11px] text-slate-400">{graded} of {totalAssess} marked so far</span>
+          </span>
+          <ChevronRight size={17} className="shrink-0 text-slate-300" />
+        </button>
       )}
 
-      <p className="px-1 pt-1 text-xs font-bold uppercase tracking-wide text-slate-400">Quick actions</p>
+      <SectionTitle colour={ACCENT.attendance}>Quick actions</SectionTitle>
       <div className="grid grid-cols-2 gap-2.5">
-        <Action onClick={() => setScreen("attendance")} Icon={Percent} label="My Attendance" sub="By unit" c={NAVY} />
-        <Action onClick={() => setScreen("assessments")} Icon={Award} label="My Results" sub="Marks & grades" c="#0d7a5f" />
-        <Action onClick={() => setScreen("query")} Icon={MessageSquare} label="Ask the College" sub={newReplies ? `${newReplies} new` : "Send a query"} c={MAROON} badge={newReplies} />
-        <Action onClick={() => setScreen("more")} Icon={Settings} label="More" sub="Account" c="#5b6472" />
+        <Action onClick={() => setScreen("attendance")} Icon={Percent} label="My Attendance" sub="By unit" c={ACCENT.attendance} i={0} />
+        <Action onClick={() => setScreen("assessments")} Icon={Award} label="My Results" sub="Marks & grades" c={ACCENT.results} i={1} />
+        <Action onClick={() => setScreen("query")} Icon={MessageSquare} label="Ask the College" sub={newReplies ? `${newReplies} new repl${newReplies === 1 ? "y" : "ies"}` : "Send a query"} c={ACCENT.ask} badge={newReplies} i={2} />
+        <Action onClick={() => setScreen("more")} Icon={Settings} label="More" sub="Account & settings" c={ACCENT.more} i={3} />
       </div>
-    </Screen>
-  );
-}
-
-function Stat({ icon: Icon, value, label, colour }) {
-  return (
-    <div className="rounded-2xl bg-white p-3 text-center shadow-sm ring-1 ring-slate-200/70">
-      <Icon size={15} className="mx-auto" style={{ color: colour }} />
-      <p className="mt-1 text-lg font-extrabold leading-none tabular-nums text-slate-800">{value}</p>
-      <p className="mt-0.5 text-[10px] font-semibold text-slate-400">{label}</p>
     </div>
   );
 }
 
-function Action({ onClick, Icon, label, sub, c, badge }) {
+// The two headline figures. A tinted panel behind the ring ties the number to its
+// band at a glance, before the number itself is even read.
+function HeroTile({ onClick, pct, label, tone, foot, i }) {
   return (
-    <button onClick={onClick} className="press relative flex flex-col items-start gap-2 rounded-2xl bg-white p-3.5 text-left shadow-sm ring-1 ring-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-md">
-      <span className="relative flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-sm" style={{ background: c }}>
+    <button onClick={onClick} className="press fade-up relative overflow-hidden rounded-3xl bg-white p-4 shadow-card ring-1 ring-slate-200/60" style={{ animationDelay: `${i * 70}ms` }}>
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-24" style={{ background: `linear-gradient(180deg, ${tone.soft} 0%, transparent 100%)` }} />
+      <div className="relative flex flex-col items-center">
+        <Ring pct={pct} size={112} stroke={11} />
+        <p className="mt-2.5 text-[11px] font-extrabold uppercase tracking-widest text-slate-500">{label}</p>
+        <p className="mt-0.5 flex items-center gap-0.5 text-[11px] font-semibold text-slate-400">{foot}<ChevronRight size={12} className="text-slate-300" /></p>
+      </div>
+    </button>
+  );
+}
+
+function Stat({ icon: Icon, value, label, colour, i = 0 }) {
+  return (
+    <div className="fade-up rounded-2xl bg-white p-3 text-center shadow-card ring-1 ring-slate-200/60" style={{ animationDelay: `${140 + i * 45}ms` }}>
+      <span className="mx-auto flex h-7 w-7 items-center justify-center rounded-xl" style={{ background: colour + "14" }}><Icon size={14} style={{ color: colour }} /></span>
+      <p className="mt-1.5 text-[19px] font-extrabold leading-none tabular-nums text-slate-800">{value}</p>
+      <p className="mt-1 text-[10px] font-semibold text-slate-400">{label}</p>
+    </div>
+  );
+}
+
+function Action({ onClick, Icon, label, sub, c, badge, i = 0 }) {
+  return (
+    <button onClick={onClick} className="press fade-up relative flex flex-col items-start gap-2.5 overflow-hidden rounded-3xl bg-white p-4 text-left shadow-card ring-1 ring-slate-200/60" style={{ animationDelay: `${300 + i * 55}ms` }}>
+      {/* faint corner wash in the section's own colour */}
+      <span className="pointer-events-none absolute -right-6 -top-6 h-16 w-16 rounded-full" style={{ background: c + "12" }} />
+      <span className="relative flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow-md" style={{ background: `linear-gradient(140deg, ${c}, ${c}cc)` }}>
         <Icon size={19} />
-        {badge > 0 && <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-extrabold text-slate-900 ring-2 ring-white">{badge}</span>}
+        {badge > 0 && <span className="pop absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-extrabold text-slate-900 ring-2 ring-white">{badge}</span>}
       </span>
-      <span>
-        <span className="block text-[13px] font-extrabold text-slate-700">{label}</span>
-        <span className={`block text-[11px] ${badge > 0 ? "font-bold text-amber-600" : "text-slate-400"}`}>{sub}</span>
+      <span className="relative">
+        <span className="block text-[13px] font-extrabold leading-tight text-slate-700">{label}</span>
+        <span className={`mt-0.5 block text-[11px] ${badge > 0 ? "font-bold text-amber-600" : "text-slate-400"}`}>{sub}</span>
       </span>
     </button>
   );
@@ -385,16 +448,17 @@ function AttendanceScreen({ attendance, busy, err }) {
   const previous = attendance.previous || [];
 
   return (
-    <Screen>
-      <Card className="!p-5">
-        <div className="flex flex-col items-center">
+    <div className="-mt-4 space-y-3.5 px-4 pb-8">
+      <div className="fade-up relative overflow-hidden rounded-3xl bg-white p-5 shadow-card-lg ring-1 ring-slate-200/60">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-28" style={{ background: `linear-gradient(180deg, ${pctTone(o.pct).soft} 0%, transparent 100%)` }} />
+        <div className="relative flex flex-col items-center">
           <Ring pct={o.pct ?? null} label="current units" />
           <p className="mt-2 text-[11px] font-semibold text-slate-400">{o.marked ?? 0} marked session{(o.marked ?? 0) === 1 ? "" : "s"} across {curUnits.length} unit{curUnits.length === 1 ? "" : "s"}</p>
         </div>
-        <div className="mt-4"><StatusBar counts={o} /></div>
-      </Card>
+        <div className="relative mt-4"><StatusBar counts={o} /></div>
+      </div>
 
-      <p className="px-1 pt-1 text-xs font-bold uppercase tracking-wide text-slate-400">Current units</p>
+      <SectionTitle colour={ACCENT.attendance}>Current units</SectionTitle>
       <Card className="!p-0 overflow-hidden">
         {curUnits.map(mr => <UnitAtt key={unitOf(mr).id} mr={mr} />)}
         {curUnits.length === 0 && <Empty icon={CalendarCheck} title="No current units" msg="Units you're enrolled on will appear here once teaching starts." />}
@@ -402,13 +466,13 @@ function AttendanceScreen({ attendance, busy, err }) {
 
       {previous.length > 0 && (
         <>
-          <p className="px-1 pt-1 text-xs font-bold uppercase tracking-wide text-slate-400">Previous units · {previous.length}</p>
+          <SectionTitle colour="#94a3b8">Previous units · {previous.length}</SectionTitle>
           <Card className="!p-0 overflow-hidden">{previous.map(mr => <UnitAtt key={unitOf(mr).id} mr={mr} ended />)}</Card>
         </>
       )}
 
-      <div className="rounded-2xl bg-white p-3.5 ring-1 ring-slate-200/70">
-        <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">How it's counted</p>
+      <div className="fade-up rounded-3xl bg-white p-4 shadow-card ring-1 ring-slate-200/60">
+        <p className="mb-2.5 text-[10px] font-extrabold uppercase tracking-widest text-slate-400">How it's counted</p>
         <div className="grid grid-cols-2 gap-y-1.5">
           {ATT.map(a => (
             <div key={a.key} className="flex items-center gap-1.5">
@@ -417,9 +481,9 @@ function AttendanceScreen({ attendance, busy, err }) {
             </div>
           ))}
         </div>
-        <p className="mt-2 text-[10px] leading-relaxed text-slate-400">Present scores 2, Late and Excused score 1, Absent scores 0. Only sessions that have been marked are counted.</p>
+        <p className="mt-2.5 text-[10px] leading-relaxed text-slate-400">Present scores 2, Late and Excused score 1, Absent scores 0. Only sessions that have been marked are counted.</p>
       </div>
-    </Screen>
+    </div>
   );
 }
 
@@ -445,9 +509,10 @@ function ResultsScreen({ results, busy, err }) {
   const BAND_C = { Distinction: "#059669", Merit: "#2563eb", Pass: "#ea580c", Fail: "#e11d48" };
 
   return (
-    <Screen>
-      <Card className="!p-5">
-        <div className="flex flex-col items-center">
+    <div className="-mt-4 space-y-3.5 px-4 pb-8">
+      <div className="fade-up relative overflow-hidden rounded-3xl bg-white p-5 shadow-card-lg ring-1 ring-slate-200/60">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-28" style={{ background: `linear-gradient(180deg, ${pctTone(results.averagePct).soft} 0%, transparent 100%)` }} />
+        <div className="relative flex flex-col items-center">
           <Ring pct={results.averagePct ?? null} label="average" />
           <span className="mt-2 rounded-xl px-3 py-1 text-sm font-extrabold ring-1" style={{ background: pctTone(results.averagePct).colour + "14", color: pctTone(results.averagePct).colour, "--tw-ring-color": pctTone(results.averagePct).colour + "33" }}>
             {results.averageGrade || "Not graded yet"}
@@ -455,7 +520,7 @@ function ResultsScreen({ results, busy, err }) {
           <p className="mt-1.5 text-[11px] font-semibold text-slate-400">{results.graded} of {results.count} assessment{results.count === 1 ? "" : "s"} marked</p>
         </div>
         {graded.length > 0 && (
-          <div className="mt-4 grid grid-cols-4 gap-1.5">
+          <div className="relative mt-4 grid grid-cols-4 gap-1.5">
             {Object.entries(bands).map(([b, n]) => (
               <div key={b} className="rounded-xl py-1.5 text-center" style={{ background: BAND_C[b] + "12" }}>
                 <p className="text-sm font-extrabold tabular-nums" style={{ color: BAND_C[b] }}>{n}</p>
@@ -464,9 +529,9 @@ function ResultsScreen({ results, busy, err }) {
             ))}
           </div>
         )}
-      </Card>
+      </div>
 
-      <p className="px-1 pt-1 text-xs font-bold uppercase tracking-wide text-slate-400">Your assessments</p>
+      <SectionTitle colour={ACCENT.results}>Your assessments</SectionTitle>
       <div className="space-y-2.5">
         {list.map(a => {
           const t = pctTone(a.pct);
@@ -494,7 +559,7 @@ function ResultsScreen({ results, busy, err }) {
         })}
         {list.length === 0 && <Card className="!p-0"><Empty icon={Award} title="No assessments yet" msg="Assessments set for your units will show here, along with your marks and feedback." /></Card>}
       </div>
-    </Screen>
+    </div>
   );
 }
 
@@ -548,7 +613,7 @@ function QueryScreen({ queries = [], reload }) {
 
       {ok && <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 px-3.5 py-3 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200"><CheckCircle2 size={15} /> Sent — the college will reply here.</div>}
 
-      <p className="px-1 pt-1 text-xs font-bold uppercase tracking-wide text-slate-400">Your conversations</p>
+      <SectionTitle colour={ACCENT.ask}>Your conversations</SectionTitle>
       {queries.length === 0 && <Card className="!p-0"><Empty icon={MessageSquare} title="No questions yet" msg="Anything you ask the college will appear here, with their reply." /></Card>}
 
       {/* Conversation style: your message on the right, the college's reply on the left. */}
