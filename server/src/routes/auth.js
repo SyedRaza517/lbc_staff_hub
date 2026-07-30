@@ -279,7 +279,9 @@ router.delete("/totp", requireAuth, async (req, res) => {
   const staff = await prisma.staff.findUnique({ where: { id: req.user.id } });
   if (!staff?.totpEnabled) return res.status(400).json({ error: "Two-factor authentication is not enabled" });
   if (!password || !verifyPassword(password, staff.passwordHash)) return res.status(400).json({ error: "Password is incorrect" });
-  if (staff.mustSetupTotp) return res.status(400).json({ error: "Two-factor authentication is required for this account" });
+  // Honour the same enforcement flag as everywhere else — while 2FA is off this
+  // must not hard-block an account from removing an authenticator it can't use.
+  if (TOTP_ENFORCED && staff.mustSetupTotp) return res.status(400).json({ error: "Two-factor authentication is required for this account" });
   const updated = await prisma.staff.update({ where: { id: staff.id }, data: { totpEnabled: false, totpSecret: null } });
   res.json({ ok: true, user: sStaff(updated) });
 });

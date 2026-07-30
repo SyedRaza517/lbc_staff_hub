@@ -126,16 +126,20 @@ export function useApiStore(notify, user) {
   // range: Monday–Friday only, excluding bank holidays. Weekends (Sat/Sun) and bank
   // holidays that fall inside the range are free — they are never deducted. This is
   // the single source of truth for how many days a booking costs.
-  const chargeableDays = useCallback((start, end) => {
+  // `year` (optional) counts only the days falling in that calendar year, because the
+  // allowance is per leave year — a booking straddling New Year charges each year the
+  // days it actually uses. Mirrors the server's chargeableDays exactly.
+  const chargeableDays = useCallback((start, end, year) => {
     if (!start || !end || start > end) return 0;
     let cur = new Date(start + "T00:00:00Z");
     const last = new Date(end + "T00:00:00Z");
     if (isNaN(cur) || isNaN(last)) return 0;
+    const wantYear = year == null ? null : String(year);
     let n = 0;
     while (cur <= last) {
       const iso = cur.toISOString().slice(0, 10);
       const dow = cur.getUTCDay(); // 0 = Sun … 6 = Sat
-      if (dow !== 0 && dow !== 6 && !bankHolidaySet.has(iso)) n += 1;
+      if (dow !== 0 && dow !== 6 && !bankHolidaySet.has(iso) && (wantYear === null || iso.slice(0, 4) === wantYear)) n += 1;
       cur = new Date(cur.getTime() + 86400000);
     }
     return n;
@@ -145,8 +149,6 @@ export function useApiStore(notify, user) {
   // which matches how the bank-holiday pot is already counted. Without this the used
   // total accumulated for ever, so a staff member who spent this year's allowance
   // could never book again in any later year.
-  const leaveYearOf = (l) => String(l.start || "").slice(0, 4);
-  const inLeaveYear = useCallback((l) => leaveYearOf(l) === String(thisYear), [thisYear]);
 
   // Every approved leave type counts against the allowance (sick included) — the
   // total is reduced by any approved leave, regardless of type. Unpaid leave does
@@ -154,17 +156,40 @@ export function useApiStore(notify, user) {
   // server's UNPAID_TYPES and the client's NON_ALLOWANCE_TYPES). We recompute the
   // cost from the dates (weekends + bank holidays removed) rather than trusting a
   // stored day count, so old records are handled correctly too.
-  const usedDays = useCallback((id) => leave.filter((l) => l.staffId === id && l.status === "approved" && l.type !== "unpaid" && inLeaveYear(l)).reduce((s, l) => s + chargeableDays(l.start, l.end), 0), [leave, chargeableDays, inLeaveYear]);
+  // Days charged against a given leave year (defaults to the current one). Counting
+  // per-year means a Dec->Jan booking draws from both years, and next year's pot is
+  // untouched by this year's usage.
+  const usedDays = useCallback((id, year = thisYear) => leave.filter((l) => l.staffId === id && l.status === "approved" && l.type !== "unpaid").reduce((s, l) => s + chargeableDays(l.start, l.end, year), 0), [leave, chargeableDays, thisYear]);
   // Adjustments are likewise scoped to this leave year (they top up / dock the year's
   // entitlement); an undated legacy adjustment still counts so nothing is lost.
-  const adjDays = useCallback((id) => adjustments.filter((a) => a.staffId === id && (!a.date || String(a.date).slice(0, 4) === String(thisYear))).reduce((s, a) => s + a.days, 0), [adjustments, thisYear]);
+  // Deliberately NOT year-scoped: adjustments are manual HR corrections with no way
+  // to date them from the UI, so scoping them made a "+3 carried over" silently
+  // disappear at midnight on 31 December. Matches the server.
+  const adjDays = useCallback((id) => adjustments.filter((a) => a.staffId === id).reduce((s, a) => s + a.days, 0), [adjustments]);
   // Total entitlement (e.g. 28) = the bookable allowance + the 8 bank holidays.
   const effectiveAllowance = useCallback((id) => { const s = staff.find((x) => x.id === id); return (s?.allowance || 0) + adjDays(id); }, [staff, adjDays]);
   // The bookable pot (e.g. 20): total entitlement minus the 8 bank holidays, which
   // are never bookable. This is the "total" on the Holiday Allowance card.
   const bookableAllowance = useCallback((id) => Math.max(0, effectiveAllowance(id) - bankHolidayTotal), [effectiveAllowance, bankHolidayTotal]);
+  // Remaining in a specific leave year. Booking forms MUST pass the year they are
+  // booking into - pinning this to the current year stopped staff booking January
+  // leave in December, and hid next year's already-approved bookings.
+  const remainingIn = useCallback((id, year) => bookableAllowance(id) - usedDays(id, year), [bookableAllowance, usedDays]);
   // Days a staff member has left to book: bookable allowance − their approved leave.
-  const remaining = useCallback((id) => bookableAllowance(id) - usedDays(id), [bookableAllowance, usedDays]);
+  const remaining = useCallback((id) => bookableAllowance(id) - usedDays(id, thisYear), [bookableAllowance, usedDays, thisYear]);
+  // The first leave year a booking would overflow, or null if it fits. Checks every
+  // year the range touches against that year's own pot.
+  const overflowYear = useCallback((id, start, end) => {
+    if (!start || !end || start > end) return null;
+    const y0 = Number(String(start).slice(0, 4)), y1 = Number(String(end).slice(0, 4));
+    if (!Number.isFinite(y0) || !Number.isFinite(y1)) return null;
+    for (let y = y0; y <= y1; y++) {
+      const cost = chargeableDays(start, end, y);
+      const left = remainingIn(id, y);
+      if (cost > 0 && cost > left) return { year: String(y), cost, left };
+    }
+    return null;
+  }, [chargeableDays, remainingIn]);
 
   const refreshInteractions = useCallback(async () => {
     try { setInteractions(await api.listInteractions()); }
@@ -176,7 +201,11 @@ export function useApiStore(notify, user) {
     try {
       const [list, ov] = await Promise.all([api.listAssessments(), api.assessmentOverview()]);
       setAssessments(list); setAssessmentOverview(ov);
-    } catch (e) { notify?.(e.message || "Failed to load assessments", "error"); }
+    } catch (e) {
+      // Tolerated like sign-ups: an admin with "executive" but not "assessments" 403s
+      // here, and toasting on every refresh/tab-focus spammed them endlessly.
+      if (e?.status !== 403) notify?.(e.message || "Failed to load assessments", "error");
+    }
     setAssessmentsLoaded(true);
   }, [notify]);
 
@@ -264,20 +293,18 @@ export function useApiStore(notify, user) {
     // Admin adds an already-approved holiday: create the request, then approve it in
     // one action so it lands straight on the calendar. The allowance is still enforced
     // server-side on the approval (paid types); unpaid never draws down.
-    // Admin "add holiday" = create then immediately approve. If the approval is
-    // refused (e.g. it would exceed the allowance) the created row would otherwise be
-    // left behind as a stray PENDING request in the approvals queue, so clean it up
-    // and surface the real reason.
+    // Admin "add holiday" = create then immediately approve.
     addApprovedLeave: run(async (data) => {
       const rec = await api.requestLeave(data);
       if (rec?.id && rec.status === "pending") {
         try {
           await api.decideLeave(rec.id, "approved");
         } catch (e) {
-          // Close the row out so it doesn't sit in the approvals queue pretending to
-          // be a staff request, then report why the approval failed.
-          try { await api.decideLeave(rec.id, "rejected", "Not applied — approval failed"); } catch (_) { /* admin can reject it manually */ }
-          throw e;
+          // Deliberately NO cleanup here. A duplicate POST returns the STAFF member's
+          // own existing pending request, so auto-rejecting it destroyed a genuine
+          // request — and irreversibly, since a decided row can't be re-decided. Leave
+          // it pending for the admin to handle and surface the real reason instead.
+          throw new Error((e.message || "Approval failed") + " — the request was created but not approved; review it under Approvals.");
         }
       }
       return rec;
@@ -365,7 +392,7 @@ export function useApiStore(notify, user) {
     units, students, sessions, semesters, courses, cohorts, terms, unassignedSessions, semesterId, attendance, hndLoaded,
     interactions, interactionsLoaded,
     assessments, assessmentOverview, assessmentsLoaded,
-    usedDays, adjDays, effectiveAllowance, bookableAllowance, remaining, chargeableDays,
+    usedDays, adjDays, effectiveAllowance, bookableAllowance, remaining, remainingIn, overflowYear, chargeableDays,
     bankHolidays, bankHolidaySet, isBankHoliday, bankHolidaysBetween, bankHolidayDaysUsed, bankHolidayTotal,
     notify, currentUser: user, isAdmin,
     ...actions,

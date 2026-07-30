@@ -24,7 +24,10 @@ export default function DeleteAccount({ user, onCancel }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
-  const needsCode = user?.totpEnabled;
+  // Two-factor is switched off server-side (TOTP_ENFORCED), and there is no longer
+  // any UI to enrol an authenticator — so demanding a code here locked legacy
+  // totpEnabled accounts out of deleting themselves, which the app stores require.
+  const needsCode = false;
   const ready = password.length > 0 && confirm.trim().toUpperCase() === "DELETE" && (!needsCode || code.length === 6);
 
   const submit = async (e) => {

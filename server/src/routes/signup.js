@@ -147,11 +147,23 @@ router.put("/:id/decision", requireAuth, requirePage("signups"), async (req, res
   // fresh one if there was no match) with the password they chose at sign-up. No 2FA.
   if (reqRow.kind === "student") {
     let student = reqRow.studentId ? await prisma.student.findUnique({ where: { id: reqRow.studentId } }) : null;
-    // Re-resolve by email AND by college ID: an admin may have created the record
-    // between sign-up and approval. Without the studentRef lookup the create branch
-    // below fired and collided on studentRef, so the request could never be approved.
+    // Re-resolve for records an admin created between sign-up and approval. Email is
+    // the login identifier, so it is the only safe key to resolve by on its own.
     if (!student) student = await prisma.student.findUnique({ where: { email: reqRow.email } });
-    if (!student && reqRow.collegeId) student = await prisma.student.findUnique({ where: { studentRef: reqRow.collegeId } });
+    // The college ID may ONLY be used when it agrees with the email — resolving by
+    // studentRef alone re-linked exactly the mistyped-ID requests that sign-up
+    // deliberately refused to link, which then wrote this applicant's password onto
+    // another student's record and locked that student out for good.
+    if (!student && reqRow.collegeId) {
+      const byRef = await prisma.student.findUnique({ where: { studentRef: reqRow.collegeId } });
+      if (byRef && byRef.email.toLowerCase() === String(reqRow.email).toLowerCase()) {
+        student = byRef;
+      } else if (byRef) {
+        return res.status(409).json({
+          error: `College ID ${reqRow.collegeId} belongs to a different student (${byRef.email}). Check the ID with the applicant, correct the student record, or reject this request — approving it would overwrite someone else's account.`,
+        });
+      }
+    }
     // Never re-claim an account that already has a password — a second request for the
     // same person (via a different email) would otherwise overwrite their credentials
     // and sign them out. The admin must resolve that by hand.

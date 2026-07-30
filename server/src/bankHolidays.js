@@ -45,7 +45,12 @@ function ukBankHolidays(year) {
 // range: Monday–Friday only, excluding bank holidays. Weekends (Sat/Sun) and bank
 // holidays inside the range are free and never deducted. Mirrors the client's
 // chargeableDays (store.js) so both sides agree on what a booking costs.
-function chargeableDays(start, end) {
+// `year` (optional, e.g. 2026 or "2026") counts only the days that fall in that
+// calendar year. The allowance is per leave year, so a booking that straddles New
+// Year must charge each year the days it actually uses — attributing the whole
+// booking to its start year let one 20-day entitlement cover a run of leave that
+// mostly fell in the following year.
+function chargeableDays(start, end, year) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) return 0;
   const y0 = Number(start.slice(0, 4)), y1 = Number(end.slice(0, 4));
   const set = new Set();
@@ -53,14 +58,24 @@ function chargeableDays(start, end) {
   let cur = new Date(start + "T00:00:00Z");
   const last = new Date(end + "T00:00:00Z");
   if (isNaN(cur) || isNaN(last)) return 0;
+  const wantYear = year == null ? null : String(year);
   let n = 0;
   while (cur <= last) {
     const iso = cur.toISOString().slice(0, 10);
     const dow = cur.getUTCDay(); // 0 = Sun … 6 = Sat
-    if (dow !== 0 && dow !== 6 && !set.has(iso)) n += 1;
+    if (dow !== 0 && dow !== 6 && !set.has(iso) && (wantYear === null || iso.slice(0, 4) === wantYear)) n += 1;
     cur = new Date(cur.getTime() + 86400000);
   }
   return n;
+}
+
+// The distinct calendar years an inclusive range touches, e.g. ["2026","2027"].
+function yearsSpanned(start, end) {
+  const y0 = Number(String(start).slice(0, 4)), y1 = Number(String(end).slice(0, 4));
+  if (!Number.isFinite(y0) || !Number.isFinite(y1) || y1 < y0) return [];
+  const out = [];
+  for (let y = y0; y <= y1; y++) out.push(String(y));
+  return out;
 }
 
 // Number of bank holidays in a year (normally 8) — the size of the bank-holiday pot
@@ -69,20 +84,4 @@ function bankHolidayCount(year) {
   return ukBankHolidays(year).length;
 }
 
-// True when EVERY calendar day in the inclusive [start, end] range is a bank holiday.
-function allDatesAreBankHolidays(start, end) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) return false;
-  const y0 = Number(start.slice(0, 4)), y1 = Number(end.slice(0, 4));
-  const set = new Set();
-  for (let y = y0; y <= y1; y++) for (const d of ukBankHolidays(y)) set.add(d);
-  let cur = new Date(start + "T00:00:00Z");
-  const last = new Date(end + "T00:00:00Z");
-  if (isNaN(cur) || isNaN(last)) return false;
-  while (cur <= last) {
-    if (!set.has(cur.toISOString().slice(0, 10))) return false;
-    cur = new Date(cur.getTime() + 86400000);
-  }
-  return true;
-}
-
-module.exports = { ukBankHolidays, allDatesAreBankHolidays, chargeableDays, bankHolidayCount };
+module.exports = { ukBankHolidays, chargeableDays, bankHolidayCount, yearsSpanned };

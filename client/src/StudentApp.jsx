@@ -123,9 +123,9 @@ function UnitAtt({ mr, ended }) {
   const s = mr.summary; const t = pctTone(s.pct);
   return (
     <div className="flex items-center gap-3 border-t border-slate-100 px-3.5 py-2.5 first:border-t-0">
-      <span className="flex h-8 w-11 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{(mr.unit.code || "?").slice(0, 5)}</span>
+      <span className="flex h-8 w-11 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{((mr.unit || mr.module || {}).code || "?").slice(0, 5)}</span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-bold text-slate-700" title={mr.unit.name}>{mr.unit.name}</p>
+        <p className="truncate text-xs font-bold text-slate-700" title={(mr.unit || mr.module || {}).name}>{(mr.unit || mr.module || {}).name}</p>
         {ended
           ? <p className="mt-0.5 text-[10px] font-medium text-slate-400">Ended {fmtDate(mr.endDate)}</p>
           : <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full" style={{ width: `${s.pct ?? 0}%`, background: t.colour }} /></div>}
@@ -140,7 +140,11 @@ function AttendanceScreen() {
   useEffect(() => { let off = false; api.studentAttendance().then(d => !off && setData(d)).catch(e => !off && setErr(e.message || "Could not load attendance")); return () => { off = true; }; }, []);
   if (err) return <Screen><ErrBox>{err}</ErrBox></Screen>;
   if (!data) return <Loading />;
-  const cur = data.current || { units: [], overall: {} };
+  // Read the current keys, falling back to the legacy `modules` ones. The server
+  // sends both, but if this build is ever newer than the API (Vercel deploys ahead
+  // of Render) the missing key would throw and blank the whole app.
+  const cur = data.current || {};
+  const curUnits = cur.units || cur.modules || [];
   const o = cur.overall || {}; const tone = pctTone(o.pct);
   const R = 42, C = 2 * Math.PI * R;
   return (
@@ -157,14 +161,14 @@ function AttendanceScreen() {
           </div>
         </div>
         <div className="mt-3 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200/70">
-          {cur.units.map(mr => <UnitAtt key={mr.unit.id} mr={mr} />)}
-          {cur.units.length === 0 && <p className="px-4 py-6 text-center text-xs text-slate-400">No current units yet.</p>}
+          {curUnits.map(mr => <UnitAtt key={(mr.unit || mr.module).id} mr={mr} />)}
+          {curUnits.length === 0 && <p className="px-4 py-6 text-center text-xs text-slate-400">No current units yet.</p>}
         </div>
       </Card>
       {data.previous && data.previous.length > 0 && (
         <div>
           <p className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">Previous units · {data.previous.length}</p>
-          <Card className="!p-0 overflow-hidden">{data.previous.map(mr => <UnitAtt key={mr.unit.id} mr={mr} ended />)}</Card>
+          <Card className="!p-0 overflow-hidden">{(data.previous || []).map(mr => <UnitAtt key={(mr.unit || mr.module).id} mr={mr} ended />)}</Card>
         </div>
       )}
       <p className="px-1 text-[11px] text-slate-400">P = Present (2) · L = Late (1) · E = Excused (1) · A = Absent (0). Only marked sessions count.</p>

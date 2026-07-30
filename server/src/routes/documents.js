@@ -12,7 +12,8 @@ router.get("/", requireAuth, async (req, res) => {
   let rows;
   // Only a documents admin sees every document (including ones privately
   // assigned to an individual). Everyone else sees org-wide + their own.
-  if (hasPage(req.user, "documents")) {
+  // Overview and Settings both show a document count, so they read the full list too.
+  if (hasPage(req.user, ["documents", "overview", "settings"])) {
     rows = await prisma.document.findMany({ orderBy: { date: "desc" } });
   } else {
     rows = await prisma.document.findMany({

@@ -160,10 +160,11 @@ const attMeta = (key) => ATT_STATUSES.find(s => s.key === key) || null;
 // showing a green rating badge next to an amber percentage.
 function pctTone(pct) {
   if (pct === null || pct === undefined) return { text: "text-slate-400", bg: "bg-slate-100", ring: "ring-slate-200", colour: "#94a3b8" };
-  if (pct >= 70) return { text: "text-emerald-700", bg: "bg-emerald-50", ring: "ring-emerald-200", colour: "#059669" };
+  if (pct >= 90) return { text: "text-violet-700", bg: "bg-violet-50", ring: "ring-violet-200", colour: "#6d28d9" };
+  if (pct >= 70) return { text: "text-green-700", bg: "bg-green-50", ring: "ring-green-200", colour: "#16a34a" };
   if (pct >= 50) return { text: "text-yellow-700", bg: "bg-yellow-50", ring: "ring-yellow-200", colour: "#ca8a04" };
   if (pct >= 40) return { text: "text-orange-700", bg: "bg-orange-50", ring: "ring-orange-200", colour: "#ea580c" };
-  return { text: "text-rose-700", bg: "bg-rose-50", ring: "ring-rose-200", colour: MAROON };
+  return { text: "text-rose-700", bg: "bg-rose-50", ring: "ring-rose-200", colour: "#dc2626" };
 }
 const fmtPct = (pct) => (pct === null || pct === undefined ? "—" : `${pct}%`);
 // Which semester a date falls in (ranges never overlap), or null if none does.
@@ -633,9 +634,12 @@ function BalanceScreen({ store, me }) {
   const animLeft = useCountUp(left);
   // Read-only counts of this user's leave by type (any status), summed as WORKING days
   // (weekends + bank holidays excluded — matches what is actually charged).
+  // Scoped to THIS leave year, like the ring and the two pots above — mixing a
+  // lifetime total in underneath them read as a contradiction.
+  const leaveYear = todayISO().slice(0, 4);
   const byType = LEAVE_TYPES.map(t => {
-    const rows = myLeave.filter(l => l.type === t.key);
-    const days = rows.reduce((sum, l) => sum + store.chargeableDays(l.start, l.end), 0);
+    const rows = myLeave.filter(l => l.type === t.key && store.chargeableDays(l.start, l.end, leaveYear) > 0);
+    const days = rows.reduce((sum, l) => sum + store.chargeableDays(l.start, l.end, leaveYear), 0);
     return { ...t, count: rows.length, days };
   }).filter(x => x.count > 0);
   const usedPct = bookable > 0 ? Math.round((used / bookable) * 100) : 0;
@@ -748,7 +752,8 @@ function MonthGrid({ store, big }) {
 // already passed. Bank holidays are a fixed pot of days off, separate from and never
 // drawn from the bookable holiday allowance.
 function BankHolidayList({ store }) {
-  const year = new Date().getFullYear();
+  // London year (matches the balance card), not the device's local year.
+  const year = Number(todayISO().slice(0, 4));
   const today = todayISO();
   const list = store.bankHolidays.filter(h => h.date.slice(0, 4) === String(year));
   if (list.length === 0) return null;
@@ -810,6 +815,10 @@ function RequestLeaveScreen({ store, me, setScreen }) {
   const bankInRange = store.bankHolidaysBetween(start, end);  // bank holidays inside the range
   const weekendInRange = Math.max(0, spanDays - charged - bankInRange); // Sat/Sun in the range
   const left = store.remaining(me.id);
+  // The allowance is per leave year, so check the year(s) this booking falls in — not
+  // just the current one. Otherwise January leave booked in December was refused
+  // against a December pot that has nothing to do with it.
+  const overflow = NON_ALLOWANCE_TYPES.includes(type) ? null : store.overflowYear(me.id, start, end);
   const isUnpaid = type === "unpaid";
   // Leave can't be booked for a date that has already passed.
   const inPast = start < todayISO();
@@ -817,7 +826,7 @@ function RequestLeaveScreen({ store, me, setScreen }) {
   // book — the app blocks it (bank holidays aren't bookable; weekends are days off).
   const nothingToBook = charged === 0;
   // Paid leave can't exceed the remaining bookable days; unpaid never charges.
-  const overAllowance = !isUnpaid && charged > left;
+  const overAllowance = !!overflow;
   const blocked = inPast || nothingToBook || overAllowance;
   // A ref, not just state: two taps in the same tick would both read the old
   // state value, but both see the ref. The whole round trip is a window in which
@@ -866,7 +875,7 @@ function RequestLeaveScreen({ store, me, setScreen }) {
           ? <div className="mt-2 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600"><AlertCircle size={15} /> You can't book leave for a past date — choose today or later.</div>
           : nothingToBook
           ? <div className="mt-2 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600"><AlertCircle size={15} /> These dates are all weekends and/or bank holidays — there are no working days to book.</div>
-          : overAllowance && <div className="mt-2 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600"><AlertCircle size={15} /> Exceeds your {left} remaining day{left === 1 ? "" : "s"} — choose Unpaid Leave or a shorter period.</div>}
+          : overAllowance && <div className="mt-2 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600"><AlertCircle size={15} /> Exceeds your {overflow.year} allowance — {overflow.cost} day{overflow.cost === 1 ? "" : "s"} needed but {overflow.left} left. Choose Unpaid Leave or a shorter period.</div>}
         <PrimaryBtn onClick={submit} disabled={busy || blocked} className="mt-5 w-full !py-3.5">
           {busy ? <><Loader2 size={18} className="animate-spin" /> Submitting…</> : <><Plus size={18} /> Submit Request</>}
         </PrimaryBtn>
@@ -1428,16 +1437,26 @@ function ExecutiveDashboard({ store }) {
   const load = useCallback(async (scope, withExec) => {
     setLoading(true); setErr("");
     try {
-      const [e, m] = await Promise.all([
+      // Fetched INDEPENDENTLY: /assessments/exec-summary needs the assessments or
+      // executive page while /hnd/attendance/monthly needs registers/students or
+      // executive, so one 403 must not blank the other half of the page.
+      const results = await Promise.allSettled([
         withExec ? api.execSummary() : Promise.resolve(null),
         api.attendanceMonthly(scope || {}),
       ]);
-      if (withExec) setExec(e);
-      setMonthly(m); setRefreshed(new Date());
+      const [execRes, monthlyRes] = results;
+      if (withExec && execRes.status === "fulfilled") setExec(execRes.value);
+      if (monthlyRes.status === "fulfilled") setMonthly(monthlyRes.value);
+      const failed = results.filter((r) => r.status === "rejected").map((r) => r.reason);
+      if (failed.length) {
+        const denied = failed.some((e) => e?.status === 403);
+        setErr(denied
+          ? "Some figures are hidden — your account doesn't have access to all of this data."
+          : (failed[0]?.message || "Could not load some dashboard data"));
+      }
+      setRefreshed(new Date());
     } catch (e) {
-      // Surface the failure — silently swallowing it made a broken/forbidden request
-      // look identical to "there is genuinely no data".
-      setErr(e?.status === 403 ? "You don't have access to this data." : (e?.message || "Could not load dashboard data"));
+      setErr(e?.message || "Could not load dashboard data");
     } finally { setLoading(false); }
   }, []);
   useEffect(() => { load({}, true); }, [load]);
@@ -1449,9 +1468,12 @@ function ExecutiveDashboard({ store }) {
   const onCourse = (c) => {
     const keep = c === "all" || store.units.some(u => u.id === unit && u.courseId === c);
     const nextUnit = keep ? unit : "all";
-    setCourse(c); setUnit(nextUnit); load(scopeOf(c, nextUnit), false);
+    // Reset the Year too: the new scope may have no data in the selected year, which
+    // left the dropdown showing a year that no longer exists and every attendance
+    // figure blank — the same impossible-filter trap the unit reset fixes.
+    setCourse(c); setUnit(nextUnit); setYear("all"); load(scopeOf(c, nextUnit), false);
   };
-  const onUnit = (u) => { setUnit(u); load(scopeOf(course, u), false); };
+  const onUnit = (u) => { setUnit(u); setYear("all"); load(scopeOf(course, u), false); };
 
   const months = monthly?.months || [];
   // Plain calendar years, from 2025 onwards (the college's first year on the system).
@@ -1489,7 +1511,9 @@ function ExecutiveDashboard({ store }) {
         action={<div className="flex items-center gap-2 text-[11px] text-slate-400">{refreshed && <span className="hidden sm:inline">Last refreshed {refreshed.toLocaleString("en-GB")}</span>}<button onClick={() => load(scopeOf(course, unit), true)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button></div>} />
       <div className="mb-4 flex flex-wrap gap-2">
         <FilterSelect label="Year" value={year} onChange={setYear} options={[{ v: "all", l: "All years" }, ...years.map(y => ({ v: y, l: y }))]} />
-        <FilterSelect label="Course" value={course} onChange={onCourse} options={[{ v: "all", l: "All courses" }, ...allCourses.map(c => ({ v: c.courseId, l: c.code }))]} />
+        {/* "__none__" is a synthetic bucket for students with no course, not a real
+            course — selecting it would filter attendance by a courseId no unit has. */}
+        <FilterSelect label="Course" value={course} onChange={onCourse} options={[{ v: "all", l: "All courses" }, ...allCourses.filter(c => c.courseId !== "__none__").map(c => ({ v: c.courseId, l: c.code }))]} />
         <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...unitsForCourse.map(m => ({ v: m.id, l: m.code }))]} />
       </div>
       {err && <div className="mb-3 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 ring-1 ring-rose-200"><AlertCircle size={15} /> {err}</div>}
@@ -2158,7 +2182,9 @@ function AdminCalendar({ store }) {
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ staffId: "", type: "annual", start: todayISO(), end: todayISO(), reason: "" });
 
-  const openAdd = () => { setForm({ staffId: store.staff[0]?.id || "", type: "annual", start: todayISO(), end: todayISO(), reason: "" }); setModal(true); };
+  // No pre-selected staff member: the dropdown starts on "Choose…" so an admin can't
+  // book an approved absence onto whoever happens to be first in the list.
+  const openAdd = () => { setForm({ staffId: "", type: "annual", start: todayISO(), end: todayISO(), reason: "" }); setModal(true); };
   const spanDays = daysBetween(form.start, form.end);          // calendar length
   const days = store.chargeableDays(form.start, form.end);     // working days actually charged
   const staff = store.staff.find(s => s.id === form.staffId);
@@ -2167,7 +2193,8 @@ function AdminCalendar({ store }) {
   const nothingToBook = !!form.staffId && days === 0;
   // Paid types draw down the allowance; unpaid does not. Block over-allowance before
   // creating anything, so a rejected approval never leaves a dangling pending request.
-  const overAllowance = form.type !== "unpaid" && !!form.staffId && days > remaining;
+  const overflow = form.type !== "unpaid" && form.staffId ? store.overflowYear(form.staffId, form.start, form.end) : null;
+  const overAllowance = !!overflow;
   const blocked = !form.staffId || nothingToBook || overAllowance;
 
   // A ref, not just `busy` state: two taps in the same tick both read the old state,
@@ -2211,7 +2238,7 @@ function AdminCalendar({ store }) {
           </div>
           {nothingToBook
             ? <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-600">Those dates are all weekends and/or bank holidays — there are no working days to book.</p>
-            : overAllowance && <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-600">Not enough allowance: {remaining}d left but {days}d requested. Choose Unpaid Leave, or a shorter period.</p>}
+            : overAllowance && <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-600">Not enough {overflow.year} allowance: {overflow.left}d left but {overflow.cost}d needed. Choose Unpaid Leave, or a shorter period.</p>}
           <PrimaryBtn onClick={addHoliday} disabled={busy || blocked} className="w-full"><Plus size={16} /> {busy ? "Adding…" : "Add holiday"}</PrimaryBtn>
         </div>
       </Modal>
@@ -2230,7 +2257,8 @@ function AdminRequests({ store }) {
   const reqDays = store.chargeableDays(form.start, form.end);
   const reqRemaining = form.staffId ? store.remaining(form.staffId) : 0;
   const reqNothing = !!form.staffId && reqDays === 0;
-  const reqOver = form.type !== "unpaid" && !!form.staffId && reqDays > reqRemaining;
+  const reqOverflow = form.type !== "unpaid" && form.staffId ? store.overflowYear(form.staffId, form.start, form.end) : null;
+  const reqOver = !!reqOverflow;
   const reqBlocked = !form.staffId || reqNothing || reqOver;
   const create = async () => {
     if (reqBlocked) return;
@@ -2278,7 +2306,7 @@ function AdminRequests({ store }) {
             {form.type === "unpaid" ? "Unpaid leave doesn't use the holiday allowance." : form.staffId ? `${reqDays} working day${reqDays === 1 ? "" : "s"} · ${reqRemaining}d allowance left.` : "Choose a staff member."}
           </div>
           {reqNothing && <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-600">Those dates are all weekends and/or bank holidays — there are no working days to book.</p>}
-          {reqOver && <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-600">Not enough allowance: {reqRemaining}d left but {reqDays}d requested. Choose Unpaid Leave, or a shorter period.</p>}
+          {reqOver && <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-600">Not enough {reqOverflow.year} allowance: {reqOverflow.left}d left but {reqOverflow.cost}d needed. Choose Unpaid Leave, or a shorter period.</p>}
           <PrimaryBtn onClick={create} disabled={reqBlocked} className="w-full"><Plus size={16} /> Create request</PrimaryBtn>
         </div>
       </Modal>
@@ -3661,7 +3689,7 @@ function AdminStudents({ store }) {
         <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
           <table className="w-full min-w-[680px] text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
-              <tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Email address</th><th className="px-5 py-3 whitespace-nowrap">Attendance risk</th><th className="px-5 py-3">Units</th><th className="px-5 py-3 text-center whitespace-nowrap">Attendance</th><th className="px-5 py-3 text-right">Actions</th></tr>
+              <tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Email address</th><th className="px-5 py-3 whitespace-nowrap" title="Based on attendance across ALL units">Attendance risk</th><th className="px-5 py-3">Units</th><th className="px-5 py-3 text-center whitespace-nowrap" title="Current units only">Current %</th><th className="px-5 py-3 text-right">Actions</th></tr>
             </thead>
             <tbody>
               {paged.slice.map(s => {
@@ -5166,7 +5194,7 @@ function AssessmentRecords({ store }) {
               <Field label="Student"><StudentCombo students={studentsInCourse(form.unitId)} value={form.studentId} onChange={id => setForm(f => ({ ...f, studentId: id }))} /></Field>
             </>
           )}
-          <Field label={`Total marks (out of ${maxMarks})`}><input type="number" min={0} max={maxMarks} step={1} value={form.marks} onChange={e => setForm(f => ({ ...f, marks: e.target.value.replace(/[^0-9]/g, "") }))} placeholder={`0–${maxMarks}`} className={inputCls} /></Field>
+          <Field label={`Total marks (out of ${maxMarks})`}><input type="text" inputMode="numeric" value={form.marks} onChange={e => { const v = e.target.value; if (v === "" || /^\d{1,4}$/.test(v)) setForm(f => ({ ...f, marks: v })); }} placeholder={`0–${maxMarks}`} className={inputCls} /></Field>
           {form.marks !== "" && Number(form.marks) >= 0 && Number(form.marks) <= maxMarks && (
             <p className="text-[11px] text-slate-400">= {Math.round(Number(form.marks) / maxMarks * 1000) / 10}% · <span className="font-bold" style={{ color: gradeTone(bandOf(Math.round(Number(form.marks) / maxMarks * 1000) / 10)).colour }}>{bandOf(Math.round(Number(form.marks) / maxMarks * 1000) / 10)}</span></p>
           )}
@@ -5470,7 +5498,7 @@ function computeStaffKpis(store) {
 
     // 5) Leave use
     const used = store.usedDays(s.id);
-    const allowance = store.effectiveAllowance(s.id);
+    const allowance = store.bookableAllowance(s.id);
 
     // Composite score — mean of the metrics that apply to this person
     const parts = [punctuality, submission, cohort].filter(v => v != null);

@@ -12,7 +12,9 @@ const { notifyAdmins } = require("../notify");
 router.use(requireAuth, requireStudent);
 
 const bandOf = (pct) => (pct == null ? null : pct >= 70 ? "Distinction" : pct >= 60 ? "Merit" : pct >= 40 ? "Pass" : "Fail");
-const pctOf = (marks, max) => (max > 0 ? Math.round((marks / max) * 1000) / 10 : null);
+// Clamped 0–100, matching the admin gradebook: an historic mark above its
+// assessment maximum would otherwise show the student a percentage over 100.
+const pctOf = (marks, max) => (max > 0 ? Math.min(100, Math.max(0, Math.round((marks / max) * 1000) / 10)) : null);
 const str = (v) => (typeof v === "string" ? v.trim() : "");
 
 // GET /api/student/me — the signed-in student's own profile.

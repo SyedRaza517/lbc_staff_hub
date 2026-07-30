@@ -10,7 +10,8 @@ const today = () => localDate();
 // GET /api/adjustments — admin: all; staff: own
 router.get("/", requireAuth, async (req, res) => {
   // Only a balances admin sees everyone's adjustments (they carry HR notes).
-  const where = hasPage(req.user, "balances") ? {} : { staffId: req.user.id };
+  // Balances owns adjustments; KPIs and Overview derive balance figures from them.
+  const where = hasPage(req.user, ["balances", "kpi", "overview"]) ? {} : { staffId: req.user.id };
   const rows = await prisma.adjustment.findMany({ where, orderBy: { date: "desc" } });
   res.json(rows.map(sAdj));
 });

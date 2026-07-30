@@ -19,7 +19,10 @@ router.get("/", requireAuth, async (req, res) => {
   if (req.query.date) where.date = String(req.query.date);
   // Only an admin granted Check-In or Daily Summaries sees everyone; any other
   // admin is scoped to their own records like ordinary staff.
-  if (!hasPage(req.user, ["checkin", "summaries"])) where.staffId = req.user.id;
+  // Pages that legitimately DISPLAY everyone's check-ins: the Check-In and Daily
+  // Summaries screens, plus Overview (present-today), KPIs (punctuality) and Staff
+  // (monthly hours). Gating on the owning page alone made those screens show zeros.
+  if (!hasPage(req.user, ["checkin", "summaries", "overview", "kpi", "staff"])) where.staffId = req.user.id;
   const rows = await prisma.checkIn.findMany({ where, orderBy: { date: "desc" } });
   res.json(rows.map(sCheckin));
 });
