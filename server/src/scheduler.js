@@ -8,7 +8,7 @@
 // table, not just memory) makes the job safe to run repeatedly and to survive a
 // process restart on the host — a staff member is reminded at most once per day.
 const prisma = require("./db");
-const { localDate } = require("./clock");
+const { localDate, localTime } = require("./clock");
 const { notifyStaff } = require("./notify");
 
 // Last calendar day of the month that `dateStr` (YYYY-MM-DD) falls in.
@@ -59,14 +59,44 @@ async function sendTimesheetReminders(todayOverride) {
   return sent;
 }
 
-// Kick off the background scheduler. Hourly cadence; the date guard inside each run
-// limits real work to the reminder day. unref() so the timer never keeps the
-// process alive on its own.
-function startScheduler() {
-  const run = () => sendTimesheetReminders().catch((e) => console.error("scheduler run failed:", e.message));
-  run(); // run once on boot (covers a deploy that happens on the reminder day)
-  setInterval(run, 60 * 60 * 1000).unref();
-  console.log("Scheduler: timesheet month-end reminders active (checks hourly)");
+// Overnight Moodle import, so marks entered in the VLE during the day are in Staff
+// Hub by morning without anyone pressing anything.
+//
+// Runs at 02:00 London — quiet for both systems. The hourly tick means the guard
+// below decides whether this hour is the one; the 12-hour dedupe against the
+// MoodleSync table then makes a restart (or a second tick inside the same hour)
+// harmless. Set MOODLE_AUTO_SYNC=off to leave it to the manual button only.
+const SYNC_HOUR = "02";
+
+async function maybeSyncMoodle() {
+  if (String(process.env.MOODLE_AUTO_SYNC || "").toLowerCase() === "off") return false;
+  const moodle = require("./moodle");
+  if (!moodle.isConfigured() || moodle.isRunning()) return false;
+  if (localTime().slice(0, 2) !== SYNC_HOUR) return false;
+
+  const recent = await prisma.moodleSync.count({
+    where: { mode: "scheduled", startedAt: { gte: new Date(Date.now() - 12 * 60 * 60 * 1000) } },
+  });
+  if (recent > 0) return false; // tonight's run already happened
+
+  console.log("Scheduler: starting the nightly Moodle import");
+  const { summary } = await moodle.runSync({ mode: "scheduled" });
+  console.log(`Scheduler: Moodle import finished — ${summary.gradesCreated} new mark(s), ${summary.gradesUpdated} updated`);
+  return true;
 }
 
-module.exports = { startScheduler, sendTimesheetReminders, isDayBeforeMonthEnd, lastDayOfMonth };
+// Kick off the background scheduler. Hourly cadence; the guards inside each job
+// limit real work to its own day/hour. unref() so the timer never keeps the process
+// alive on its own.
+function startScheduler() {
+  const run = () => {
+    sendTimesheetReminders().catch((e) => console.error("scheduler run failed:", e.message));
+    // Kept separate so a failing Moodle import can never stop the reminders.
+    maybeSyncMoodle().catch((e) => console.error("nightly Moodle import failed:", e.message));
+  };
+  run(); // run once on boot (covers a deploy that happens on the reminder day)
+  setInterval(run, 60 * 60 * 1000).unref();
+  console.log(`Scheduler: timesheet month-end reminders active (checks hourly); Moodle import at ${SYNC_HOUR}:00`);
+}
+
+module.exports = { startScheduler, sendTimesheetReminders, maybeSyncMoodle, isDayBeforeMonthEnd, lastDayOfMonth };

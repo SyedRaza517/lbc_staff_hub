@@ -68,6 +68,7 @@ app.use("/api/assessments", wrapAsync(require("./routes/assessments")));
 app.use("/api/timesheets", wrapAsync(require("./routes/timesheets")));
 app.use("/api/student", wrapAsync(require("./routes/student")));
 app.use("/api/student-queries", wrapAsync(require("./routes/studentQueries")));
+app.use("/api/moodle", wrapAsync(require("./routes/moodle")));
 
 // 404 + error handlers
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));

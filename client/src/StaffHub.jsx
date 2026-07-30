@@ -6287,6 +6287,162 @@ function AdminStaff({ store }) {
   );
 }
 
+// The counters a sync reports, in the order they read naturally: what came in, then
+// what was already here. Only non-zero rows are shown, so a quiet run stays quiet.
+const MOODLE_COUNTS = [
+  ["coursesCreated", "Courses added"], ["unitsCreated", "Units added"],
+  ["assessmentsCreated", "Assessments added"], ["studentsCreated", "Students added"],
+  ["enrolmentsCreated", "Enrolments added"], ["gradesCreated", "Marks imported"],
+  ["gradesUpdated", "Marks updated"], ["coursesUpdated", "Courses updated"],
+  ["unitsUpdated", "Units updated"], ["assessmentsUpdated", "Assessments updated"],
+  ["studentsMatched", "Students matched"], ["gradesSkippedManual", "Marks left alone"],
+];
+const moodleTotal = (s) => MOODLE_COUNTS.reduce((n, [k]) => n + (Number(s?.[k]) || 0), 0);
+
+// Moodle (VLE) import. Reads the college's Moodle and creates the matching courses,
+// units, assessments, students and marks here — one way, never writing back.
+function MoodleCard({ store }) {
+  const [status, setStatus] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [busy, setBusy] = useState("");        // "" | "preview" | "sync"
+  const [showIssues, setShowIssues] = useState(false);
+
+  const load = useCallback(async () => {
+    try { setStatus(await api.moodleStatus()); }
+    catch (e) { setStatus({ failed: e.message }); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  // A sync outlives the request that starts it, so polling is the only way to learn
+  // how it went — and it means closing this tab doesn't abandon the run.
+  useEffect(() => {
+    if (busy !== "sync") return;
+    let live = true;
+    const tick = async () => {
+      try {
+        const s = await api.moodleStatus();
+        if (!live) return;
+        setStatus(s);
+        if (s.running) return;
+        setBusy("");
+        if (s.last?.status === "ok") {
+          const n = moodleTotal(s.last.summary);
+          store.notify(n ? `Moodle sync finished — ${n} record${n === 1 ? "" : "s"} imported or updated.` : "Moodle sync finished — everything was already up to date.");
+          // Pull the new courses, units, students and marks into the app so they
+          // appear without a reload.
+          store.refreshHnd?.().catch(() => {});
+          store.refreshAssessments?.().catch(() => {});
+        } else {
+          store.notify(s.last?.error || "The Moodle sync failed.", "error");
+        }
+      } catch (_) { /* a dropped poll is harmless — the next tick retries */ }
+    };
+    const id = setInterval(tick, 2000);
+    return () => { live = false; clearInterval(id); };
+  }, [busy, store]);
+
+  const runPreview = async () => {
+    setBusy("preview"); setPreview(null); setShowIssues(false);
+    try { setPreview(await api.moodlePreview()); }
+    catch (e) { store.notify(e.message || "Could not read Moodle", "error"); }
+    finally { setBusy(""); }
+  };
+  const runSync = async () => {
+    setPreview(null); setShowIssues(false);
+    try { await api.moodleSync(); setBusy("sync"); setStatus(s => ({ ...(s || {}), running: true })); }
+    catch (e) { store.notify(e.message || "Could not start the sync", "error"); }
+  };
+
+  const result = preview || (busy !== "sync" ? status?.last : null);
+  const counts = MOODLE_COUNTS.filter(([k]) => Number(result?.summary?.[k]) > 0);
+  const issues = result?.issues || [];
+  const when = status?.last?.finishedAt ? new Date(status.last.finishedAt) : null;
+
+  return (
+    <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 fade-up">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="flex items-center gap-1.5 text-sm font-bold text-slate-700"><GraduationCap size={15} style={{ color: NAVY }} /> Moodle (VLE)</p>
+        {status && !status.failed && (
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${status.configured ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"}`}>
+            {status.configured ? "Connected" : "Not set up"}
+          </span>
+        )}
+      </div>
+
+      {!status && <div className="skeleton h-20 rounded-xl" />}
+
+      {status?.failed && (
+        <p className="flex items-start gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-[11px] leading-relaxed text-rose-700 ring-1 ring-rose-200">
+          <AlertCircle size={13} className="mt-px shrink-0" />{status.failed}
+        </p>
+      )}
+
+      {status && !status.failed && !status.configured && (
+        <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800 ring-1 ring-amber-200">
+          Add <b>MOODLE_URL</b> and <b>MOODLE_TOKEN</b> to the server's environment variables,
+          then restart it. The token stays on the server and is never sent to this page.
+        </p>
+      )}
+
+      {status?.configured && (
+        <>
+          <p className="mb-3 truncate text-[11px] text-slate-400" title={status.url}>{status.url.replace(/^https?:\/\//, "")}</p>
+          <p className="mb-3 text-[11px] text-slate-500">
+            {status.running || busy === "sync"
+              ? <span className="flex items-center gap-1.5 font-semibold text-blue-600"><Loader2 size={12} className="animate-spin" /> Importing from Moodle…</span>
+              : when ? <>Last run {when.toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} — <b className={status.last.status === "ok" ? "text-emerald-600" : "text-rose-600"}>{status.last.status === "ok" ? "succeeded" : "failed"}</b></>
+              : "Never run."}
+          </p>
+
+          <div className="mb-3 flex flex-wrap gap-2">
+            <button onClick={runPreview} disabled={!!busy || status.running}
+              className="press inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-200 disabled:opacity-50">
+              {busy === "preview" ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Preview
+            </button>
+            <PrimaryBtn onClick={runSync} disabled={!!busy || status.running} className="!px-3 !py-2 !text-xs">
+              {busy === "sync" || status.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Sync now
+            </PrimaryBtn>
+          </div>
+
+          {preview && <p className="mb-2 rounded-lg bg-blue-50 px-2.5 py-1.5 text-[11px] font-semibold text-blue-700">Preview only — nothing has been saved.</p>}
+
+          {result && (counts.length > 0
+            ? <div className="grid grid-cols-2 gap-1.5">
+                {counts.map(([k, label]) => (
+                  <div key={k} className="rounded-xl bg-slate-50 px-2.5 py-2">
+                    <p className="text-base font-extrabold leading-none" style={{ color: k === "gradesSkippedManual" ? "#b45309" : NAVY }}>{result.summary[k]}</p>
+                    <p className="mt-1 text-[10px] leading-tight text-slate-400">{label}</p>
+                  </div>
+                ))}
+              </div>
+            : <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-500">Nothing to change — Staff Hub already matches Moodle.</p>
+          )}
+
+          {issues.length > 0 && (
+            <div className="mt-2">
+              <button onClick={() => setShowIssues(v => !v)} className="press flex w-full items-center justify-between rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800 ring-1 ring-amber-200">
+                <span className="flex items-center gap-1.5"><AlertCircle size={13} /> {issues.length} thing{issues.length === 1 ? "" : "s"} needed a person</span>
+                <ChevronDown size={13} className={`transition-transform ${showIssues ? "rotate-180" : ""}`} />
+              </button>
+              {showIssues && (
+                <ul className="mt-1.5 max-h-52 space-y-1 overflow-y-auto rounded-xl bg-slate-50 p-2">
+                  {issues.map((m, i) => <li key={i} className="text-[11px] leading-relaxed text-slate-600">• {m}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+
+          <p className="mt-3 flex items-start gap-1.5 text-[10px] leading-relaxed text-slate-400">
+            <Info size={12} className="mt-px shrink-0" />
+            Reads Moodle only — it never writes back, never deletes anything here, and
+            never overwrites a mark someone typed in by hand.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function AdminSettings({ store }) {
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
@@ -6370,6 +6526,7 @@ function AdminSettings({ store }) {
           <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
         </div>
         <div className="space-y-4">
+          <MoodleCard store={store} />
           <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 fade-up">
             <div className="mb-3 flex items-center justify-between"><p className="flex items-center gap-1.5 text-sm font-bold text-slate-700"><Building2 size={15} /> Departments</p><span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">{depts.length}</span></div>
             <div className="space-y-2.5">{depts.map((d, i) => { const n = store.staff.filter(s => s.dept === d).length; const total = store.staff.length; const pct = total > 0 ? Math.round((n / total) * 100) : 0; const c = PALETTE[i % PALETTE.length]; return (

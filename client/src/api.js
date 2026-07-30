@@ -209,4 +209,10 @@ export const api = {
   removeTimesheet: (id) => request(`/timesheets/${id}`, { method: "DELETE" }),
   submitTimesheet: (month) => request("/timesheets/submit", { method: "POST", body: { month } }),
   reviewTimesheet: (staffId, month, decision, note) => request("/timesheets/review", { method: "POST", body: { staffId, month, decision, note } }),
+  // Moodle (VLE). preview writes nothing; sync imports courses, units, assessments,
+  // students and marks. sync only STARTS the run and returns — reading a whole VLE
+  // can outlast a proxy's request timeout — so poll moodleStatus() for the result.
+  moodleStatus: () => request("/moodle/status"),
+  moodlePreview: () => request("/moodle/preview"),
+  moodleSync: () => request("/moodle/sync", { method: "POST" }),
 };

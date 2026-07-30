@@ -241,6 +241,10 @@ model Course {
   id        String   @id @default(cuid())
   name      String   @unique
   colour    String   @default("#1a3a8f")
+  // The Moodle course this was imported from. Set by the VLE sync so a re-run
+  // updates this row rather than creating a second copy; null for courses created
+  // by hand in the app.
+  moodleCourseId Int? @unique
   createdAt DateTime @default(now())
 
   units Unit[]
@@ -293,6 +297,10 @@ model Unit {
   // Unit codes are unique WITHIN a course, not globally — the same code (e.g. "UNIT 01")
   // may be reused on a different course. Enforced by the composite unique below.
   code        String
+  // The Moodle course-section this unit came from, and the Moodle course it sits in.
+  // Sections are only unique within their course, hence both.
+  moodleSectionId Int?
+  moodleCourseId  Int?
   // The unit's number within its course, e.g. "1", "01" or "3a". Free text rather than
   // an Int because awarding bodies use mixed formats, and blank for units that
   // genuinely have no number.
@@ -326,6 +334,9 @@ model Assessment {
   id        String   @id @default(cuid())
   unit    Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
   unitId  String
+  // The Moodle grade item this mirrors (unique per site), plus its course-module id.
+  moodleItemId Int? @unique
+  moodleCmid   Int?
   title     String
   type      String   @default("Assignment") // Assignment | Exam | Presentation | Project | Portfolio
   maxMarks  Int      @default(100)
@@ -346,6 +357,14 @@ model AssessmentGrade {
   student      Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
   studentId    String
   marks        Int
+  // Where this mark came from: "manual" (typed in the app) or "moodle" (synced).
+  // A mark a person typed is never overwritten by a sync.
+  source       String     @default("manual")
+  // Moodle's own dates (YYYY-MM-DD), so staff can see when the work was handed in
+  // and when it was marked in the VLE. Distinct from gradedAt below, which is when
+  // the mark landed in Staff Hub.
+  submittedAt  String?
+  gradedOn     String?
   feedback     String     @default("")
   gradedBy     String?
   gradedAt     DateTime   @default(now())
@@ -358,6 +377,9 @@ model AssessmentGrade {
 // their email (e.g. 100121 -> 100121@londonbrookescollege.co.uk).
 model Student {
   id         String   @id @default(cuid())
+  // The Moodle user this student was matched to, so later syncs re-use the match
+  // instead of re-resolving by student number/email every time.
+  moodleUserId Int? @unique
   firstName  String
   lastName   String
   studentRef String   @unique
@@ -507,4 +529,23 @@ model TimesheetEntry {
 
   @@index([staffId, date])
   @@index([staffId, status])
+}
+
+// One row per VLE sync run - what was created/updated, and anything that needed a
+// human. Keeping the history means "why did this student not import?" is answerable
+// after the fact instead of only in the moment.
+model MoodleSync {
+  id          String   @id @default(cuid())
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+  status      String   @default("running") // running | ok | failed
+  mode        String   @default("manual")  // manual | scheduled | preview
+  startedBy   String?                      // admin name, or null for the nightly run
+  // Counters, as JSON: courses/units/assessments/students/grades created & updated.
+  summary     String   @default("{}")
+  // Anything skipped or unmatched, as a JSON array of readable messages.
+  issues      String   @default("[]")
+  error       String?
+
+  @@index([startedAt])
 }
