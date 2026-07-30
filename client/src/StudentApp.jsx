@@ -96,7 +96,7 @@ function Ring({ pct, size = 132, stroke = 13, label, colour }) {
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg viewBox={`0 0 ${size} ${size}`} className="h-full w-full -rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#e8edf5" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(15,23,42,.08)" strokeWidth={stroke} />
         <circle
           cx={size / 2} cy={size / 2} r={r} fill="none" stroke={tone} strokeWidth={stroke} strokeLinecap="round"
           strokeDasharray={c} strokeDashoffset={c * (1 - (pct ?? 0) / 100)}
@@ -311,8 +311,7 @@ function Home({ user, attendance, results, queries, busy, err, setScreen, newRep
   const avgTone = pctTone(avgPct);
 
   return (
-    // -mt-5 lifts the content onto the header's curve, so the hero pair overlaps it.
-    <div className="-mt-5 space-y-3.5 px-4 pb-8">
+    <div className="space-y-3.5 px-4 pb-8 pt-5">
       {/* Headline pair: the two numbers a student actually cares about. */}
       <div className="grid grid-cols-2 gap-3">
         <HeroTile onClick={() => setScreen("attendance")} i={0}
@@ -376,12 +375,12 @@ function Home({ user, attendance, results, queries, busy, err, setScreen, newRep
 // band at a glance, before the number itself is even read.
 function HeroTile({ onClick, pct, label, tone, foot, i }) {
   return (
-    <button onClick={onClick} className="press fade-up relative overflow-hidden rounded-3xl bg-white p-4 shadow-card ring-1 ring-slate-200/60" style={{ animationDelay: `${i * 70}ms` }}>
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-24" style={{ background: `linear-gradient(180deg, ${tone.soft} 0%, transparent 100%)` }} />
-      <div className="relative flex flex-col items-center">
+    <button onClick={onClick} className="press fade-up rounded-3xl p-4 shadow-card ring-1"
+      style={{ background: tone.soft, "--tw-ring-color": tone.colour + "2e", animationDelay: `${i * 70}ms` }}>
+      <div className="flex flex-col items-center">
         <Ring pct={pct} size={112} stroke={11} />
-        <p className="mt-2.5 text-[11px] font-extrabold uppercase tracking-widest text-slate-500">{label}</p>
-        <p className="mt-0.5 flex items-center gap-0.5 text-[11px] font-semibold text-slate-400">{foot}<ChevronRight size={12} className="text-slate-300" /></p>
+        <p className="mt-2.5 text-[11px] font-extrabold uppercase tracking-widest" style={{ color: tone.colour }}>{label}</p>
+        <p className="mt-0.5 flex items-center gap-0.5 text-[11px] font-semibold text-slate-500">{foot}<ChevronRight size={12} className="text-slate-400" /></p>
       </div>
     </button>
   );
@@ -399,16 +398,15 @@ function Stat({ icon: Icon, value, label, colour, i = 0 }) {
 
 function Action({ onClick, Icon, label, sub, c, badge, i = 0 }) {
   return (
-    <button onClick={onClick} className="press fade-up relative flex flex-col items-start gap-2.5 overflow-hidden rounded-3xl bg-white p-4 text-left shadow-card ring-1 ring-slate-200/60" style={{ animationDelay: `${300 + i * 55}ms` }}>
-      {/* faint corner wash in the section's own colour */}
-      <span className="pointer-events-none absolute -right-6 -top-6 h-16 w-16 rounded-full" style={{ background: c + "12" }} />
-      <span className="relative flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow-md" style={{ background: `linear-gradient(140deg, ${c}, ${c}cc)` }}>
+    <button onClick={onClick} className="press fade-up relative flex flex-col items-start gap-2.5 rounded-3xl p-4 text-left shadow-card ring-1"
+      style={{ background: c + "12", "--tw-ring-color": c + "2e", animationDelay: `${300 + i * 55}ms` }}>
+      <span className="relative flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow-md" style={{ background: c }}>
         <Icon size={19} />
         {badge > 0 && <span className="pop absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-extrabold text-slate-900 ring-2 ring-white">{badge}</span>}
       </span>
-      <span className="relative">
-        <span className="block text-[13px] font-extrabold leading-tight text-slate-700">{label}</span>
-        <span className={`mt-0.5 block text-[11px] ${badge > 0 ? "font-bold text-amber-600" : "text-slate-400"}`}>{sub}</span>
+      <span>
+        <span className="block text-[13px] font-extrabold leading-tight" style={{ color: c }}>{label}</span>
+        <span className={`mt-0.5 block text-[11px] ${badge > 0 ? "font-bold text-amber-600" : "text-slate-500"}`}>{sub}</span>
       </span>
     </button>
   );
@@ -448,14 +446,13 @@ function AttendanceScreen({ attendance, busy, err }) {
   const previous = attendance.previous || [];
 
   return (
-    <div className="-mt-4 space-y-3.5 px-4 pb-8">
-      <div className="fade-up relative overflow-hidden rounded-3xl bg-white p-5 shadow-card-lg ring-1 ring-slate-200/60">
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-28" style={{ background: `linear-gradient(180deg, ${pctTone(o.pct).soft} 0%, transparent 100%)` }} />
-        <div className="relative flex flex-col items-center">
+    <div className="space-y-3.5 px-4 pb-8 pt-5">
+      <div className="fade-up rounded-3xl p-5 shadow-card-lg ring-1" style={{ background: pctTone(o.pct).soft, "--tw-ring-color": pctTone(o.pct).colour + "2e" }}>
+        <div className="flex flex-col items-center">
           <Ring pct={o.pct ?? null} label="current units" />
           <p className="mt-2 text-[11px] font-semibold text-slate-400">{o.marked ?? 0} marked session{(o.marked ?? 0) === 1 ? "" : "s"} across {curUnits.length} unit{curUnits.length === 1 ? "" : "s"}</p>
         </div>
-        <div className="relative mt-4"><StatusBar counts={o} /></div>
+        <div className="mt-4"><StatusBar counts={o} /></div>
       </div>
 
       <SectionTitle colour={ACCENT.attendance}>Current units</SectionTitle>
@@ -509,10 +506,9 @@ function ResultsScreen({ results, busy, err }) {
   const BAND_C = { Distinction: "#059669", Merit: "#2563eb", Pass: "#ea580c", Fail: "#e11d48" };
 
   return (
-    <div className="-mt-4 space-y-3.5 px-4 pb-8">
-      <div className="fade-up relative overflow-hidden rounded-3xl bg-white p-5 shadow-card-lg ring-1 ring-slate-200/60">
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-28" style={{ background: `linear-gradient(180deg, ${pctTone(results.averagePct).soft} 0%, transparent 100%)` }} />
-        <div className="relative flex flex-col items-center">
+    <div className="space-y-3.5 px-4 pb-8 pt-5">
+      <div className="fade-up rounded-3xl p-5 shadow-card-lg ring-1" style={{ background: pctTone(results.averagePct).soft, "--tw-ring-color": pctTone(results.averagePct).colour + "2e" }}>
+        <div className="flex flex-col items-center">
           <Ring pct={results.averagePct ?? null} label="average" />
           <span className="mt-2 rounded-xl px-3 py-1 text-sm font-extrabold ring-1" style={{ background: pctTone(results.averagePct).colour + "14", color: pctTone(results.averagePct).colour, "--tw-ring-color": pctTone(results.averagePct).colour + "33" }}>
             {results.averageGrade || "Not graded yet"}
@@ -520,7 +516,7 @@ function ResultsScreen({ results, busy, err }) {
           <p className="mt-1.5 text-[11px] font-semibold text-slate-400">{results.graded} of {results.count} assessment{results.count === 1 ? "" : "s"} marked</p>
         </div>
         {graded.length > 0 && (
-          <div className="relative mt-4 grid grid-cols-4 gap-1.5">
+          <div className="mt-4 grid grid-cols-4 gap-1.5">
             {Object.entries(bands).map(([b, n]) => (
               <div key={b} className="rounded-xl py-1.5 text-center" style={{ background: BAND_C[b] + "12" }}>
                 <p className="text-sm font-extrabold tabular-nums" style={{ color: BAND_C[b] }}>{n}</p>
