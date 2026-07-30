@@ -325,7 +325,7 @@ router.post("/units", requireAuth, requireHndWrite, async (req, res) => {
   if (ct.error) return res.status(400).json({ error: ct.error });
   try {
     const m = await prisma.unit.create({
-      data: { code, name, tutor: str(req.body?.tutor), courseId, cohortId: ct.cohortId, termId: ct.termId },
+      data: { code, unitNumber: str(req.body?.unitNumber), name, tutor: str(req.body?.tutor), courseId, cohortId: ct.cohortId, termId: ct.termId },
     });
     res.status(201).json(sUnit(m));
   } catch (e) {
@@ -360,6 +360,7 @@ router.put("/units/:id", requireAuth, requireHndWrite, async (req, res) => {
     data.name = name;
   }
   if (req.body?.tutor !== undefined) data.tutor = str(req.body.tutor);
+  if (req.body?.unitNumber !== undefined) data.unitNumber = str(req.body.unitNumber);
   // cohort/term are set together (the UI picks a cohort then its term).
   if (req.body?.cohortId !== undefined || req.body?.termId !== undefined) {
     const ct = await resolveCohortTerm(req.body?.cohortId, req.body?.termId);

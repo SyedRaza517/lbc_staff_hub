@@ -293,6 +293,10 @@ model Unit {
   // Unit codes are unique WITHIN a course, not globally — the same code (e.g. "UNIT 01")
   // may be reused on a different course. Enforced by the composite unique below.
   code        String
+  // The unit's number within its course, e.g. "1", "01" or "3a". Free text rather than
+  // an Int because awarding bodies use mixed formats, and blank for units that
+  // genuinely have no number.
+  unitNumber  String     @default("")
   name        String
   tutor       String     @default("")
   course   Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)

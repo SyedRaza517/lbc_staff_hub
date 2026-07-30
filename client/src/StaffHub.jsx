@@ -4350,7 +4350,7 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
   const [modal, setModal] = useState(false);
   const [step, setStep] = useState("details");       // details -> schedule (new courses only)
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ code: "", name: "", tutor: "", courseId: "", cohortId: "", termId: "" });
+  const [form, setForm] = useState({ code: "", unitNumber: "", name: "", tutor: "", courseId: "", cohortId: "", termId: "" });
   const [picked, setPicked] = useState([]);           // studentIds enrolled on this course
   const [pickQuery, setPickQuery] = useState("");     // search within the student picker
   const [sched, setSched] = useState({ start: todayISO(), end: "", hours: 3 });
@@ -4367,13 +4367,13 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
   const enrolledIds = (unitId) => store.students.filter(s => (s.unitIds || []).includes(unitId)).map(s => s.id);
   const openAdd = () => {
     setEdit(null); setStep("details"); setSavedId(null); setPicked([]); setPickQuery("");
-    setForm({ code: "", name: "", tutor: "", courseId: defaultCourse, cohortId: "", termId: "" });
+    setForm({ code: "", unitNumber: "", name: "", tutor: "", courseId: defaultCourse, cohortId: "", termId: "" });
     setSched({ start: todayISO(), end: "", hours: 3 });
     setModal(true);
   };
   const openEdit = (m) => {
     setEdit(m); setStep("details"); setSavedId(m.id); setPicked(enrolledIds(m.id)); setPickQuery("");
-    setForm({ code: m.code, name: m.name, tutor: m.tutor || "", courseId: m.courseId || "", cohortId: m.cohortId || "", termId: m.termId || "" });
+    setForm({ code: m.code, unitNumber: m.unitNumber || "", name: m.name, tutor: m.tutor || "", courseId: m.courseId || "", cohortId: m.cohortId || "", termId: m.termId || "" });
     setModal(true);
   };
   const togglePick = (id) => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
@@ -4474,7 +4474,7 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
               <div className="relative h-32">
                 <CoursePattern seed={seed} colour={colour} />
                 <div className="absolute right-3 top-3"><CourseMenu onEdit={() => openEdit(m)} onDelete={() => remove(m)} /></div>
-                <span className="absolute bottom-3 left-3 rounded-md bg-white/95 px-2.5 py-1 text-xs font-extrabold text-slate-800 shadow-sm">{m.code}</span>
+                <span className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-md bg-white/95 px-2.5 py-1 text-xs font-extrabold text-slate-800 shadow-sm">{m.unitNumber ? <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-extrabold text-white">Unit {m.unitNumber}</span> : null}{m.code}</span>
               </div>
 
               <div className="flex flex-1 flex-col p-4">
@@ -4540,7 +4540,8 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
                 </select>
               </Field>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Unit number"><input value={form.unitNumber} onChange={e => setForm(f => ({ ...f, unitNumber: e.target.value }))} placeholder="e.g. 1" className={inputCls} /></Field>
               <Field label="Unit code"><input value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))} placeholder="e.g. OBM" className={inputCls} /></Field>
               <Field label="Tutor"><select value={form.tutor} onChange={e => setForm(f => ({ ...f, tutor: e.target.value }))} className={inputCls}><option value="">— none —</option>{store.staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></Field>
             </div>
@@ -4926,7 +4927,7 @@ function AssessmentUnits({ store, courseFilter, setCourseFilter, onView }) {
                 <span className="flex h-9 w-12 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{u.code.slice(0, 5)}</span>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-extrabold" style={{ color: NAVY_DARK }} title={u.name}>{u.name}</p>
-                  <p className="truncate text-[11px] text-slate-400">{course ? course.name : "No course"} · {u.studentCount ?? 0} students</p>
+                  <p className="truncate text-[11px] text-slate-400">{u.unitNumber ? `Unit ${u.unitNumber} · ` : ""}{course ? course.name : "No course"} · {u.studentCount ?? 0} students</p>
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-1.5 text-center">
@@ -5059,7 +5060,7 @@ function AssessmentsManage({ store, onGrade, unitId, setUnitId, courseFilter = "
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-lg font-extrabold" style={{ color: NAVY_DARK }}>{selected.name}</p>
-            <p className="text-xs text-slate-400">{selected.code}{courseOf ? ` · ${courseOf.name}` : ""} · {selected.studentCount ?? 0} students</p>
+            <p className="text-xs text-slate-400">{selected.unitNumber ? `Unit ${selected.unitNumber} · ` : ""}{selected.code}{courseOf ? ` · ${courseOf.name}` : ""} · {selected.studentCount ?? 0} students</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {/* Switchable views for the same unit. */}
