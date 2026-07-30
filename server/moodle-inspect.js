@@ -62,7 +62,7 @@ const trim = (s, n = 46) => { const t = String(s ?? ""); return t.length > n ? t
 (async () => {
   if (!BASE || !TOKEN) {
     console.error("\n✗ MOODLE_URL and MOODLE_TOKEN are required.\n  See the setup notes at the top of this file.\n");
-    process.exit(1);
+    process.exitCode = 1; return;
   }
   console.log(`\nInspecting ${BASE}  (read-only)\n`);
 
@@ -73,7 +73,8 @@ const trim = (s, n = 46) => { const t = String(s ?? ""); return t.length > n ? t
   } catch (e) {
     console.error(`✗ Could not reach Moodle or the token was rejected:\n  ${e.message}\n`);
     console.error("  Check: the URL is the Moodle root (no /login), web services + REST are enabled,\n  and the token is valid and not restricted to another IP.\n");
-    process.exit(1);
+    console.error("  A Moodle token is 32 hex characters. If you copied the whole row from\n  the tokens table you may have included the service name — use only the token.\n");
+    process.exitCode = 1; return;
   }
   line();
   console.log(`SITE      ${site.sitename}`);
@@ -172,4 +173,4 @@ const trim = (s, n = 46) => { const t = String(s ?? ""); return t.length > n ? t
   console.log("Done — nothing was changed. Send this output back and we'll fix the mapping.");
   line("═");
   console.log("");
-})().catch((e) => { console.error("\n✗ Inspection failed:", e.message, "\n"); process.exit(1); });
+})().catch((e) => { console.error("\n✗ Inspection failed:", e.message, "\n"); process.exitCode = 1; });
