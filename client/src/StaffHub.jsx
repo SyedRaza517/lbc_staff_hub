@@ -4772,10 +4772,45 @@ function DistBar({ dist, className = "" }) {
   );
 }
 
+// Aggregates the gradebook overview (which is per UNIT) up to course level, so the
+// Courses gallery can show assessment figures without another endpoint. Averages are
+// re-derived from graded counts so a unit with 40 marks outweighs one with 2 — a plain
+// mean of unit averages would misreport the course.
+function courseAssessmentStats(store) {
+  const perUnit = store.assessmentOverview?.units || [];
+  const unitById = Object.fromEntries(store.units.map(u => [u.id, u]));
+  const acc = new Map();
+  for (const u of perUnit) {
+    const courseId = unitById[u.id]?.courseId || "__none__";
+    const a = acc.get(courseId) || { units: 0, assessments: 0, graded: 0, sum: 0, dist: { Distinction: 0, Merit: 0, Pass: 0, Fail: 0 } };
+    a.units += 1;
+    a.assessments += u.assessmentCount || 0;
+    a.graded += u.gradedCount || 0;
+    if (u.avgPct != null && u.gradedCount) a.sum += u.avgPct * u.gradedCount;
+    for (const k of Object.keys(a.dist)) a.dist[k] += u.dist?.[k] || 0;
+    acc.set(courseId, a);
+  }
+  const out = {};
+  for (const [courseId, a] of acc) {
+    const passed = a.dist.Distinction + a.dist.Merit + a.dist.Pass;
+    out[courseId] = {
+      ...a,
+      avgPct: a.graded ? Math.round((a.sum / a.graded) * 10) / 10 : null,
+      passRate: a.graded ? Math.round((passed / a.graded) * 1000) / 10 : null,
+    };
+  }
+  return out;
+}
+
 function AdminAssessments({ store }) {
   const { refreshHnd, refreshAssessments, assessmentsLoaded } = store;
-  const [view, setView] = useState("overview");   // overview | manage | student
-  const [openGrades, setOpenGrades] = useState(null); // assessment being graded
+  // Mirrors the Registers section: Courses → Units → Marks, plus Results % and
+  // Students. Courses, units and students are the SAME records the registers use —
+  // create them once under Registers and they appear here automatically.
+  const [view, setView] = useState("courses"); // courses | units | marks | results | students
+  const [courseFilter, setCourseFilter] = useState("");  // "" = all courses
+  const [unitId, setUnitId] = useState("");              // unit whose marks are open
+  const [openGrades, setOpenGrades] = useState(null);    // assessment being graded
   useEffect(() => { refreshHnd(); refreshAssessments(); }, [refreshHnd, refreshAssessments]);
 
   if (!assessmentsLoaded) {
@@ -4784,24 +4819,124 @@ function AdminAssessments({ store }) {
   if (openGrades) return <GradeEntry store={store} assessment={openGrades} onBack={() => setOpenGrades(null)} />;
 
   const tabs = [
-    { key: "overview", label: "Overview", I: BarChart3 },
-    { key: "manage", label: "Assessments & grades", I: ClipboardList },
-    { key: "records", label: "Grade records", I: Layers },
-    { key: "student", label: "By student", I: GraduationCap },
+    { key: "courses", label: "Courses", I: Layers },
+    { key: "units", label: "Units", I: GraduationCap },
+    { key: "marks", label: "Marks", I: ClipboardList },
+    { key: "results", label: "Results %", I: Percent },
+    { key: "students", label: "Students", I: Users },
   ];
+  const openUnit = (id) => { setUnitId(id); setView("marks"); };
   return (
     <>
-      <AdminHeader title="Assessments" subtitle="Marks, grades and averages across every unit" Icon={Award}
+      <AdminHeader title="Assessments" subtitle="Marks, grades and averages across every course and unit" Icon={Award}
         action={<button onClick={() => refreshAssessments()} className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><RefreshCw size={14} /> Refresh</button>} />
       <div className="mb-4 flex flex-wrap gap-1.5">
         {tabs.map(t => (
           <button key={t.key} onClick={() => setView(t.key)} className={`press flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold shadow-sm transition-all ${view === t.key ? "text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`} style={view === t.key ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}><t.I size={14} /> {t.label}</button>
         ))}
       </div>
-      {view === "overview" && <AssessmentsOverview store={store} />}
-      {view === "manage" && <AssessmentsManage store={store} onGrade={setOpenGrades} />}
-      {view === "records" && <AssessmentRecords store={store} />}
-      {view === "student" && <StudentAssessments store={store} />}
+      {view === "courses" && <AssessmentCourses store={store} onView={(id) => { setCourseFilter(id); setView("units"); }} />}
+      {view === "units" && <AssessmentUnits store={store} courseFilter={courseFilter} setCourseFilter={setCourseFilter} onView={openUnit} />}
+      {view === "marks" && <AssessmentsManage store={store} unitId={unitId} setUnitId={setUnitId} courseFilter={courseFilter} onGrade={setOpenGrades} />}
+      {view === "results" && <AssessmentsOverview store={store} />}
+      {view === "students" && <StudentAssessments store={store} />}
+    </>
+  );
+}
+
+/* ----- Assessments ▸ Courses: the same courses as Registers, read-only ----- */
+// Courses are created and edited under Registers; this gallery only reads them, so
+// there is one place they can be changed and the two sections can never drift apart.
+function AssessmentCourses({ store, onView }) {
+  const stats = courseAssessmentStats(store);
+  const unitsOf = (id) => store.units.filter(u => u.courseId === id);
+  if (!store.courses.length) {
+    return <Card><EmptyState Icon={Layers} title="No courses yet" msg="Courses are set up under Registers — add one there and it appears here automatically." /></Card>;
+  }
+  return (
+    <>
+      <p className="mb-3 text-[11px] text-slate-500">These are the same courses as the Registers section — add or edit them there and they update here automatically. Open a course to mark its units.</p>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {store.courses.map((c, i) => {
+          const st = stats[c.id] || { units: 0, assessments: 0, graded: 0, avgPct: null, passRate: null };
+          const tone = pctTone(st.avgPct);
+          const seed = hashStr(c.name);
+          return (
+            <div key={c.id} className="fade-up flex flex-col overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md" style={{ animationDelay: `${i * 45}ms` }}>
+              <div className="relative h-24">
+                <CoursePattern seed={seed} colour={c.colour || courseColour(seed)} />
+                <span className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-md bg-white/95 px-2.5 py-1 text-xs font-extrabold text-slate-800 shadow-sm"><Layers size={12} /> Course</span>
+              </div>
+              <div className="p-4">
+                <p className="truncate text-sm font-extrabold" style={{ color: NAVY_DARK }} title={c.name}>{c.name}</p>
+                <p className="mt-0.5 text-xs font-semibold text-slate-400">{unitsOf(c.id).length} unit{unitsOf(c.id).length === 1 ? "" : "s"} · {st.assessments} assessment{st.assessments === 1 ? "" : "s"}</p>
+                <div className="mt-3 grid grid-cols-3 gap-1.5 text-center">
+                  <div className="rounded-lg bg-slate-50 py-1.5"><p className="text-sm font-extrabold tabular-nums text-slate-700">{st.graded}</p><p className="text-[9px] uppercase tracking-wide text-slate-400">Marks</p></div>
+                  <div className={`rounded-lg py-1.5 ${tone.bg}`}><p className={`text-sm font-extrabold tabular-nums ${tone.text}`}>{fmtPct(st.avgPct)}</p><p className="text-[9px] uppercase tracking-wide text-slate-400">Average</p></div>
+                  <div className="rounded-lg bg-slate-50 py-1.5"><p className="text-sm font-extrabold tabular-nums" style={{ color: pctColour(st.passRate) }}>{fmtPct(st.passRate)}</p><p className="text-[9px] uppercase tracking-wide text-slate-400">Pass</p></div>
+                </div>
+                <button onClick={() => onView(c.id)} className="press mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-slate-200 py-2 text-xs font-bold transition hover:border-indigo-300 hover:bg-indigo-50" style={{ color: NAVY }}>View units <ArrowRight size={15} /></button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+/* ----- Assessments ▸ Units: the same units as Registers, read-only ----- */
+function AssessmentUnits({ store, courseFilter, setCourseFilter, onView }) {
+  const [query, setQuery] = useState("");
+  const perUnit = Object.fromEntries((store.assessmentOverview?.units || []).map(u => [u.id, u]));
+  const ql = query.trim().toLowerCase();
+  const list = store.units.filter(u => {
+    if (courseFilter === "none" && u.courseId) return false;
+    if (courseFilter && courseFilter !== "none" && u.courseId !== courseFilter) return false;
+    return !ql || u.code.toLowerCase().includes(ql) || u.name.toLowerCase().includes(ql);
+  });
+  const courseById = Object.fromEntries(store.courses.map(c => [c.id, c]));
+  const pills = [{ v: "", l: "All courses" }, ...store.courses.map(c => ({ v: c.id, l: c.name })), ...(store.units.some(u => !u.courseId) ? [{ v: "none", l: "No course" }] : [])];
+  return (
+    <>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap gap-1.5">
+          {pills.map(p => (
+            <button key={p.v} onClick={() => setCourseFilter(p.v)} className={`press rounded-full px-3 py-1.5 text-xs font-bold shadow-sm transition ${courseFilter === p.v ? "text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`} style={courseFilter === p.v ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}>{p.l}</button>
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200"><Search size={15} className="text-slate-400" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search units…" className="w-40 bg-transparent text-sm outline-none sm:w-56" /></div>
+      </div>
+      <p className="mb-3 text-[11px] text-slate-500">Units come from the Registers section — add or edit them there. Open one to define its assessments and enter marks.</p>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {list.map((u, i) => {
+          const st = perUnit[u.id] || { assessmentCount: 0, gradedCount: 0, avgPct: null };
+          const tone = pctTone(st.avgPct);
+          const course = courseById[u.courseId];
+          return (
+            <Card key={u.id} className="fade-up" style={{ animationDelay: `${i * 40}ms` }}>
+              <div className="flex items-start gap-2.5">
+                <span className="flex h-9 w-12 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{u.code.slice(0, 5)}</span>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-extrabold" style={{ color: NAVY_DARK }} title={u.name}>{u.name}</p>
+                  <p className="truncate text-[11px] text-slate-400">{course ? course.name : "No course"} · {u.studentCount ?? 0} students</p>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-1.5 text-center">
+                <div className="rounded-lg bg-slate-50 py-1.5"><p className="text-sm font-extrabold tabular-nums text-slate-700">{st.assessmentCount || 0}</p><p className="text-[9px] uppercase tracking-wide text-slate-400">Assessments</p></div>
+                <div className="rounded-lg bg-slate-50 py-1.5"><p className="text-sm font-extrabold tabular-nums text-slate-700">{st.gradedCount || 0}</p><p className="text-[9px] uppercase tracking-wide text-slate-400">Marks</p></div>
+                <div className={`rounded-lg py-1.5 ${tone.bg}`}><p className={`text-sm font-extrabold tabular-nums ${tone.text}`}>{fmtPct(st.avgPct)}</p><p className="text-[9px] uppercase tracking-wide text-slate-400">Average</p></div>
+              </div>
+              <button onClick={() => onView(u.id)} className="press mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-slate-200 py-2 text-xs font-bold transition hover:border-indigo-300 hover:bg-indigo-50" style={{ color: NAVY }}><ClipboardList size={14} /> Marks &amp; assessments</button>
+            </Card>
+          );
+        })}
+        {list.length === 0 && (
+          <div className="sm:col-span-2 lg:col-span-3">
+            <Card><EmptyState Icon={BookOpen} title={store.units.length === 0 ? "No units yet" : "No units match"} msg={store.units.length === 0 ? "Units are set up under Registers — add one there and it appears here." : "Try a different course or search."} /></Card>
+          </div>
+        )}
+      </div>
     </>
   );
 }
@@ -4866,19 +5001,28 @@ function AssessmentsOverview({ store }) {
 }
 
 /* ----- Manage assessments per course + open grade entry ----- */
-function AssessmentsManage({ store, onGrade }) {
-  const [unitId, setUnitId] = useState("");
+function AssessmentsManage({ store, onGrade, unitId, setUnitId, courseFilter = "" }) {
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
   const [form, setForm] = useState({ title: "", type: "Assignment", maxMarks: 100, weight: 0, dueDate: "" });
+  // Switchable views for one unit: the assessment cards, the whole student × assessment
+  // grid, or the flat searchable record list across every unit.
+  const [mode, setMode] = useState("list"); // list | grid | records
+
+  // The unit picker only offers units from the course drilled into (all units when no
+  // course is selected), so this tab stays in step with Courses → Units.
+  const pickable = courseFilter && courseFilter !== "none"
+    ? store.units.filter(u => u.courseId === courseFilter)
+    : courseFilter === "none" ? store.units.filter(u => !u.courseId) : store.units;
 
   useEffect(() => {
-    if (!store.units.length) { setUnitId(""); return; }
-    if (!unitId || !store.units.some(m => m.id === unitId)) setUnitId(store.units[0].id);
-  }, [store.units, unitId]);
+    if (!pickable.length) { if (unitId) setUnitId(""); return; }
+    if (!unitId || !pickable.some(m => m.id === unitId)) setUnitId(pickable[0].id);
+  }, [pickable, unitId, setUnitId]);
 
   const selected = store.units.find(m => m.id === unitId) || null;
   const list = store.assessments.filter(a => a.unitId === unitId);
+  const courseOf = store.courses.find(c => c.id === selected?.courseId) || null;
 
   const openAdd = () => { setEdit(null); setForm({ title: "", type: "Assignment", maxMarks: 100, weight: 0, dueDate: "" }); setModal(true); };
   const openEdit = (a) => { setEdit(a); setForm({ title: a.title, type: a.type, maxMarks: a.maxMarks, weight: a.weight, dueDate: a.dueDate || "" }); setModal(true); };
@@ -4900,17 +5044,30 @@ function AssessmentsManage({ store, onGrade }) {
   return (
     <>
       <div className="mb-4 flex flex-wrap gap-1.5">
-        {store.units.map(m => (
+        {pickable.map(m => (
           <button key={m.id} onClick={() => setUnitId(m.id)} className={`press rounded-xl px-3.5 py-2 text-left text-xs font-bold shadow-sm ring-1 transition-all ${unitId === m.id ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`} style={unitId === m.id ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}>{m.code}</button>
         ))}
       </div>
       {selected && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <div><p className="text-lg font-extrabold" style={{ color: NAVY_DARK }}>{selected.name}</p><p className="text-xs text-slate-400">{selected.code} · {selected.studentCount} students</p></div>
-          <PrimaryBtn onClick={openAdd}><Plus size={16} /> Add assessment</PrimaryBtn>
+          <div>
+            <p className="text-lg font-extrabold" style={{ color: NAVY_DARK }}>{selected.name}</p>
+            <p className="text-xs text-slate-400">{selected.code}{courseOf ? ` · ${courseOf.name}` : ""} · {selected.studentCount ?? 0} students</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Switchable views for the same unit. */}
+            <div className="flex gap-1 rounded-xl bg-white p-1 ring-1 ring-slate-200">
+              {[{ k: "list", l: "Assessments" }, { k: "grid", l: "Grid" }, { k: "records", l: "All records" }].map(v => (
+                <button key={v.k} onClick={() => setMode(v.k)} className={`press rounded-lg px-2.5 py-1.5 text-xs font-bold transition ${mode === v.k ? "text-white" : "text-slate-500 hover:bg-slate-100"}`} style={mode === v.k ? { background: NAVY } : {}}>{v.l}</button>
+              ))}
+            </div>
+            {mode !== "records" && <PrimaryBtn onClick={openAdd}><Plus size={16} /> Add assessment</PrimaryBtn>}
+          </div>
         </div>
       )}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {mode === "records" && <AssessmentRecords store={store} />}
+      {mode === "grid" && selected && <UnitGradeGrid store={store} unit={selected} assessments={list} />}
+      <div className={`grid gap-3 sm:grid-cols-2 lg:grid-cols-3 ${mode === "list" ? "" : "hidden"}`}>
         {list.map((a, i) => {
           const tone = pctTone(a.avgPct);
           return (
@@ -4945,6 +5102,119 @@ function AssessmentsManage({ store, onGrade }) {
         </div>
       </Modal>
     </>
+  );
+}
+
+/* ----- One unit's whole gradebook as a student × assessment grid ----- */
+// The alternative to marking one assessment at a time: every enrolled student down the
+// side, every assessment across the top, marks editable in place. Edits are collected
+// and saved per assessment (the API takes one assessment's grades at a time).
+function UnitGradeGrid({ store, unit, assessments }) {
+  const [rows, setRows] = useState(null);      // { [studentId]: { [assessmentId]: "marks" } }
+  const [students, setStudents] = useState([]);
+  const [dirty, setDirty] = useState({});      // { [assessmentId]: { [studentId]: "marks" } }
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true); setDirty({});
+    try {
+      const res = await api.listGrades({ unitId: unit.id });
+      const byStudent = {};
+      for (const r of res.records || []) {
+        (byStudent[r.studentId] = byStudent[r.studentId] || {})[r.assessmentId] = String(r.marks);
+      }
+      setRows(byStudent);
+      // Enrolled students, in the same order the registers use.
+      setStudents(store.students.filter(s => (s.unitIds || []).includes(unit.id)));
+    } catch (e) { store.notify?.(e.message || "Could not load the grid", "error"); }
+    finally { setLoading(false); }
+  }, [unit.id, store]);
+  useEffect(() => { load(); }, [load]);
+
+  const setCell = (studentId, a, v) => {
+    if (v !== "" && !/^\d{1,4}$/.test(v)) return;          // whole numbers only, like the server
+    setDirty(d => ({ ...d, [a.id]: { ...(d[a.id] || {}), [studentId]: v } }));
+  };
+  const valueOf = (studentId, a) => {
+    const pending = dirty[a.id]?.[studentId];
+    if (pending !== undefined) return pending;
+    return rows?.[studentId]?.[a.id] ?? "";
+  };
+  const overMax = assessments.some(a => Object.values(dirty[a.id] || {}).some(v => v !== "" && Number(v) > a.maxMarks));
+  const changeCount = Object.values(dirty).reduce((n, m) => n + Object.keys(m).length, 0);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      // One request per assessment, sending only the students actually edited — the
+      // endpoint upserts/clears just those, so untouched marks are never disturbed.
+      for (const [assessmentId, byStudent] of Object.entries(dirty)) {
+        const grades = Object.entries(byStudent).map(([studentId, marks]) => ({ studentId, marks: marks === "" ? null : Number(marks) }));
+        if (grades.length) await store.saveGrades(assessmentId, grades);
+      }
+      await load();
+    } catch (_e) { /* store toasts; keep the edits so nothing is lost */ }
+    finally { setBusy(false); }
+  };
+
+  if (loading) return <div className="skeleton h-64 rounded-2xl" />;
+  if (!assessments.length) return <Card><EmptyState Icon={ClipboardList} title="No assessments for this unit" msg="Add an assessment first, then marks can be entered here." /></Card>;
+  if (!students.length) return <Card><EmptyState Icon={Users} title="No students enrolled" msg="Enrol students onto this unit under Registers, then their marks appear here." /></Card>;
+
+  return (
+    <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 fade-up">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+        <p className="text-xs font-bold text-slate-500">{students.length} student{students.length === 1 ? "" : "s"} × {assessments.length} assessment{assessments.length === 1 ? "" : "s"}</p>
+        <div className="flex items-center gap-2">
+          {overMax && <span className="text-[11px] font-semibold text-rose-600">A mark is above its maximum</span>}
+          {changeCount > 0 && <span className="text-[11px] font-semibold text-amber-600">{changeCount} unsaved</span>}
+          <PrimaryBtn onClick={save} disabled={busy || overMax || changeCount === 0}><Save size={15} /> {busy ? "Saving…" : "Save marks"}</PrimaryBtn>
+        </div>
+      </div>
+      <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
+            <tr>
+              <th className="sticky left-0 z-10 bg-slate-50 px-4 py-3">Student</th>
+              {assessments.map(a => <th key={a.id} className="px-3 py-3 text-center whitespace-nowrap" title={`${a.type} · out of ${a.maxMarks}`}>{a.title}<span className="ml-1 font-normal text-slate-300">/{a.maxMarks}</span></th>)}
+              <th className="px-3 py-3 text-center">Average</th>
+            </tr>
+          </thead>
+          <tbody>
+            {students.map(s => {
+              // Live average across whatever is currently in the row, pending edits included.
+              const pcts = assessments.map(a => { const v = valueOf(s.id, a); return v === "" ? null : Math.min(100, (Number(v) / a.maxMarks) * 100); }).filter(v => v !== null);
+              const avg = pcts.length ? Math.round((pcts.reduce((x, y) => x + y, 0) / pcts.length) * 10) / 10 : null;
+              const tone = pctTone(avg);
+              return (
+                <tr key={s.id} className="border-t border-slate-100 hover:bg-blue-50/30">
+                  <td className="sticky left-0 z-10 bg-white px-4 py-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: s.colour }}>{s.initials}</span>
+                      <div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-700">{s.name}</p><p className="text-[10px] tabular-nums text-slate-400">{s.studentRef}</p></div>
+                    </div>
+                  </td>
+                  {assessments.map(a => {
+                    const v = valueOf(s.id, a);
+                    const bad = v !== "" && Number(v) > a.maxMarks;
+                    const edited = dirty[a.id]?.[s.id] !== undefined;
+                    return (
+                      <td key={a.id} className="px-3 py-2 text-center">
+                        <input value={v} onChange={e => setCell(s.id, a, e.target.value)} inputMode="numeric" placeholder="—"
+                          className={`w-16 rounded-lg border-2 px-2 py-1 text-center text-xs font-bold tabular-nums outline-none transition ${bad ? "border-rose-300 bg-rose-50 text-rose-700" : edited ? "border-amber-300 bg-amber-50" : "border-slate-200 focus:border-blue-400"}`} />
+                      </td>
+                    );
+                  })}
+                  <td className="px-3 py-2 text-center"><span className={`rounded-lg px-2 py-1 text-xs font-extrabold tabular-nums ${tone.bg} ${tone.text}`}>{fmtPct(avg)}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="px-4 py-3 text-[11px] text-slate-400">Type a mark to change it, or clear the box to remove it. Nothing is saved until you press <b>Save marks</b>. Grades: 70%+ Distinction · 60–69 Merit · 40–59 Pass · below 40 Fail.</p>
+    </div>
   );
 }
 
