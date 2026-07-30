@@ -73,7 +73,11 @@ router.post("/", async (req, res) => {
     // account, or already has a live request — never reveal which. Both candidate
     // records are checked so a claimed account can't be re-claimed via the other key.
     const alreadyClaimed = (byRef && byRef.passwordHash) || (byEmail && byEmail.passwordHash);
-    if (staffClash || alreadyClaimed || (existingRequest && existingRequest.status !== "rejected")) return genericOk();
+    // An "approved" request whose student record has since been deleted is stale and
+    // must not bar a fresh application (see the staff branch for the full reasoning).
+    const staleApproved = existingRequest && existingRequest.status === "approved" && !byRef && !byEmail;
+    const liveRequest = existingRequest && existingRequest.status !== "rejected" && !staleApproved;
+    if (staffClash || alreadyClaimed || liveRequest) return genericOk();
 
     const data = { kind: "student", studentId: student?.id || null, collegeId, name, email, passwordHash: hashPassword(password), jobTitle: "", dept: "", site: null, status: "pending", note: null, decidedBy: null, decidedAt: null };
     if (existingRequest) await prisma.signupRequest.update({ where: { id: existingRequest.id }, data });
@@ -98,7 +102,15 @@ router.post("/", async (req, res) => {
     prisma.signupRequest.findUnique({ where: { email } }),
   ]);
 
-  if (existingStaff || (existingRequest && existingRequest.status !== "rejected")) {
+  // A request only blocks a re-application while it is still live. An "approved" one
+  // whose Staff account no longer exists is STALE — the account was deleted — and must
+  // not bar the same person from signing up again. (Deleting a staff member now clears
+  // their request as well; this is the belt-and-braces half of that fix, and it also
+  // repairs accounts deleted before it shipped.)
+  const staleApproved = existingRequest && existingRequest.status === "approved" && !existingStaff;
+  const liveRequest = existingRequest && existingRequest.status !== "rejected" && !staleApproved;
+
+  if (existingStaff || liveRequest) {
     // The on-screen answer stays identical, but the real account holder is told —
     // otherwise a genuine applicant who already has an account waits forever for
     // an approval that was never created, and the owner never learns someone tried.
@@ -106,8 +118,9 @@ router.post("/", async (req, res) => {
     return res.status(202).json({ ok: true, status: "pending", message: "Thanks — your request has been sent to the college administrator for approval." });
   }
 
-  // A previously rejected applicant may apply again: overwrite the old row so the
-  // unique email constraint doesn't permanently bar them.
+  // A previously rejected applicant — or one whose account has since been deleted —
+  // may apply again: overwrite the old row so the unique email constraint doesn't
+  // permanently bar them.
   const data = { name, email, passwordHash: hashPassword(password), jobTitle, dept, site, status: "pending", note: null, decidedBy: null, decidedAt: null };
   if (existingRequest) await prisma.signupRequest.update({ where: { id: existingRequest.id }, data });
   else await prisma.signupRequest.create({ data });

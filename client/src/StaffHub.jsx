@@ -1144,7 +1144,11 @@ function TimesheetScreen({ store, me }) {
   for (const e of list) (byDate[e.date] = byDate[e.date] || []).push(e);
   const days = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
 
-  const del = async (id) => { try { await store.removeTimesheet(id); reload(); } catch (_) {} };
+  const del = async (id) => {
+    const e = list.find(x => x.id === id);
+    if (!window.confirm(`Delete this timesheet entry?${e ? `\n\n${fmtDate(e.date)} · ${e.startTime}–${e.endTime} · ${e.title}` : ""}\n\nThis cannot be undone.`)) return;
+    try { await store.removeTimesheet(id); reload(); } catch (_) {}
+  };
   const send = async () => { setBusy(true); try { await store.submitTimesheet(month); setConfirmSend(false); reload(); } catch (_) {} finally { setBusy(false); } };
 
   return (
@@ -2319,7 +2323,11 @@ function AdminDocuments({ store }) {
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState({ name: "", type: "Policy", scope: "all", assignedTo: "" });
   const add = async () => { if (!form.name.trim()) return; await store.addDoc({ name: form.name, type: form.type, scope: form.scope, assignedTo: form.assignedTo }); setModal(false); setForm({ name: "", type: "Policy", scope: "all", assignedTo: "" }); };
-  const del = (d) => store.deleteDoc(d.id);
+  const del = (d) => {
+    const who = d.scope === "personal" ? "a personal document" : "shared with all staff";
+    if (!window.confirm(`Delete "${d.name}"?\n\nThis is ${who} and will be removed for everyone who can see it. This cannot be undone.`)) return;
+    return store.deleteDoc(d.id);
+  };
   const iconFor = (t) => ({ Policy: FileText, Payroll: Briefcase, Calendar: CalendarDays, HR: Users, Form: ClipboardList }[t] || FileText);
   return (
     <>
@@ -2852,7 +2860,11 @@ function HndSessions({ store, unitId, setUnitId, selected, onTake, scoped }) {
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
   };
   const remove = async (s) => {
-    if (s.markedCount > 0 && !window.confirm(`This session has ${s.markedCount} mark${s.markedCount === 1 ? "" : "s"} recorded. Deleting it removes those marks and changes attendance percentages. Continue?`)) return;
+    // Always confirm — an unmarked session used to disappear on a single tap.
+    const marks = s.markedCount > 0
+      ? `\n\nIt has ${s.markedCount} mark${s.markedCount === 1 ? "" : "s"} recorded; deleting it removes those marks and changes attendance percentages.`
+      : "\n\nNo attendance has been marked on it yet.";
+    if (!window.confirm(`Delete the session on ${fmtDate(s.date)} (${s.startTime}–${s.endTime})?${marks}\n\nThis cannot be undone.`)) return;
     await store.removeSession(s.id);
   };
   const exportSessions = () => {
@@ -3417,7 +3429,7 @@ function HndStudents({ store }) {
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
   };
   const remove = async (s) => {
-    if (!window.confirm(`Remove ${s.name}? Their attendance marks will be deleted too.`)) return;
+    if (!window.confirm(`Remove ${s.name}?\n\nTheir enrolments, attendance marks, assessment grades and sign-up record will be deleted too, so the same email can register again.\n\nThis cannot be undone.`)) return;
     await store.removeStudent(s.id);
   };
 
@@ -3581,7 +3593,7 @@ function AdminStudents({ store }) {
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
   };
   const remove = async (s) => {
-    if (!window.confirm(`Remove ${s.name}?\n\nTheir enrolments and all their attendance marks will be deleted too. This cannot be undone.`)) return;
+    if (!window.confirm(`Remove ${s.name}?\n\nTheir enrolments, attendance marks, assessment grades and sign-up record will be deleted too, so the same email can register again.\n\nThis cannot be undone.`)) return;
     await store.removeStudent(s.id);
   };
 
@@ -5924,7 +5936,9 @@ function AdminStaff({ store }) {
           </div>
           <p className="flex items-start gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-[11px] leading-relaxed text-rose-700 ring-1 ring-rose-200">
             <AlertCircle size={13} className="mt-px shrink-0" />
-            This permanently deletes their account <b>and their entire history</b> — leave, check-ins, balance adjustments and notifications. It cannot be undone.
+            This permanently deletes their account <b>and their entire history</b> — leave, check-ins,
+            balance adjustments, timesheets, notifications, documents assigned only to them, and their
+            original sign-up record (so the same email can register again). It cannot be undone.
           </p>
           <PrimaryBtn colour={MAROON} onClick={confirmRemove} disabled={deleteBusy} className="w-full"><Trash2 size={16} /> {deleteBusy ? "Removing…" : `Remove ${deleteTarget?.name || ""}`}</PrimaryBtn>
           <button onClick={() => setDeleteTarget(null)} disabled={deleteBusy} className="press w-full text-center text-xs font-semibold text-slate-400 transition hover:text-slate-600">Cancel</button>

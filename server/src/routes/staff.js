@@ -190,11 +190,30 @@ router.delete("/:id/totp", requireAuth, requireAnyPage(["staff", "settings"]), a
 // DELETE /api/staff/:id  (admin)
 router.delete("/:id", requireAuth, requireAnyPage(["staff", "settings"]), async (req, res) => {
   if (req.params.id === req.user.id) return res.status(400).json({ error: "You cannot delete your own account" });
+  const existing = await prisma.staff.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: "Staff not found" });
   try {
-    await prisma.staff.delete({ where: { id: req.params.id } });
-    res.json({ ok: true });
+    // Delete EVERYTHING tied to this person, in one transaction.
+    //
+    // The database cascades most of it (device tokens, password resets, notifications,
+    // check-ins, leave, adjustments, timesheet entries), but two things are not linked
+    // by a foreign key and used to survive:
+    //
+    //   • Their SignupRequest — matched only by email, which is @unique. A leftover
+    //     "approved" request meant the same person could never sign up again: the
+    //     sign-up endpoint saw a live request and returned its neutral "sent for
+    //     approval" reply without creating anything, so the applicant waited for an
+    //     approval that did not exist and no admin ever saw a request.
+    //   • Documents privately assigned to them, which would otherwise linger as
+    //     orphaned personal records nobody can open.
+    const [, docs] = await prisma.$transaction([
+      prisma.signupRequest.deleteMany({ where: { email: existing.email } }),
+      prisma.document.deleteMany({ where: { scope: "personal", assignedToId: existing.id } }),
+      prisma.staff.delete({ where: { id: existing.id } }),
+    ]);
+    res.json({ ok: true, documentsRemoved: docs.count });
   } catch (e) {
-    res.status(404).json({ error: "Staff not found" });
+    res.status(400).json({ error: "Could not delete this staff member" });
   }
 });
 

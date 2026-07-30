@@ -501,8 +501,19 @@ router.put("/students/:id", requireAuth, requireHndWrite, async (req, res) => {
 });
 
 router.delete("/students/:id", requireAuth, requireHndWrite, async (req, res) => {
-  try { await prisma.student.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
-  catch (_e) { res.status(404).json({ error: "Student not found" }); }
+  const existing = await prisma.student.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: "Student not found" });
+  try {
+    // Enrolments, attendance marks, grades and PAT interactions cascade at the DB
+    // level. Their SignupRequest does NOT — it is matched only by email, which is
+    // @unique, so a leftover row would silently stop this person ever signing up
+    // again (the endpoint would see a live request and create nothing).
+    await prisma.$transaction([
+      prisma.signupRequest.deleteMany({ where: { email: existing.email } }),
+      prisma.student.delete({ where: { id: existing.id } }),
+    ]);
+    res.json({ ok: true });
+  } catch (_e) { res.status(400).json({ error: "Could not delete this student" }); }
 });
 
 // Replace a student's unit enrolments wholesale.
