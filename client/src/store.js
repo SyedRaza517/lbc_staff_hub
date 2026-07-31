@@ -160,23 +160,24 @@ export function useApiStore(notify, user) {
   // per-year means a Dec->Jan booking draws from both years, and next year's pot is
   // untouched by this year's usage.
   const usedDays = useCallback((id, year = thisYear) => leave.filter((l) => l.staffId === id && l.status === "approved" && l.type !== "unpaid").reduce((s, l) => s + chargeableDays(l.start, l.end, year), 0), [leave, chargeableDays, thisYear]);
-  // Adjustments are likewise scoped to this leave year (they top up / dock the year's
-  // entitlement); an undated legacy adjustment still counts so nothing is lost.
-  // Deliberately NOT year-scoped: adjustments are manual HR corrections with no way
-  // to date them from the UI, so scoping them made a "+3 carried over" silently
-  // disappear at midnight on 31 December. Matches the server.
-  const adjDays = useCallback((id) => adjustments.filter((a) => a.staffId === id).reduce((s, a) => s + a.days, 0), [adjustments]);
+  // Adjustments belong to the leave year they were recorded in — matching the server.
+  // Summing them across all time meant a one-off "+3 carried over" quietly granted 3
+  // extra days every year after, while usedDays reset each January, so the two figures
+  // could never be reconciled.
+  const adjDays = useCallback((id, year = thisYear) =>
+    adjustments.filter((a) => a.staffId === id && String(a.date || "").slice(0, 4) === String(year)).reduce((s, a) => s + a.days, 0),
+    [adjustments, thisYear]);
   // Total entitlement (e.g. 28) = the bookable allowance + the 8 bank holidays.
-  const effectiveAllowance = useCallback((id) => { const s = staff.find((x) => x.id === id); return (s?.allowance || 0) + adjDays(id); }, [staff, adjDays]);
+  const effectiveAllowance = useCallback((id, year = thisYear) => { const s = staff.find((x) => x.id === id); return (s?.allowance || 0) + adjDays(id, year); }, [staff, adjDays, thisYear]);
   // The bookable pot (e.g. 20): total entitlement minus the 8 bank holidays, which
   // are never bookable. This is the "total" on the Holiday Allowance card.
-  const bookableAllowance = useCallback((id) => Math.max(0, effectiveAllowance(id) - bankHolidayTotal), [effectiveAllowance, bankHolidayTotal]);
+  const bookableAllowance = useCallback((id, year = thisYear) => Math.max(0, effectiveAllowance(id, year) - bankHolidayTotal), [effectiveAllowance, bankHolidayTotal, thisYear]);
   // Remaining in a specific leave year. Booking forms MUST pass the year they are
   // booking into - pinning this to the current year stopped staff booking January
   // leave in December, and hid next year's already-approved bookings.
-  const remainingIn = useCallback((id, year) => bookableAllowance(id) - usedDays(id, year), [bookableAllowance, usedDays]);
+  const remainingIn = useCallback((id, year) => bookableAllowance(id, year) - usedDays(id, year), [bookableAllowance, usedDays]);
   // Days a staff member has left to book: bookable allowance − their approved leave.
-  const remaining = useCallback((id) => bookableAllowance(id) - usedDays(id, thisYear), [bookableAllowance, usedDays, thisYear]);
+  const remaining = useCallback((id) => bookableAllowance(id, thisYear) - usedDays(id, thisYear), [bookableAllowance, usedDays, thisYear]);
   // The first leave year a booking would overflow, or null if it fits. Checks every
   // year the range touches against that year's own pot.
   const overflowYear = useCallback((id, start, end) => {
@@ -352,7 +353,26 @@ export function useApiStore(notify, user) {
     updateUnit: runHnd((id, data) => api.updateUnit(id, data), "Unit updated"),
     removeUnit: runHnd((id) => api.removeUnit(id), "Unit removed", "error"),
     setUnitEnrolments: runHnd((id, studentIds) => api.setUnitEnrolments(id, studentIds), "Students enrolled"),
-    generateSessions: runHnd((id, data) => api.generateSessions(id, data), (id, data) => `Weekly registers created`),
+    // Not runHnd: its success message only sees the ARGUMENTS, and this one has to
+    // report what the server actually did — how many registers were created, whether
+    // the range was capped, and whether the unit already has registers outside the
+    // window (which is what a re-run on a different weekday leaves behind).
+    generateSessions: async (id, data) => {
+      try {
+        const r = await api.generateSessions(id, data);
+        const made = r?.created ?? 0;
+        const parts = [made ? `${made} register${made === 1 ? "" : "s"} created` : "No new registers — they already exist"];
+        if (r?.truncatedAt) parts.push(`stopped at ${r.truncatedAt} (60-week limit)`);
+        if (r?.strayCount) parts.push(`${r.strayCount} existing register${r.strayCount === 1 ? "" : "s"} fall outside these dates`);
+        notify?.(parts.join(" · "), r?.truncatedAt || r?.strayCount ? "error" : "success");
+        refreshHnd().catch(() => {});
+        return r;
+      } catch (e) {
+        refreshHnd().catch(() => {});
+        notify?.(e.message || "Could not create the registers", "error");
+        throw e;
+      }
+    },
     addStudent: runHnd((data) => api.addStudent(data), (d) => `Added ${d.firstName} ${d.lastName}`),
     updateStudent: runHnd((id, data) => api.updateStudent(id, data), "Student updated"),
     removeStudent: runHnd((id) => api.removeStudent(id), "Student removed", "error"),

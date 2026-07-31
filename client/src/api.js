@@ -44,14 +44,36 @@ export const setToken = (t) => {
   if (!t) { try { window.localStorage.removeItem(TOKEN_KEY); } catch (_) { /* ignore */ } } // belt-and-braces on logout
 };
 
-async function request(path, { method = "GET", body } = {}) {
+// Every request gets a deadline. Without one, a weak mobile signal or a cold-starting
+// free-tier server left the app awaiting a promise that never settled: a skeleton
+// screen forever, spinner turning, no error and no way to retry. 30s is generous for
+// a normal call; the Moodle endpoints, which read a whole VLE, pass their own.
+const DEFAULT_TIMEOUT_MS = 30000;
+
+async function request(path, { method = "GET", body, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const headers = { "Content-Type": "application/json" };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  // cache:"no-store" — never serve a cached response. Without this, a mobile
-  // WebView can return stale data after a mutation's refetch, so the UI only
-  // updates on a manual reload. This forces every request to hit the network.
-  const res = await fetch(BASE + path, { method, headers, cache: "no-store", body: body ? JSON.stringify(body) : undefined });
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  let res;
+  try {
+    // cache:"no-store" — never serve a cached response. Without this, a mobile
+    // WebView can return stale data after a mutation's refetch, so the UI only
+    // updates on a manual reload. This forces every request to hit the network.
+    res = await fetch(BASE + path, { method, headers, cache: "no-store", signal: controller?.signal, body: body ? JSON.stringify(body) : undefined });
+  } catch (e) {
+    // An abort is a timeout, not a mystery network failure — say so, because the two
+    // need different things from the user.
+    if (e?.name === "AbortError") {
+      const err = new Error("The server took too long to respond. Check your connection and try again.");
+      err.timeout = true;
+      throw err;
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if (res.status === 401) {
     setToken(null);
     // Signal the app to drop the user and show <Login>, rather than leaving a
@@ -215,6 +237,8 @@ export const api = {
   // students and marks. sync only STARTS the run and returns — reading a whole VLE
   // can outlast a proxy's request timeout — so poll moodleStatus() for the result.
   moodleStatus: () => request("/moodle/status"),
-  moodlePreview: () => request("/moodle/preview"),
+  // A preview reads every course, every enrolment and every grade item in the VLE, so
+  // it legitimately outlives the default deadline.
+  moodlePreview: () => request("/moodle/preview", { timeoutMs: 180000 }),
   moodleSync: () => request("/moodle/sync", { method: "POST" }),
 };

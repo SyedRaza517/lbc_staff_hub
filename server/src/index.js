@@ -23,6 +23,13 @@ app.use((_req, res, next) => {
   next();
 });
 
+// Behind Render (and any reverse proxy) the socket address is the proxy's, so every
+// caller shares one req.ip. The login limiter keys on IP + email, which then collapsed
+// to email alone: eight wrong guesses could lock a real person out, and spraying one
+// guess across many accounts was never limited at all. Trusting the first proxy hop
+// restores the caller's own address from X-Forwarded-For.
+app.set("trust proxy", 1);
+
 // --- CORS restricted to the configured client origin(s) ---
 // Only these browser origins may call the API. Requests with no Origin header
 // (curl, health checks, native mobile) are allowed; a browser page on any other

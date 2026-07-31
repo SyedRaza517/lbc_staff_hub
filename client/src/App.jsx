@@ -284,7 +284,18 @@ export default function App() {
   );
   // Students get their own app — attendance, results, and a query form. It's a
   // separate world from the staff/admin Shell below.
-  if (user.kind === "student") return (<><style>{GLOBAL_STYLE}</style><StudentApp user={user} logout={logout} /></>);
+  // The definite height matters: PhoneShell is h-full, so without a sized parent it
+  // collapsed to auto, the inner overflow-y-auto never became a real scrollport, and
+  // the bottom tab bar's sticky positioning had nothing to stick to — the navigation
+  // scrolled away with the content. Every other screen already sets this.
+  if (user.kind === "student") return (
+    <>
+      <style>{GLOBAL_STYLE}</style>
+      <div className="w-full" style={{ height: "100dvh", minHeight: "100dvh" }}>
+        <StudentApp user={user} logout={logout} />
+      </div>
+    </>
+  );
 
   // Someone who came in through the staff app lands in the staff app, even if
   // they're an admin — otherwise picking "Staff App" would drop them on the dashboard.

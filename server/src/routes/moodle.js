@@ -6,8 +6,13 @@ const prisma = require("../db");
 const { requireAuth, requireAnyPage } = require("../auth");
 const moodle = require("../moodle");
 
-const PAGES = ["settings", "assessments"];
-router.use(requireAuth, requireAnyPage(PAGES));
+// A sync is not confined to the gradebook: it creates students, enrolments, courses
+// and units, all of which require the registers/students pages everywhere else in the
+// app. Gating on "settings" alone let an admin given only app configuration create
+// student records and rewrite marks, so those pages are demanded too.
+const READ_PAGES = ["settings", "assessments", "registers", "students"];
+const SYNC_PAGES = ["registers", "students"];
+router.use(requireAuth, requireAnyPage(READ_PAGES));
 
 const parse = (s, fallback) => { try { return JSON.parse(s); } catch { return fallback; } };
 const sRun = (r) => r && ({
@@ -25,6 +30,17 @@ const sRun = (r) => r && ({
 // What the admin screen needs to render before anyone presses anything: is Moodle
 // configured, is a run in progress, and how did the last few go.
 router.get("/status", async (req, res) => {
+  // A process killed mid-sync (deploy, restart, out-of-memory) leaves its row saying
+  // "running" for ever. Nothing else ever resolves it, so the card read "Never run"
+  // (it keys off finishedAt) and the nightly job's 12-hour dedupe counted the ghost as
+  // tonight's run and skipped. Anything still "running" while nothing is in flight is
+  // by definition abandoned.
+  if (!moodle.isRunning()) {
+    await prisma.moodleSync.updateMany({
+      where: { status: "running" },
+      data: { status: "failed", finishedAt: new Date(), error: "Interrupted — the server restarted while this sync was running." },
+    });
+  }
   const history = await prisma.moodleSync.findMany({ orderBy: { startedAt: "desc" }, take: 10 });
   res.json({
     configured: moodle.isConfigured(),
@@ -53,7 +69,7 @@ router.get("/preview", async (req, res) => {
 // than a proxy will hold a request open, so the run continues server-side and the
 // caller polls /status for the outcome — which is also recorded in MoodleSync, so
 // closing the browser doesn't lose the result.
-router.post("/sync", async (req, res) => {
+router.post("/sync", requireAnyPage(SYNC_PAGES), async (req, res) => {
   if (!moodle.isConfigured()) return res.status(400).json({ error: "Moodle isn't set up yet. Add MOODLE_URL and MOODLE_TOKEN on the server." });
   if (moodle.isRunning()) return res.status(409).json({ error: "A sync is already running. Wait for it to finish." });
 

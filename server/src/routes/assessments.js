@@ -149,6 +149,9 @@ router.get("/grades", requireAuth, async (req, res) => {
       const pct = pctOf(g.marks, g.assessment.maxMarks);
       return {
         id: g.id, assessmentId: g.assessmentId, studentId: g.studentId, marks: g.marks, pct, grade: bandOf(pct),
+        // Provenance: "manual" marks are protected from the Moodle sync, "moodle" ones
+        // are refreshed by it. Surfaced so that guarantee is checkable, not just claimed.
+        source: g.source ?? "manual", gradedBy: g.gradedBy ?? null,
         student: { id: g.student.id, name: `${g.student.firstName} ${g.student.lastName}`, studentRef: g.student.studentRef, initials: g.student.initials, colour: g.student.colour },
         assessment: { id: g.assessment.id, title: g.assessment.title, type: g.assessment.type, maxMarks: g.assessment.maxMarks },
         unit: { id: g.assessment.unitId, code: g.assessment.unit.code, name: g.assessment.unit.name, courseId: g.assessment.unit.courseId },
@@ -207,8 +210,13 @@ router.put("/:id/grades", requireAuth, requireAdmin, async (req, res) => {
       ? prisma.assessmentGrade.deleteMany({ where: { assessmentId: a.id, studentId: r.studentId } })
       : prisma.assessmentGrade.upsert({
           where: { assessmentId_studentId: { assessmentId: a.id, studentId: r.studentId } },
-          create: { assessmentId: a.id, studentId: r.studentId, marks: r.marks, gradedBy },
-          update: { marks: r.marks, gradedBy, gradedAt: new Date() },
+          // source: "manual" on BOTH branches. A mark a person typed must carry that
+          // provenance, or the Moodle sync — which only spares source === "manual" —
+          // silently reverts the correction on its next run. The schema default only
+          // applies on create, so the update branch omitting it meant every mark that
+          // originated in Moodle could never be corrected durably.
+          create: { assessmentId: a.id, studentId: r.studentId, marks: r.marks, gradedBy, source: "manual" },
+          update: { marks: r.marks, gradedBy, gradedAt: new Date(), source: "manual" },
         })
   )));
   const saved = await prisma.assessmentGrade.findMany({ where: { assessmentId: a.id } });
@@ -283,7 +291,7 @@ router.get("/student/:id", requireAuth, async (req, res) => {
 });
 
 // GET /assessments/exec-summary — college-wide pass statistics for the Executive
-// Dashboard. A student "passes" if their AVERAGE graded mark is 40%+. Results are
+// Dashboard. A student "passes" if their AVERAGE graded mark is at or above PASS_MARK. Results are
 // grouped by cohort (the "course"), plus per-course pass-rate. Heavy per-student
 // aggregation done here (server-side) so the client never fetches 100s of students.
 async function execSummary(req, res) {

@@ -78,10 +78,6 @@ router.post("/", requireAuth, async (req, res) => {
   // leave requests — two rows for one holiday, double-counted against the
   // allowance, and two approvals for the manager to work through. Treat a repeat
   // of an already-pending request as the same request and hand back the original.
-  const duplicate = await prisma.leave.findFirst({
-    where: { staffId: targetStaff, type, start, end, status: "pending" },
-  });
-  if (duplicate) return res.status(200).json(sLeave(duplicate));
   // Cost of the booking = working days only: Mon–Fri, excluding bank holidays.
   // Weekends and bank holidays inside the range are free. If NOTHING is chargeable
   // (the whole range is weekend and/or bank holiday) there is nothing to book, so we
@@ -90,19 +86,78 @@ router.post("/", requireAuth, async (req, res) => {
   if (chargeable === 0) {
     return res.status(400).json({ error: "Those dates are all weekends or bank holidays — there are no working days to book." });
   }
+  // The duplicate check and the overlap check are both read-then-write, so they run
+  // under the same per-staff lock the decision path uses. Without it two simultaneous
+  // POSTs — a double-tap, or a mobile retry — both read "nothing there" and both
+  // create, giving one holiday two rows and charging the allowance twice.
   try {
-    const rec = await prisma.leave.create({
-      data: {
-        staffId: targetStaff, type, start, end, days: chargeable, reason: reason || "—",
-        requestedAt: today(),
-        status: "pending",
-      },
+    const outcome = await withStaffLock(targetStaff, async () => {
+      const duplicate = await prisma.leave.findFirst({
+        where: { staffId: targetStaff, type, start, end, status: "pending" },
+      });
+      if (duplicate) return { status: 200, body: sLeave(duplicate) };
+
+      // Overlapping bookings were each charged in full, so 10–14 Aug plus 12–18 Aug
+      // took 10 days off the allowance for 7 days actually absent. Two ranges overlap
+      // when each starts on or before the other ends.
+      const clash = await prisma.leave.findFirst({
+        where: {
+          staffId: targetStaff,
+          status: { in: ["pending", "approved"] },
+          start: { lte: end },
+          end: { gte: start },
+        },
+        orderBy: { start: "asc" },
+      });
+      if (clash) {
+        return { status: 409, body: { error: `Those dates overlap leave already ${clash.status === "approved" ? "approved" : "requested"} for ${clash.start} to ${clash.end}. Cancel or amend that booking first.` } };
+      }
+
+      const rec = await prisma.leave.create({
+        data: {
+          staffId: targetStaff, type, start, end, days: chargeable, reason: reason || "—",
+          requestedAt: today(),
+          status: "pending",
+        },
+      });
+      return { status: 201, body: sLeave(rec), created: true };
     });
-    notifyAdmins({ type: "info", message: `New ${type} leave request from ${exists.name}`, link: "approvals" });
-    res.status(201).json(sLeave(rec));
+    if (outcome.created) notifyAdmins({ type: "info", message: `New ${type} leave request from ${exists.name}`, link: "approvals" });
+    res.status(outcome.status).json(outcome.body);
   } catch (e) {
     res.status(400).json({ error: "Could not create leave request" });
   }
+});
+
+// DELETE /api/leave/:id — cancel a booking and give the days back.
+//
+// Without this an approved holiday could never be undone: a trip cancelled in advance
+// kept consuming the allowance for good, and the only workaround (a balance
+// adjustment) then applied to every future year as well.
+router.delete("/:id", requireAuth, async (req, res) => {
+  const existing = await prisma.leave.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: "Leave not found" });
+  const isLeaveAdmin = hasPage(req.user, LEAVE_ADMIN_PAGES);
+  // Staff may withdraw their OWN request; only a leave admin can cancel someone
+  // else's, or anything already approved.
+  if (existing.staffId !== req.user.id && !isLeaveAdmin) return res.status(403).json({ error: "You can only cancel your own leave" });
+  if (existing.status === "approved" && !isLeaveAdmin) {
+    return res.status(403).json({ error: "This leave is already approved — ask an administrator to cancel it." });
+  }
+  // Cancelling leave that has already been taken would rewrite history; an admin can
+  // still do it, but ordinary staff cannot.
+  if (existing.end < today() && !isLeaveAdmin) {
+    return res.status(400).json({ error: "That leave has already been taken." });
+  }
+  await withStaffLock(existing.staffId, () => prisma.leave.delete({ where: { id: existing.id } }));
+  if (existing.staffId !== req.user.id) {
+    notifyStaff(existing.staffId, {
+      type: "info",
+      message: `${req.user.name} cancelled your ${existing.type} leave for ${existing.start} to ${existing.end}. Those days are back in your allowance.`,
+      link: "leave",
+    });
+  }
+  res.json({ ok: true, days: existing.days });
 });
 
 // PUT /api/leave/:id/decision  (admin) — approve / reject with optional note
@@ -141,10 +196,11 @@ router.put("/:id/decision", requireAuth, requireAnyPage(LEAVE_ADMIN_PAGES), asyn
       const years = yearsSpanned(leave.start, leave.end);
       const [staff, adj, others] = await Promise.all([
         prisma.staff.findUnique({ where: { id: leave.staffId } }),
-        // Adjustments are NOT year-scoped: they are manual HR corrections with no way
-        // to date them from the UI, so scoping them made a "+3 carried over" silently
-        // vanish at midnight on 31 December.
-        prisma.adjustment.aggregate({ where: { staffId: leave.staffId }, _sum: { days: true } }),
+        // Adjustments belong to the leave year they were recorded in. Summing them
+        // across all time meant a one-off "+3 carried over" granted 3 extra days in
+        // every future year as well — and, because usedDays IS year-scoped, the two
+        // could never reconcile once the year turned.
+        prisma.adjustment.findMany({ where: { staffId: leave.staffId }, select: { days: true, date: true } }),
         // Every other approved allowance-consuming booking that could overlap any of
         // these years. We read the DATES (not the stored `days`) and recompute, so a
         // legacy row whose `days` was a raw calendar count can't over-charge.
@@ -162,7 +218,8 @@ router.put("/:id/decision", requireAuth, requireAnyPage(LEAVE_ADMIN_PAGES), asyn
         // The bookable pot excludes the bank holidays (normally 8), which are a
         // separate entitlement and never bookable: bookable = total + adjustments − 8.
         const bankPot = bankHolidayCount(Number(year));
-        const bookableAllowance = Math.max(0, (staff?.allowance || 0) + (adj._sum.days || 0) - bankPot);
+        const adjForYear = adj.reduce((n, a) => n + (String(a.date || "").slice(0, 4) === String(year) ? a.days : 0), 0);
+        const bookableAllowance = Math.max(0, (staff?.allowance || 0) + adjForYear - bankPot);
         const usedDays = others.reduce((n, l) => n + chargeableDays(l.start, l.end, year), 0);
         const thisDays = chargeableDays(leave.start, leave.end, year);
         if (thisDays === 0) continue; // this booking uses none of that year's pot

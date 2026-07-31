@@ -26,6 +26,15 @@ const pctTone = (p) => p == null ? { bg: "bg-slate-100", text: "text-slate-400",
     : p >= 75 ? { bg: "bg-teal-50", text: "text-teal-700", colour: "#0d9488", ring: "ring-teal-200", soft: "#f0fdfa" }
       : p >= 60 ? { bg: "bg-amber-50", text: "text-amber-700", colour: "#d97706", ring: "ring-amber-200", soft: "#fffbeb" }
         : { bg: "bg-rose-50", text: "text-rose-700", colour: "#e11d48", ring: "ring-rose-200", soft: "#fff1f2" };
+// GRADE bands are not attendance bands. The college's boundaries are 70 Distinction /
+// 60 Merit / 50 Pass / below 50 Fail, so a mark must never be coloured with the
+// attendance scale above — that painted every 50% Pass in the same red as a Fail,
+// contradicting the band tiles on the very same screen.
+const gradeTone = (p) => p == null ? { colour: "#94a3b8", soft: "#f1f5f9" }
+  : p >= 70 ? { colour: "#059669", soft: "#ecfdf5" }   // Distinction
+    : p >= 60 ? { colour: "#2563eb", soft: "#eff6ff" } // Merit
+      : p >= 50 ? { colour: "#ea580c", soft: "#fff7ed" } // Pass
+        : { colour: "#e11d48", soft: "#fff1f2" };       // Fail
 const fmtDate = (iso) => { if (!iso) return null; const [y, m, d] = iso.split("-"); const mm = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1] || m; return `${Number(d)} ${mm} ${y}`; };
 
 // Attendance statuses. These are STATUS colours, so they always ship with the letter
@@ -169,8 +178,16 @@ export default function StudentApp({ user, logout }) {
     if (a.status === "fulfilled") setAttendance(a.value);
     if (r.status === "fulfilled") setResults(r.value);
     if (q.status === "fulfilled") setQueries(q.value);
+    // ANY failure is reported, not only a total one. Requiring all three to fail meant
+    // a single broken call showed the student "Not graded yet" or "0 sessions" — an
+    // answer, and a wrong one — instead of telling them something didn't load.
     const failed = [a, r, q].filter(x => x.status === "rejected");
-    if (failed.length === 3) setErr(failed[0].reason?.message || "Could not load your information");
+    if (failed.length) {
+      const which = [a.status === "rejected" && "attendance", r.status === "rejected" && "results", q.status === "rejected" && "messages"].filter(Boolean);
+      setErr(failed.length === 3
+        ? (failed[0].reason?.message || "Could not load your information")
+        : `Could not load your ${which.join(" or ")}. Pull down to refresh — the rest of this page is up to date.`);
+    }
     setBusy(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -308,7 +325,7 @@ function Home({ user, attendance, results, queries, busy, err, setScreen, newRep
       : { t: "Your attendance needs attention.", c: "#e11d48" };
 
   const attTone = pctTone(attPct);
-  const avgTone = pctTone(avgPct);
+  const avgTone = gradeTone(avgPct);
 
   return (
     <div className="space-y-3.5 px-4 pb-8 pt-5">
@@ -507,10 +524,10 @@ function ResultsScreen({ results, busy, err }) {
 
   return (
     <div className="space-y-3.5 px-4 pb-8 pt-5">
-      <div className="fade-up rounded-3xl p-5 shadow-card-lg ring-1" style={{ background: pctTone(results.averagePct).soft, "--tw-ring-color": pctTone(results.averagePct).colour + "2e" }}>
+      <div className="fade-up rounded-3xl p-5 shadow-card-lg ring-1" style={{ background: gradeTone(results.averagePct).soft, "--tw-ring-color": gradeTone(results.averagePct).colour + "2e" }}>
         <div className="flex flex-col items-center">
           <Ring pct={results.averagePct ?? null} label="average" />
-          <span className="mt-2 rounded-xl px-3 py-1 text-sm font-extrabold ring-1" style={{ background: pctTone(results.averagePct).colour + "14", color: pctTone(results.averagePct).colour, "--tw-ring-color": pctTone(results.averagePct).colour + "33" }}>
+          <span className="mt-2 rounded-xl px-3 py-1 text-sm font-extrabold ring-1" style={{ background: gradeTone(results.averagePct).colour + "14", color: gradeTone(results.averagePct).colour, "--tw-ring-color": gradeTone(results.averagePct).colour + "33" }}>
             {results.averageGrade || "Not graded yet"}
           </span>
           <p className="mt-1.5 text-[11px] font-semibold text-slate-400">{results.graded} of {results.count} assessment{results.count === 1 ? "" : "s"} marked</p>
@@ -530,7 +547,7 @@ function ResultsScreen({ results, busy, err }) {
       <SectionTitle colour={ACCENT.results}>Your assessments</SectionTitle>
       <div className="space-y-2.5">
         {list.map(a => {
-          const t = pctTone(a.pct);
+          const t = gradeTone(a.pct);
           const done = a.marks != null;
           return (
             <Card key={a.id} className="!p-3.5">

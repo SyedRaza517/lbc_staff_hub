@@ -22,9 +22,14 @@ const CHALLENGE_TTL = "10m";
 // totpEnabled=true signs in with a password alone yet can never reset its password
 // or delete itself without a code it may no longer have. Flip this to true (and
 // uncomment the /login branches) to turn 2FA back on everywhere at once.
+// TOTP_ENFORCED controls whether 2FA is MANDATORY for everyone (which would push
+// accounts into enrolment on next sign-in). It stays off.
 const TOTP_ENFORCED = false;
-// True when this account must satisfy a second factor right now.
-const totpRequiredFor = (staff) => TOTP_ENFORCED && !!staff?.totpEnabled;
+// But an account that has DELIBERATELY enrolled is always challenged, regardless of
+// the switch above. Previously this was gated on TOTP_ENFORCED too, so a user who
+// turned two-step verification on signed in with a password alone while the API kept
+// reporting totpEnabled: true — the app promised a protection it wasn't applying.
+const totpRequiredFor = (staff) => !!staff?.totpEnabled;
 // The challenge carries tokenVersion for the same reason a session does: a password
 // reset must sever authentication that is already in flight, not just completed
 // sessions. Without it, someone holding the OLD password could start a sign-in,
@@ -150,14 +155,14 @@ router.post("/login", async (req, res) => {
 
   if (staffOk) {
     ATTEMPTS.delete(key); // successful login clears the counter
-    // --- Authenticator (2FA / TOTP) temporarily DISABLED ---
-    // The second-factor step is switched off for now so no one is sent to the
-    // authenticator setup/verify screen. To re-enable, uncomment the two branches
-    // below (and restore `mustSetupTotp: true` on sign-up approval in signup.js).
-    // if (staff.totpEnabled) {
-    //   return res.json({ mfaRequired: true, challengeToken: signChallenge(staff, "verify"), email: staff.email, name: staff.name });
-    // }
-    // if (staff.mustSetupTotp) {
+    // An account that has enrolled an authenticator is always challenged — otherwise
+    // the app shows "two-step verification: On" while letting a password alone in.
+    if (totpRequiredFor(staff)) {
+      return res.json({ mfaRequired: true, challengeToken: signChallenge(staff, "verify"), email: staff.email, name: staff.name });
+    }
+    // Forcing enrolment on accounts that never opted in stays off; flip TOTP_ENFORCED
+    // and restore `mustSetupTotp: true` on sign-up approval to make 2FA mandatory.
+    // if (TOTP_ENFORCED && staff.mustSetupTotp) {
     //   return res.json({ totpSetupRequired: true, challengeToken: signChallenge(staff, "setup"), email: staff.email, name: staff.name });
     // }
     return res.json({ token: signToken(staff), user: sStaff(staff) });

@@ -8,7 +8,14 @@ const hash = (pw) => bcrypt.hashSync(pw, 10);
 const today = new Date().toISOString().slice(0, 10);
 const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 const yr = new Date().getFullYear();
-const DEFAULT_PW = "password123";
+// Demo passwords come from the environment. A literal here is a committed credential,
+// and a seeded account that reaches a real database is a real way in — so refuse to
+// run rather than ship one. Set SEED_PASSWORD before seeding a demo dataset.
+const DEFAULT_PW = process.env.SEED_PASSWORD || "";
+if (!DEFAULT_PW || DEFAULT_PW.length < 12) {
+  console.error("\n✗ Set SEED_PASSWORD (12+ characters) before seeding. It is never hard-coded here.\n");
+  process.exit(1);
+}
 const daysBetween = (a, b) => { const d1 = new Date(a + "T00:00:00Z"), d2 = new Date(b + "T00:00:00Z"); return Math.max(1, Math.round((d2 - d1) / 86400000) + 1); };
 
 /* ---------- HND attendance registers ---------- */
@@ -169,7 +176,7 @@ async function main() {
     }
   }
 
-  console.log("\nSeed complete. Login credentials (all use password: " + DEFAULT_PW + ")");
+  console.log("\nSeed complete. All demo accounts use the SEED_PASSWORD you supplied (not printed).");
   console.log("  ADMIN:  admin@lbc.ac.uk");
   console.log("  STAFF:  j.whitfield@lbc.ac.uk, a.rahman@lbc.ac.uk, d.okoye@lbc.ac.uk, s.marin@lbc.ac.uk, p.nair@lbc.ac.uk");
 }

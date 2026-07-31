@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sStaff } = require("../serializers");
-const { requireAuth, requireAdmin, requireSuperAdmin, requireAnyPage, hashPassword } = require("../auth");
+const { requireAuth, requireAdmin, requireSuperAdmin, requireAnyPage, hasPage, hashPassword } = require("../auth");
 const { notifyStaff } = require("../notify");
 const { isInt32, MAX_ALLOWANCE_DAYS, isString, isNonEmptyString, isHomeSite, ADMIN_PAGES } = require("../validate");
 const { sendInvite, unguessablePassword } = require("../invite");
@@ -31,9 +31,17 @@ router.get("/", requireAuth, async (req, res) => {
   const pages = u.adminPages; // null = full access
   const canManageStaff = u.accountRole === "ADMIN" && (u.isSuperAdmin || pages == null || pages.includes("staff") || pages.includes("settings"));
   if (canManageStaff) return res.json(staff.map(sStaff));
+  // A leave admin needs each person's ALLOWANCE to show a balance or book on their
+  // behalf — without it the client computed 0 for everyone, showed negative remaining
+  // days, and disabled the booking button entirely. It is an entitlement figure, not
+  // the personal data (email, 2FA state, admin pages) this shape exists to withhold.
+  const leaveAdmin = hasPage(u, ["balances", "calendar", "requests", "approvals"]);
   res.json(staff.map((s) => s.id === u.id
     ? sStaff(s)
-    : { id: s.id, name: s.name, role: s.jobTitle, dept: s.dept, initials: s.initials, colour: s.colour }));
+    : {
+        id: s.id, name: s.name, role: s.jobTitle, dept: s.dept, initials: s.initials, colour: s.colour,
+        ...(leaveAdmin ? { allowance: s.allowance } : {}),
+      }));
 });
 
 // POST /api/staff  (admin)
@@ -83,8 +91,23 @@ router.post("/", requireAuth, requireAnyPage(["staff", "settings"]), async (req,
   }
 });
 
+// The Super Admin is the only account that can grant or revoke admin pages, so it must
+// not be editable, deletable or 2FA-strippable by the very admins it governs. Without
+// this, an admin holding only the "staff" page could point the Super Admin's email at
+// their own inbox, run a password reset, and take the account over — or simply delete
+// it and freeze all access management for good. Only another Super Admin may act on one.
+function guardSuperAdmin(target, req) {
+  if (!target?.isSuperAdmin) return null;
+  if (req.user?.isSuperAdmin) return null;
+  return "Only a Super Admin can change or remove the Super Admin account";
+}
+
 // PUT /api/staff/:id  (admin)
 router.put("/:id", requireAuth, requireAnyPage(["staff", "settings"]), async (req, res) => {
+  const target = await prisma.staff.findUnique({ where: { id: req.params.id } });
+  if (!target) return res.status(404).json({ error: "Staff not found" });
+  const blocked = guardSuperAdmin(target, req);
+  if (blocked) return res.status(403).json({ error: blocked });
   const { name, role, dept, email, allowance, site } = req.body || {};
   const data = {};
   if (name != null) {
@@ -167,6 +190,8 @@ router.post("/:id/invite", requireAuth, requireAnyPage(["staff", "settings"]), a
 router.delete("/:id/totp", requireAuth, requireAnyPage(["staff", "settings"]), async (req, res) => {
   const staff = await prisma.staff.findUnique({ where: { id: req.params.id } });
   if (!staff) return res.status(404).json({ error: "Staff not found" });
+  const blockedTotp = guardSuperAdmin(staff, req);
+  if (blockedTotp) return res.status(403).json({ error: blockedTotp });
   if (!staff.totpEnabled && !staff.totpSecret) return res.status(400).json({ error: "Two-step verification is not set up for this account" });
 
   const updated = await prisma.staff.update({
@@ -192,6 +217,8 @@ router.delete("/:id", requireAuth, requireAnyPage(["staff", "settings"]), async 
   if (req.params.id === req.user.id) return res.status(400).json({ error: "You cannot delete your own account" });
   const existing = await prisma.staff.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Staff not found" });
+  const blockedDel = guardSuperAdmin(existing, req);
+  if (blockedDel) return res.status(403).json({ error: blockedDel });
   try {
     // Delete EVERYTHING tied to this person, in one transaction.
     //

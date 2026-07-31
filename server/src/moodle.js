@@ -22,15 +22,32 @@ const TOKEN = () => process.env.MOODLE_TOKEN || "";
 const isConfigured = () => Boolean(BASE() && TOKEN());
 
 // --- Moodle REST -----------------------------------------------------------------
+// A single Moodle call must never hang. Without a deadline a stalled VLE left the
+// sync awaiting a response forever, which pinned the in-flight lock: status reported
+// "running" indefinitely, every later sync 409'd, the nightly job skipped every night,
+// and only a restart recovered — with nothing logged to say why.
+const CALL_TIMEOUT_MS = 120000;
+
 async function call(wsfunction, params = {}) {
   if (!isConfigured()) throw new Error("Moodle is not configured (set MOODLE_URL and MOODLE_TOKEN)");
   const body = new URLSearchParams({ wstoken: TOKEN(), moodlewsrestformat: "json", wsfunction });
   for (const [k, v] of Object.entries(params)) body.append(k, String(v));
-  const res = await fetch(`${BASE()}/webservice/rest/server.php`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${BASE()}/webservice/rest/server.php`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e?.name === "AbortError") throw new Error(`${wsfunction}: Moodle did not respond within ${CALL_TIMEOUT_MS / 1000}s`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   const text = await res.text();
   let data;
   try { data = JSON.parse(text); }
@@ -86,6 +103,22 @@ function termsBySectionId(sections) {
 }
 
 const clean = (s) => String(s ?? "").replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").trim();
+
+// The college's student number, which is what a student types when they sign up.
+//
+// Moodle's `idnumber` was the obvious source, but on this site it holds an opaque
+// internal hash ("_-_AQaJw5yr2TMLcSRJLR5qIfg"), not the college number. The real
+// number is the local part of the college email — 100104@londonbrookescollege.co.uk.
+// Importing the hash left every student with a reference nobody could ever quote,
+// so sign-up could not match them and staff could not search for them.
+const COLLEGE_NUMBER = /^\d{4,10}$/;
+function collegeNumber(idnumber, email) {
+  const id = clean(idnumber);
+  if (COLLEGE_NUMBER.test(id)) return id;
+  const local = String(email || "").split("@")[0].trim();
+  if (COLLEGE_NUMBER.test(local)) return local;
+  return id;  // nothing better available — keep whatever Moodle gave us
+}
 const initialsOf = (f, l) => `${clean(f)[0] || ""}${clean(l)[0] || ""}`.toUpperCase() || "??";
 const PALETTE = ["#1a3a8f", "#9e1b32", "#0d7a5f", "#b45309", "#6d28d9", "#0e7490", "#be123c"];
 const colourFor = (seed) => PALETTE[Math.abs(String(seed).split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % PALETTE.length];
@@ -184,18 +217,28 @@ async function syncFromMoodle({ dryRun = false } = {}) {
       // A unit outside every "Year N - Term M" section keeps year/term null rather
       // than being guessed at — it is reported below so someone can place it.
       const place = placeOf.get(sec.id) || null;
-      if (!place) unplaced.push(parsed.code);
       const data = {
         code: parsed.code,
         unitNumber: parsed.number,
         name: parsed.name,
-        year: place ? place.year : null,
-        termNumber: place ? place.termNumber : null,
         courseId: dbCourse ? dbCourse.id : null,
         moodleSectionId: sec.id,
         moodleCourseId: course.id,
       };
       let unit = unitBySection.get(sec.id) || unitByCode.get(parsed.code) || null;
+      // Year/term follow Moodle ONLY when Moodle actually places the unit. When it
+      // doesn't, the existing value is left alone: previously this wrote null every
+      // run, so a placement an admin set by hand — which the note below explicitly
+      // tells them to do — was wiped again at 02:00, night after night.
+      if (place) {
+        data.year = place.year;
+        data.termNumber = place.termNumber;
+      } else if (!unit) {
+        data.year = null;
+        data.termNumber = null;
+      }
+      // Only worth reporting if nobody has placed it yet, in Moodle or by hand.
+      if (!place && !(unit && unit.year != null)) unplaced.push(parsed.code);
       if (unit) {
         summary.unitsUpdated++;
         if (!dryRun) unit = await prisma.unit.update({ where: { id: unit.id }, data });
@@ -221,7 +264,9 @@ async function syncFromMoodle({ dryRun = false } = {}) {
 
     // ---------- Students (role "student" only) ----------
     const studentUsers = users.filter((u) => (u.roles || []).some((r) => r.shortname === "student"));
-    const refs = studentUsers.map((u) => clean(u.idnumber)).filter(Boolean);
+    // Both the derived college number AND Moodle's raw idnumber, so students imported
+    // by an earlier run — which stored the raw hash — are still found and repaired.
+    const refs = studentUsers.flatMap((u) => [collegeNumber(u.idnumber, u.email), clean(u.idnumber)]).filter(Boolean);
     const emails = studentUsers.map((u) => clean(u.email).toLowerCase()).filter(Boolean);
     const known = await prisma.student.findMany({
       where: {
@@ -239,15 +284,23 @@ async function syncFromMoodle({ dryRun = false } = {}) {
     const studentByMoodleId = new Map();
     for (const u of studentUsers) {
       const email = clean(u.email).toLowerCase();
-      const ref = clean(u.idnumber);
+      const ref = collegeNumber(u.idnumber, u.email);
+      const rawRef = clean(u.idnumber);
       // Match on a link made previously, then the college's own student number,
-      // then email.
-      let st = byMoodleId.get(u.id) || (ref && byRef.get(ref)) || (email && byEmail.get(email)) || null;
+      // then the raw Moodle idnumber an earlier run may have stored, then email.
+      let st = byMoodleId.get(u.id) || (ref && byRef.get(ref)) || (rawRef && byRef.get(rawRef)) || (email && byEmail.get(email)) || null;
       if (st) {
         summary.studentsMatched++;
-        if (!dryRun && st.moodleUserId !== u.id) {
-          try { st = await prisma.student.update({ where: { id: st.id }, data: { moodleUserId: u.id } }); }
-          catch (_) { /* another student already claims this Moodle id — leave the link alone */ }
+        if (!dryRun) {
+          // Repair a reference stored before we knew idnumber was a hash. Guarded,
+          // because the number is unique and another row may already hold it.
+          const fix = {};
+          if (st.moodleUserId !== u.id) fix.moodleUserId = u.id;
+          if (ref && st.studentRef !== ref && COLLEGE_NUMBER.test(ref)) fix.studentRef = ref;
+          if (Object.keys(fix).length) {
+            try { st = await prisma.student.update({ where: { id: st.id }, data: fix }); }
+            catch (_) { /* another student already holds that number or Moodle id — leave as is */ }
+          }
         }
       } else {
         if (!ref && !email) { note(`${label}: a Moodle student has neither a student number nor an email — skipped.`); continue; }
@@ -387,7 +440,7 @@ async function syncFromMoodle({ dryRun = false } = {}) {
           }
         } else if (existing.marks !== marks || existing.submittedAt !== stamps.submittedAt || existing.gradedOn !== stamps.gradedOn) {
           summary.gradesUpdated++;
-          if (!dryRun) await prisma.assessmentGrade.update({ where: { id: existing.id }, data: { marks, source: "moodle", ...stamps } });
+          if (!dryRun) await prisma.assessmentGrade.update({ where: { id: existing.id }, data: { marks, source: "moodle", feedback: clean(item.feedback).slice(0, 2000), ...stamps } });
         }
       }
     }

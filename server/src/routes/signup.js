@@ -25,7 +25,30 @@ const str = (v) => (typeof v === "string" ? v.trim() : "");
 // `kind` is "staff" (default) or "student". Student requests carry only name/email/
 // password; they match an existing Student by email when one exists, and always
 // wait for admin approval.
+// Sign-up is public and does real work per call: a synchronous bcrypt hash (which
+// blocks the single Node thread) plus a notification, an email and a push to EVERY
+// admin. Unlimited, a loop both stalls the API and mailbombs the administrators, so
+// each address gets a small burst allowance.
+const SIGNUP_HITS = new Map();
+const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
+const SIGNUP_MAX = 5;
+function signupAllowed(ip) {
+  const now = Date.now();
+  const hits = (SIGNUP_HITS.get(ip) || []).filter((t) => now - t < SIGNUP_WINDOW_MS);
+  if (hits.length >= SIGNUP_MAX) { SIGNUP_HITS.set(ip, hits); return false; }
+  hits.push(now);
+  SIGNUP_HITS.set(ip, hits);
+  // Cheap sweep so the map can't grow without bound on a long-lived process.
+  if (SIGNUP_HITS.size > 5000) {
+    for (const [k, v] of SIGNUP_HITS) if (!v.some((t) => now - t < SIGNUP_WINDOW_MS)) SIGNUP_HITS.delete(k);
+  }
+  return true;
+}
+
 router.post("/", async (req, res) => {
+  if (!signupAllowed(req.ip)) {
+    return res.status(429).json({ error: "Too many sign-up attempts from this connection. Please try again later." });
+  }
   const kind = str(req.body?.kind) === "student" ? "student" : "staff";
   const name = str(req.body?.name);
   const email = str(req.body?.email).toLowerCase();
@@ -63,8 +86,12 @@ router.post("/", async (req, res) => {
       // another student's ID, so never auto-link. An admin resolves it by hand.
       matchNote = ` — WARNING: college ID ${collegeId} is on file under a different email; check before approving`;
     } else if (!byRef && byEmail) {
-      // Email is the login identifier, so trust it, but flag the ID discrepancy.
-      student = byEmail; matchNote = ` — email matches a student record whose college ID differs from ${collegeId}; please verify`;
+      // NEVER auto-link on the email alone. Nothing in this flow proves the applicant
+      // controls that mailbox, and every student email here is the college number at a
+      // known domain — so trusting it let anyone claim any unclaimed account simply by
+      // guessing the address. The admin is shown the candidate and must link it
+      // deliberately; the request itself stays unlinked.
+      matchNote = ` — WARNING: this email is on a student record whose college ID is not ${collegeId}; confirm identity before approving`;
     } else if (byRef && byEmail) {
       // Both exist but are different people — definitely do not link either.
       matchNote = ` — WARNING: college ID ${collegeId} and this email belong to two different student records; check before approving`;
@@ -160,20 +187,26 @@ router.put("/:id/decision", requireAuth, requirePage("signups"), async (req, res
   // fresh one if there was no match) with the password they chose at sign-up. No 2FA.
   if (reqRow.kind === "student") {
     let student = reqRow.studentId ? await prisma.student.findUnique({ where: { id: reqRow.studentId } }) : null;
-    // Re-resolve for records an admin created between sign-up and approval. Email is
-    // the login identifier, so it is the only safe key to resolve by on its own.
-    if (!student) student = await prisma.student.findUnique({ where: { email: reqRow.email } });
-    // The college ID may ONLY be used when it agrees with the email — resolving by
-    // studentRef alone re-linked exactly the mistyped-ID requests that sign-up
-    // deliberately refused to link, which then wrote this applicant's password onto
-    // another student's record and locked that student out for good.
-    if (!student && reqRow.collegeId) {
-      const byRef = await prisma.student.findUnique({ where: { studentRef: reqRow.collegeId } });
-      if (byRef && byRef.email.toLowerCase() === String(reqRow.email).toLowerCase()) {
-        student = byRef;
-      } else if (byRef) {
+    // Re-resolve for records an admin created between sign-up and approval — but ONLY
+    // when the college ID and the email name the same person, exactly as sign-up
+    // requires. Resolving on either key alone is what let an applicant claim an
+    // account they had merely guessed the address of: every student email here is the
+    // college number at a known domain, so email is a public identifier, not proof.
+    if (!student) {
+      const [byEmail, byRef] = await Promise.all([
+        prisma.student.findUnique({ where: { email: reqRow.email } }),
+        reqRow.collegeId ? prisma.student.findUnique({ where: { studentRef: reqRow.collegeId } }) : Promise.resolve(null),
+      ]);
+      if (byRef && byEmail && byRef.id === byEmail.id) {
+        student = byRef;                        // both agree — safe to link
+      } else if (byRef || byEmail) {
+        const which = byRef && byEmail
+          ? `College ID ${reqRow.collegeId} and this email belong to two different student records.`
+          : byRef
+            ? `College ID ${reqRow.collegeId} is on file under a different email (${byRef.email}).`
+            : `This email is on a student record whose college ID is not ${reqRow.collegeId || "(none given)"}.`;
         return res.status(409).json({
-          error: `College ID ${reqRow.collegeId} belongs to a different student (${byRef.email}). Check the ID with the applicant, correct the student record, or reject this request — approving it would overwrite someone else's account.`,
+          error: `${which} Approving would overwrite the wrong account. Confirm the applicant's identity, correct the student record so its college ID and email agree, then approve.`,
         });
       }
     }

@@ -91,6 +91,10 @@ const sAssessment = (a) => ({
 const sGrade = (g) => ({
   id: g.id, assessmentId: g.assessmentId, studentId: g.studentId, marks: g.marks,
   feedback: g.feedback, gradedBy: g.gradedBy, gradedAt: g.gradedAt,
+  // Where the mark came from ("manual" = typed here, "moodle" = imported) and the
+  // VLE's own dates. Exposed so staff can see provenance, and so the sync's promise
+  // that it never overwrites hand-entered marks is verifiable from outside.
+  source: g.source ?? "manual", submittedAt: g.submittedAt ?? null, gradedOn: g.gradedOn ?? null,
 });
 
 /* ---------- Timesheets ---------- */

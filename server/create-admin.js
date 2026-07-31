@@ -1,34 +1,63 @@
-// One-off helper: recreate an admin login after the database was reset by the
-// Course/Unit rename push. Uses the Staff table (unchanged by the rename), so it
-// works even with the current Prisma client.
+// One-off helper: create or reset the super-admin login.
 //
-//   Run it from the server folder:
-//     cd server
-//     node create-admin.js
+// The password is NEVER hard-coded here. This file is committed, so a literal in it
+// is a published credential for anyone holding the repo — which is exactly what it
+// used to be ("raza@lbc.ac.uk / 123456789", printed to the console for good measure).
+// It now comes from the environment and must be a real one.
 //
-// Then sign in with:  raza@lbc.ac.uk  /  123456789   (super admin, full access)
+//   cd server
+//   ADMIN_EMAIL=you@lbc.ac.uk ADMIN_PASSWORD='a-long-passphrase' node create-admin.js
+//
+// On Windows CMD set the variables first with `set VAR=value`; in PowerShell use
+// `$env:VAR = "value"`.
 require("dotenv").config();
 const { PrismaClient } = require("@prisma/client");
 const { hashPassword } = require("./src/auth");
 const prisma = new PrismaClient();
 
+const MIN_PASSWORD = 12;
+// Passwords this project has shipped before, plus the usual suspects. Refused outright
+// so a "temporary" one can't quietly become the production credential.
+const BANNED = ["123456789", "password123", "password", "changeme", "admin123"];
+
 (async () => {
+  const email = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+  const password = String(process.env.ADMIN_PASSWORD || "");
+  const name = String(process.env.ADMIN_NAME || "Administrator").trim();
+
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    console.error("\n✗ Set ADMIN_EMAIL to a valid address.\n");
+    process.exitCode = 1; return;
+  }
+  if (password.length < MIN_PASSWORD) {
+    console.error(`\n✗ Set ADMIN_PASSWORD to at least ${MIN_PASSWORD} characters.\n`);
+    process.exitCode = 1; return;
+  }
+  if (BANNED.includes(password.toLowerCase())) {
+    console.error("\n✗ That is one of the default passwords this project used to ship. Choose another.\n");
+    process.exitCode = 1; return;
+  }
+
   try {
-    let passwordHash = hashPassword("123456789");
+    let passwordHash = hashPassword(password);
     if (passwordHash && typeof passwordHash.then === "function") passwordHash = await passwordHash;
+    const initials = name.split(/\s+/).map((p) => p[0] || "").join("").slice(0, 2).toUpperCase() || "A";
     const s = await prisma.staff.upsert({
-      where: { email: "raza@lbc.ac.uk" },
-      update: { passwordHash, accountRole: "ADMIN", isSuperAdmin: true, adminPages: null, pendingActivation: false, tokenVersion: 0 },
+      where: { email },
+      // tokenVersion increments so any session or reset link issued under the previous
+      // password stops working the moment this runs.
+      update: { passwordHash, accountRole: "ADMIN", isSuperAdmin: true, adminPages: null, pendingActivation: false, tokenVersion: { increment: 1 } },
       create: {
-        name: "Raza", jobTitle: "Lecturer", dept: "Teaching", email: "raza@lbc.ac.uk",
+        name, jobTitle: "Administrator", dept: "Administration", email,
         passwordHash, accountRole: "ADMIN", isSuperAdmin: true, adminPages: null,
-        initials: "R", colour: "#6d28d9", allowance: 28, pendingActivation: false,
+        initials, colour: "#6d28d9", allowance: 28, pendingActivation: false,
       },
     });
-    console.log("\n✅  Admin ready:", s.email, "(super admin)");
-    console.log("    Password: 123456789\n");
+    console.log(`\n✓ Super admin ready: ${s.email}`);
+    console.log("  The password is the one you passed in — deliberately not printed here.\n");
   } catch (e) {
-    console.error("\n❌  Failed:", e.message, "\n");
+    console.error("\n✗ Failed:", e.message, "\n");
+    process.exitCode = 1;
   } finally {
     await prisma.$disconnect();
   }

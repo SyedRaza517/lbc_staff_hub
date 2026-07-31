@@ -154,6 +154,10 @@ const ATT_STATUSES = [
 const ATT_POINTS = { P: 2, L: 1, E: 1, A: 0 };
 const ATT_MAX = 2;
 const attMeta = (key) => ATT_STATUSES.find(s => s.key === key) || null;
+// The Pass boundary for GRADES (not attendance). Every pass rate and every band in
+// the client must derive from this one value — the server holds the same constant in
+// routes/assessments.js. Three separate literals had already drifted apart once.
+const PASS_MARK = 50;
 // Traffic-light tone for an attendance percentage. Thresholds match the college's
 // attendance-rating bands (see riskBand): under 40% is High Risk, 40–50 Monitor,
 // 50–70 Good, 70+ on track. Keeping one set of cut-offs stops the same figure from
@@ -1575,12 +1579,16 @@ function ExecutiveDashboard({ store }) {
       const [execRes, monthlyRes] = results;
       if (withExec && execRes.status === "fulfilled") setExec(execRes.value);
       if (monthlyRes.status === "fulfilled") setMonthly(monthlyRes.value);
+      // A failed reload must DROP the old attendance, not keep it. Leaving it in place
+      // showed the previous course's percentage, sessions and month chart under the
+      // new course's name — worse than showing nothing, because it looked right.
+      else setMonthly(null);
       const failed = results.filter((r) => r.status === "rejected").map((r) => r.reason);
       if (failed.length) {
         const denied = failed.some((e) => e?.status === 403);
         setErr(denied
           ? "Some figures are hidden — your account doesn't have access to all of this data."
-          : (failed[0]?.message || "Could not load some dashboard data"));
+          : `${failed[0]?.message || "Could not load some dashboard data"} — the attendance figures below are unavailable, not zero.`);
       }
       setRefreshed(new Date());
     } catch (e) {
@@ -1588,7 +1596,9 @@ function ExecutiveDashboard({ store }) {
     } finally { setLoading(false); }
   }, []);
   useEffect(() => { load({}, true); }, [load]);
-  const stageParts = (s) => (s === "all" ? {} : { year: s.split("-")[0], termNumber: s.split("-")[1] });
+  // Defensive on the argument: a missing stage previously threw inside the Refresh
+  // handler, where nothing catches it, so the button silently did nothing at all.
+  const stageParts = (s) => (!s || s === "all" ? {} : { year: s.split("-")[0], termNumber: s.split("-")[1] });
   const scopeOf = (c, u, s) => ({ ...(c !== "all" ? { courseId: c } : {}), ...(u !== "all" ? { unitId: u } : {}), ...stageParts(s) });
   // Units are listed per course, so changing the course must clear a unit that isn't
   // in it — otherwise the two filters AND together into an impossible scope and every
@@ -1628,23 +1638,28 @@ function ExecutiveDashboard({ store }) {
   const earned = win.reduce((a, m) => a + m.P * 2 + m.L + m.E, 0);
   const possible = win.reduce((a, m) => a + (m.P + m.L + m.E + m.A) * 2, 0);
   const attPct = possible ? Math.round(earned / possible * 1000) / 10 : null;
-  const totalMarks = win.reduce((a, m) => a + m.P + m.L + m.E + m.A, 0);
+  // null when the attendance request failed — 0 would read as "nobody attended".
+  const totalMarks = monthly ? win.reduce((a, m) => a + m.P + m.L + m.E + m.A, 0) : null;
   // Sessions in the selected Year, derived from the months actually in scope, so this
   // tile tracks the Year filter like the other attendance figures. (monthly.sessions
   // is the course/unit-scoped all-time count, used only when no year is selected.)
-  const totalSessions = year === "all" ? (monthly?.sessions ?? 0) : null;
+  // null (not 0) when the attendance request failed, so a fetch error shows "—"
+  // rather than claiming the college has no sessions at all.
+  const totalSessions = year === "all" ? (monthly ? monthly.sessions ?? 0 : null) : null;
 
   const allCourses = exec?.courses || [];
   const courses = allCourses.filter(c => course === "all" || c.courseId === course);
   // Only plot courses that actually have a measurable pass rate.
   const courseData = courses.filter(c => c.passRate != null).map(c => ({ code: c.code, passRate: c.passRate }));
   const shownStudents = course === "all" ? (exec?.totals?.students ?? store.students.length) : courses.reduce((a, c) => a + c.studentCount, 0);
-  const shownPassed = course === "all" ? (exec?.totals?.studentsPassed ?? 0) : courses.reduce((a, c) => a + c.studentsPassed, 0);
+  // Same rule for the exec-summary figures: a failed load shows "—", not a
+  // confident zero beside a Pass Rate that correctly shows "—".
+  const shownPassed = course === "all" ? (exec ? exec?.totals?.studentsPassed ?? 0 : null) : courses.reduce((a, c) => a + c.studentsPassed, 0);
   // Pass rate counts only ASSESSED students; null (—) until someone has been graded.
   const shownGraded = course === "all" ? (exec?.totals?.graded ?? 0) : courses.reduce((a, c) => a + (c.graded || 0), 0);
   const shownPassRate = shownGraded ? Math.round(shownPassed / shownGraded * 1000) / 10 : null;
   const totalCourses = course === "all" ? (exec?.totals?.courses ?? store.courses.length) : 1;
-  const assessmentsCount = course === "all" ? (exec?.totals?.assessments ?? store.assessments.length) : courses.reduce((a, c) => a + (c.assessments || 0), 0);
+  const assessmentsCount = course === "all" ? (exec ? exec?.totals?.assessments ?? store.assessments.length : (store.assessments.length || null)) : courses.reduce((a, c) => a + (c.assessments || 0), 0);
   // A Unit filter narrows attendance only — say so rather than mixing scopes silently.
   // Both the Unit and Year/Term filters narrow the attendance query only — the
   // student and results figures come from exec-summary, which is course-wide.
@@ -1653,7 +1668,7 @@ function ExecutiveDashboard({ store }) {
   return (
     <>
       <AdminHeader title="Executive Dashboard" subtitle="College-wide attendance & results at a glance" Icon={BarChart3}
-        action={<div className="flex items-center gap-2 text-[11px] text-slate-400">{refreshed && <span className="hidden sm:inline">Last refreshed {refreshed.toLocaleString("en-GB")}</span>}<button onClick={() => load(scopeOf(course, unit), true)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button></div>} />
+        action={<div className="flex items-center gap-2 text-[11px] text-slate-400">{refreshed && <span className="hidden sm:inline">Last refreshed {refreshed.toLocaleString("en-GB")}</span>}<button onClick={() => load(scopeOf(course, unit, stage), true)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" title="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button></div>} />
       <div className="mb-4 flex flex-wrap gap-2">
         <FilterSelect label="Year" value={year} onChange={setYear} options={[{ v: "all", l: "All years" }, ...years.map(y => ({ v: y, l: y }))]} />
         {/* "__none__" is a synthetic bucket for students with no course, not a real
@@ -1663,7 +1678,7 @@ function ExecutiveDashboard({ store }) {
           <FilterSelect label="Year / Term" value={stage} onChange={onStage}
             options={[{ v: "all", l: "Whole course" }, ...stages.map(s => ({ v: s, l: `Year ${s.split("-")[0]} · Term ${s.split("-")[1]}` }))]} />
         )}
-        <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...unitsForCourse.map(m => ({ v: m.id, l: m.code }))]} />
+        <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...unitsForCourse.map(m => ({ v: m.id, l: `${m.code} — ${m.name}` }))]} />
       </div>
       {err && <div className="mb-3 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 ring-1 ring-rose-200"><AlertCircle size={15} /> {err}</div>}
       {unitScoped && <p className="mb-3 text-[11px] text-slate-400">The {unit !== "all" && stage !== "all" ? "Year / Term and Unit filters apply" : unit !== "all" ? "Unit filter applies" : "Year / Term filter applies"} to the attendance figures; student and results figures cover the whole {course === "all" ? "college" : "course"}.</p>}
@@ -1671,11 +1686,11 @@ function ExecutiveDashboard({ store }) {
         <ExecKpi label="Total Students" value={shownStudents} />
         <ExecKpi label="Total Courses" value={totalCourses} />
         <ExecKpi label="Attendance %" value={attPct == null ? "—" : `${attPct}%`} tone={pctColour(attPct)} />
-        <ExecKpi label="Assessments" value={assessmentsCount} />
+        <ExecKpi label="Assessments" value={assessmentsCount == null ? "—" : assessmentsCount} />
         <ExecKpi label="Student Pass Rate" value={shownPassRate == null ? "—" : `${shownPassRate}%`} tone={pctColour(shownPassRate)} sub={shownGraded ? `of ${shownGraded} assessed` : "no marks yet"} />
-        <ExecKpi label="Students Passed" value={shownPassed} tone="#0d7a5f" />
+        <ExecKpi label="Students Passed" value={shownPassed == null ? "—" : shownPassed} tone="#0d7a5f" />
         <ExecKpi label="Total Sessions" value={totalSessions == null ? "—" : totalSessions} sub={totalSessions == null ? "all years only" : undefined} />
-        <ExecKpi label="Total Attendance" value={kNum(totalMarks)} sub="marks recorded" />
+        <ExecKpi label="Total Attendance" value={totalMarks == null ? "—" : kNum(totalMarks)} sub="marks recorded" />
       </div>
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         <ChartCard title="Attendance % by Year and Month">
@@ -2274,7 +2289,10 @@ function AdminBalances({ store }) {
   const filteredStaff = store.staff.filter(s => !ql || s.name.toLowerCase().includes(ql) || (s.dept || "").toLowerCase().includes(ql));
   const paged = usePaged(filteredStaff, 12, ql);
   const exportBalances = () => {
-    const bank = store.bankHolidayDaysUsed();
+    // The bank-holiday ENTITLEMENT (8), not how many have elapsed. The elapsed
+    // count made the row fail to add up (Base - Used - Bank != Remaining) and
+    // drifted upward all year, so two exports never agreed.
+    const bank = store.bankHolidayTotal;
     const rows = store.staff.map(s => { const base = s.allowance; const adjv = store.adjDays(s.id); const used = store.usedDays(s.id); const remaining = store.remaining(s.id); return { staff: s.name, dept: s.dept, base, adj: adjv, used, bank, remaining }; });
     downloadCSV("holiday-balances.csv", [
       { key: "staff", label: "Staff" }, { key: "dept", label: "Dept" }, { key: "base", label: "Base allowance" }, { key: "adj", label: "Adjustments" }, { key: "used", label: "Leave used" }, { key: "bank", label: "Bank holidays" }, { key: "remaining", label: "Remaining" },
@@ -2297,7 +2315,7 @@ function AdminBalances({ store }) {
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400"><tr><th className="px-5 py-3">Staff</th><th className="px-5 py-3">Base</th><th className="px-5 py-3">Adj</th><th className="px-5 py-3">Used</th><th className="px-5 py-3">Bank</th><th className="px-5 py-3">Remaining</th><th className="px-5 py-3 w-40">Usage</th><th className="px-5 py-3">Actions</th></tr></thead>
           <tbody>
-            {paged.slice.map(s => { const bookable = store.bookableAllowance(s.id); const used = store.usedDays(s.id); const bank = store.bankHolidayDaysUsed(); const left = store.remaining(s.id); const adjv = store.adjDays(s.id); const pct = bookable > 0 ? Math.round(used / bookable * 100) : 0; return (
+            {paged.slice.map(s => { const bookable = store.bookableAllowance(s.id); const used = store.usedDays(s.id); const bank = store.bankHolidayTotal; const left = store.remaining(s.id); const adjv = store.adjDays(s.id); const pct = bookable > 0 ? Math.round(used / bookable * 100) : 0; return (
               <tr key={s.id} className="border-t border-slate-100 transition-colors duration-150 hover:bg-blue-50/40">
                 <td className="px-5 py-3"><div className="flex items-center gap-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-sm" style={{ background: s.colour }}>{s.initials}</span><div><p className="font-semibold text-slate-700">{s.name}</p><p className="text-[11px] text-slate-400">{s.dept}</p></div></div></td>
                 <td className="px-5 py-3 font-medium text-slate-600">{s.allowance}d</td>
@@ -3013,7 +3031,10 @@ function HndSessions({ store, unitId, setUnitId, selected, onTake, scoped }) {
     const marks = s.markedCount > 0
       ? `\n\nIt has ${s.markedCount} mark${s.markedCount === 1 ? "" : "s"} recorded; deleting it removes those marks and changes attendance percentages.`
       : "\n\nNo attendance has been marked on it yet.";
-    if (!window.confirm(`Delete the session on ${fmtDate(s.date)} (${s.startTime}–${s.endTime})?${marks}\n\nThis cannot be undone.`)) return;
+    // s.start / s.end — the serializer renames startTime/endTime. Reading the old
+    // names printed "undefined–undefined", so the two registers that share a date were
+    // indistinguishable and it was easy to delete the marked one by mistake.
+    if (!window.confirm(`Delete the ${s.kind || "session"} on ${fmtDate(s.date)} at ${s.start}–${s.end}?${marks}\n\nThis cannot be undone.`)) return;
     await store.removeSession(s.id);
   };
   const exportSessions = () => {
@@ -3200,15 +3221,28 @@ function HndRegister({ store, sessionId, onBack }) {
   const setRemark = (studentId, remark) => { if (readOnly) return; setDraft(d => ({ ...d, [studentId]: { ...d[studentId], remark } })); };
   const applyBulk = (status) => {
     if (readOnly) return;
+    // Marking a whole cohort Absent is one click, it lands straight in the attendance
+    // denominator, and every student is now enrolled on every unit of their course —
+    // including units that start next year. Confirm before writing a zero-percent day
+    // onto a register whose teaching hasn't begun.
+    if (status === "A" && session?.date && session.date > today) {
+      const n = rows.length;
+      if (!window.confirm(`Mark all ${n} student${n === 1 ? "" : "s"} ABSENT for ${fmtDate(session.date)}?\n\nThat date is in the future, so this counts ${n === 1 ? "them" : "them all"} as having missed a class that hasn't happened yet, and it will pull their attendance percentage down.`)) return;
+    }
     setBulk(status);
     if (!status) return;
     setDraft(d => Object.fromEntries(rows.map(r => [r.student.id, { ...d[r.student.id], status }])));
   };
 
-  const dirty = rows.some(r => {
+  // Rows this screen has actually changed since it loaded. Sending ONLY these is what
+  // makes concurrent register-taking safe: the server reads a null status as "clear
+  // this mark", so sending every row meant a tab that loaded before a colleague saved
+  // would carry nulls for their 29 marks and delete them all, reporting success.
+  const changedRows = rows.filter(r => {
     const a = draft[r.student.id] || {}, b = saved[r.student.id] || {};
     return (a.status || null) !== (b.status || null) || (a.remark || "") !== (b.remark || "");
   });
+  const dirty = changedRows.length > 0;
   const tally = summariseDraft(rows.map(r => draft[r.student.id]?.status).filter(Boolean));
   const unmarked = rows.length - tally.marked;
 
@@ -3216,7 +3250,7 @@ function HndRegister({ store, sessionId, onBack }) {
     setSaving(true);
     try {
       // `locked` term → send the admin override so the server accepts the correction.
-      await store.saveRegister(sessionId, rows.map(r => ({ studentId: r.student.id, status: draft[r.student.id]?.status || null, remark: draft[r.student.id]?.remark || "" })), locked);
+      await store.saveRegister(sessionId, changedRows.map(r => ({ studentId: r.student.id, status: draft[r.student.id]?.status || null, remark: draft[r.student.id]?.remark || "" })), locked);
       await load();
       setReopened(false);
     } catch (_e) { /* the store already surfaced the error as a toast */ }
@@ -3764,8 +3798,19 @@ function AdminStudents({ store }) {
   const total = store.students.length;
   const activeCount = store.students.filter(s => s.active !== false).length;
   const enrolledCount = store.students.filter(s => (s.unitIds || []).length > 0).length;
-  const pcts = store.students.map(s => currentPctOf(s)).filter(v => v !== null && v !== undefined);
-  const avgAtt = pcts.length ? Math.round((pcts.reduce((a, b) => a + b, 0) / pcts.length) * 10) / 10 : null;
+  // Weighted by sessions, not a mean of percentages. Averaging the percentages let a
+  // student marked once (0%) count as much as one marked fifty times (100%), so this
+  // tile could read 50% while the Registers tab's donut — computed properly — read
+  // 98% for the same population.
+  const avgAtt = (() => {
+    let earned = 0, possible = 0;
+    store.students.forEach(s => {
+      const row = attnRowById[s.id];
+      if (!row) return;
+      (s.unitIds || []).forEach(mid => { if (isCurrentUnit(mid)) { const st = row.units[mid]; if (st) { earned += st.earned || 0; possible += st.possible || 0; } } });
+    });
+    return possible > 0 ? Math.round((earned / possible) * 1000) / 10 : null;
+  })();
 
   const exportStudents = () => {
     downloadCSV(
@@ -4005,7 +4050,9 @@ function StudentAttendanceDetail({ student, store }) {
   // ---- Dashboard metrics (results + attendance rating + charts) ----
   const gradedItems = (assess?.assessments || []).filter(a => a.pct != null);
   const avgMark = assess?.averagePct ?? null;                       // average graded %
-  const passRate = gradedItems.length ? Math.round(gradedItems.filter(a => a.pct >= 40).length / gradedItems.length * 1000) / 10 : null;
+    // 50 is the Pass boundary (see bandOf). A literal 40 here disagreed with every
+  // other pass figure in the app, and with the Fail badges rendered directly below.
+  const passRate = gradedItems.length ? Math.round(gradedItems.filter(a => a.pct >= PASS_MARK).length / gradedItems.length * 1000) / 10 : null;
   const enrolledCount = (student.unitIds || []).length;
   const unitsWithMark = new Set(gradedItems.map(a => a.unitId)).size; // "completed" = has a final mark
   // Final mark by unit code = the student's average % per unit (donut).
@@ -4613,6 +4660,10 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
         const created = await store.addUnit(form);
         if (picked.length) await store.setUnitEnrolments(created.id, picked);
         setSavedId(created.id);
+        // Carry the teaching dates just entered into the schedule step. Without this
+        // it opened on today's date, and the widen rule below then pushed the unit's
+        // real start date back to today — losing what the admin had just typed.
+        if (form.startDate) setSched(s => ({ ...s, start: form.startDate, end: form.endDate || s.end }));
         setStep("schedule");
       }
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
@@ -4675,7 +4726,7 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
           {chips.map(c => {
             const active = courseFilter === c.id;
             return (
-              <button key={c.id || "all"} onClick={() => setCourseFilter?.(c.id)}
+              <button key={c.id || "all"} onClick={() => { setCourseFilter?.(c.id); setYearFilter(""); setTermFilter(""); setStatusFilter(""); }}
                 className={`press flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold shadow-sm ring-1 transition-all ${active ? "text-white ring-transparent" : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50"}`}
                 style={active ? { background: c.colour || NAVY } : {}}>
                 {c.colour && !active && <span className="h-2 w-2 rounded-full" style={{ background: c.colour }} />}
@@ -5048,7 +5099,7 @@ const ASSESS_TYPES = ["Assignment", "Exam", "Presentation", "Project", "Portfoli
 // The college's grade boundaries: 70+ Distinction, 60-69 Merit, 50-59 Pass, below
 // 50 Fail. The same boundaries live in the server's routes/assessments.js and
 // routes/student.js — a mark must never band differently on the two sides.
-const bandOf = (pct) => (pct == null ? null : pct >= 70 ? "Distinction" : pct >= 60 ? "Merit" : pct >= 50 ? "Pass" : "Fail");
+const bandOf = (pct) => (pct == null ? null : pct >= 70 ? "Distinction" : pct >= 60 ? "Merit" : pct >= PASS_MARK ? "Pass" : "Fail");
 const gradeTone = (band) =>
   band === "Distinction" ? { bg: "bg-emerald-100", text: "text-emerald-700", colour: "#059669" }
     : band === "Merit" ? { bg: "bg-blue-100", text: "text-blue-700", colour: "#2563eb" }
@@ -5204,7 +5255,7 @@ function AssessmentUnits({ store, courseFilter, setCourseFilter, onView }) {
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap gap-1.5">
           {pills.map(p => (
-            <button key={p.v} onClick={() => setCourseFilter(p.v)} className={`press rounded-full px-3 py-1.5 text-xs font-bold shadow-sm transition ${courseFilter === p.v ? "text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`} style={courseFilter === p.v ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}>{p.l}</button>
+            <button key={p.v} onClick={() => { setCourseFilter(p.v); setYearFilter(""); setTermFilter(""); }} className={`press rounded-full px-3 py-1.5 text-xs font-bold shadow-sm transition ${courseFilter === p.v ? "text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`} style={courseFilter === p.v ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}>{p.l}</button>
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200"><Search size={15} className="text-slate-400" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search units…" className="w-40 bg-transparent text-sm outline-none sm:w-56" /></div>
@@ -5268,7 +5319,7 @@ function AssessmentsOverview({ store }) {
       <div className="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Assessments" value={o.assessments} sub="defined across units" Icon={ClipboardList} tone={NAVY} delay={0} animate />
         <StatCard label="Average mark" value={fmtPct(o.avgPct)} sub="across all grades" Icon={Percent} tone={pctTone(o.avgPct).colour} delay={60} animate />
-        <StatCard label="Pass rate" value={fmtPct(o.passRate)} sub="graded at 40%+" Icon={Award} tone={pctTone(o.passRate).colour} delay={120} animate />
+        <StatCard label="Pass rate" value={fmtPct(o.passRate)} sub="graded at 50%+" Icon={Award} tone={pctTone(o.passRate).colour} delay={120} animate />
         <StatCard label="Grades entered" value={o.gradedSubmissions} sub="marked submissions" Icon={CheckCircle2} tone="#0d7a5f" delay={180} animate />
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -6613,13 +6664,22 @@ function MoodleCard({ store }) {
 
   // A sync outlives the request that starts it, so polling is the only way to learn
   // how it went — and it means closing this tab doesn't abandon the run.
+  //
+  // Polls whenever a run is in flight, NOT only in the tab that started it. Gating on
+  // `busy` alone meant switching tabs and back remounted the card with busy === "",
+  // so it fetched status once, saw running: true, and never polled again — leaving a
+  // permanent spinner and two disabled buttons until a full page reload. A second
+  // admin opening Settings mid-sync saw exactly the same.
+  const polling = busy === "sync" || status?.running === true;
   useEffect(() => {
-    if (busy !== "sync") return;
+    if (!polling) return;
     let live = true;
+    let failures = 0;
     const tick = async () => {
       try {
         const s = await api.moodleStatus();
         if (!live) return;
+        failures = 0;
         setStatus(s);
         if (s.running) return;
         setBusy("");
@@ -6633,11 +6693,20 @@ function MoodleCard({ store }) {
         } else {
           store.notify(s.last?.error || "The Moodle sync failed.", "error");
         }
-      } catch (_) { /* a dropped poll is harmless — the next tick retries */ }
+      } catch (_) {
+        // A dropped poll is harmless, but give up eventually rather than spinning for
+        // ever against a server that has gone away or a token that has expired.
+        if (!live) return;
+        if (++failures >= 10) {
+          setBusy("");
+          setStatus(s => ({ ...(s || {}), running: false }));
+          store.notify("Lost contact with the server while the sync was running. Reopen Settings to see how it finished.", "error");
+        }
+      }
     };
     const id = setInterval(tick, 2000);
     return () => { live = false; clearInterval(id); };
-  }, [busy, store]);
+  }, [polling, store]);
 
   const runPreview = async () => {
     setBusy("preview"); setPreview(null); setShowIssues(false);

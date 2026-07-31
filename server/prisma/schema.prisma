@@ -503,6 +503,11 @@ model HndSession {
 
   marks AttendanceMark[]
 
+  // One register per unit, per day, per start time. Generation de-duplicates in the
+  // request, but without this the database allowed a second run on a different
+  // weekday to create a whole parallel set — silently doubling every attendance
+  // denominator — and two concurrent generates to create exact duplicates.
+  @@unique([unitId, date, startTime])
   @@index([unitId, date])
 }
 

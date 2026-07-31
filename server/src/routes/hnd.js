@@ -680,6 +680,9 @@ router.delete("/sessions/:id", requireAuth, requireHndWrite, async (req, res) =>
 // at once. Idempotent: dates that already have a session for this unit are
 // skipped, so re-running never duplicates.
 const MAX_WEEKLY_SESSIONS = 60; // ~14 months of weeks — a safety cap, not a limit anyone hits
+// No register can hold more rows than a unit has students; 500 leaves generous room
+// while keeping one save to a transaction the database can finish quickly.
+const MAX_REGISTER_ROWS = 500;
 router.post("/units/:id/sessions/generate", requireAuth, requireHndWrite, async (req, res) => {
   const mod = await prisma.unit.findUnique({ where: { id: req.params.id } });
   if (!mod) return res.status(404).json({ error: "Unit not found" });
@@ -716,9 +719,13 @@ router.post("/units/:id/sessions/generate", requireAuth, requireHndWrite, async 
     dates.push(cursor.toISOString().slice(0, 10));
     cursor.setUTCDate(cursor.getUTCDate() + 7);
   }
+  // Was the range longer than the cap allows? Reported so a two-year window can't
+  // quietly produce fourteen months of registers and still say "created".
+  const truncatedAt = cursor <= last ? dates[dates.length - 1] : null;
 
   // A register is unique per (date, block start-time), so we can add missing blocks
-  // without duplicating ones already generated.
+  // without duplicating ones already generated. The DB enforces the same key, so a
+  // concurrent second call can't slip a duplicate past this read.
   const existing = await prisma.hndSession.findMany({ where: { unitId: mod.id, date: { in: dates } }, select: { date: true, startTime: true } });
   const have = new Set(existing.map((x) => `${x.date}|${x.startTime}`));
   // On a multi-register day the first block is Teaching, the second a Seminar.
@@ -729,8 +736,18 @@ router.post("/units/:id/sessions/generate", requireAuth, requireHndWrite, async 
       if (!have.has(`${date}|${s}`)) toCreate.push({ unitId: mod.id, date, startTime: s, endTime: e, description: mod.code, audience, kind: KINDS[i] || "" });
     });
   }
-  if (toCreate.length) await prisma.hndSession.createMany({ data: toCreate });
-  res.status(201).json({ ok: true, weeks: dates.length, registersPerWeek: blocks.length, created: toCreate.length });
+  // skipDuplicates so a race with another generate is a no-op rather than a 500.
+  if (toCreate.length) await prisma.hndSession.createMany({ data: toCreate, skipDuplicates: true });
+
+  // Registers on this unit that fall OUTSIDE the requested window — usually a
+  // previous run on a different weekday, which used to be invisible.
+  const strayCount = await prisma.hndSession.count({
+    where: { unitId: mod.id, OR: [{ date: { lt: start } }, { date: { gt: end } }] },
+  });
+  res.status(201).json({
+    ok: true, weeks: dates.length, registersPerWeek: blocks.length, created: toCreate.length,
+    truncatedAt, strayCount,
+  });
 });
 
 /* ============================== the register ============================== */
@@ -798,21 +815,43 @@ router.put("/sessions/:id/register", requireAuth, requireHndWrite, async (req, r
 
   const marks = Array.isArray(req.body?.marks) ? req.body.marks : null;
   if (!marks) return res.status(400).json({ error: "marks array required" });
+  // A register can never legitimately carry more rows than the unit has students.
+  // Without a cap, one 1MB request becomes ~15,000 operations in a single
+  // transaction, which holds a connection long enough to starve the whole API.
+  if (marks.length > MAX_REGISTER_ROWS) return res.status(400).json({ error: `Too many rows in one save (limit ${MAX_REGISTER_ROWS})` });
 
   const rows = [];
+  const seen = new Set();
   for (const m of marks) {
     const studentId = str(m?.studentId);
     if (!studentId) return res.status(400).json({ error: "Each mark needs a studentId" });
+    // Duplicates previously slipped past the existence check (which compared against
+    // the de-duplicated count) and became repeated writes to the same row.
+    if (seen.has(studentId)) return res.status(400).json({ error: "The same student appears twice in one save" });
+    seen.add(studentId);
     const status = m?.status == null || m.status === "" ? null : str(m.status).toUpperCase();
     if (status !== null && !isStatus(status)) return res.status(400).json({ error: `Invalid status "${m.status}" — use P, L, E or A` });
-    const remark = typeof m?.remark === "string" ? m.remark.slice(0, 500) : "";
-    rows.push({ studentId, status, remark });
+    // `remark` is only written when the caller actually sent one, so a partial save
+    // that omits the field can't wipe a note somebody left.
+    const hasRemark = typeof m?.remark === "string";
+    rows.push({ studentId, status, remark: hasRemark ? m.remark.slice(0, 500) : "", hasRemark });
   }
 
   const ids = rows.map((r) => r.studentId);
   if (ids.length) {
-    const found = await prisma.student.count({ where: { id: { in: ids } } });
-    if (found !== new Set(ids).size) return res.status(400).json({ error: "One or more students do not exist" });
+    // Enrolment, not mere existence. Checking only that the student exists let a
+    // mistyped or stale id attach a mark — and therefore a whole unit — to somebody
+    // who was never on the course.
+    const enrolled = await prisma.enrolment.findMany({ where: { unitId: session.unitId, studentId: { in: ids } }, select: { studentId: true } });
+    const okIds = new Set(enrolled.map((e) => e.studentId));
+    // Marks already on this register stay editable even if the student has since been
+    // un-enrolled, so historic registers remain correctable.
+    if (okIds.size !== ids.length) {
+      const existing = await prisma.attendanceMark.findMany({ where: { sessionId: session.id, studentId: { in: ids } }, select: { studentId: true } });
+      for (const e of existing) okIds.add(e.studentId);
+    }
+    const stray = ids.filter((id) => !okIds.has(id));
+    if (stray.length) return res.status(400).json({ error: `${stray.length} student${stray.length === 1 ? " is" : "s are"} not enrolled on this unit` });
   }
 
   const takenBy = req.user?.name || null;
@@ -822,7 +861,7 @@ router.put("/sessions/:id/register", requireAuth, requireHndWrite, async (req, r
       : prisma.attendanceMark.upsert({
           where: { sessionId_studentId: { sessionId: session.id, studentId: r.studentId } },
           create: { sessionId: session.id, studentId: r.studentId, status: r.status, remark: r.remark, takenBy },
-          update: { status: r.status, remark: r.remark, takenBy, takenAt: new Date() },
+          update: { status: r.status, ...(r.hasRemark ? { remark: r.remark } : {}), takenBy, takenAt: new Date() },
         })
   )));
 
@@ -1020,11 +1059,20 @@ router.get("/students/:id/attendance-terms", requireAuth, async (req, res) => {
   const marksByUnit = new Map();
   for (const m of marks) { const mid = sessMod.get(m.sessionId); if (!mid) continue; if (!marksByUnit.has(mid)) marksByUnit.set(mid, []); marksByUnit.get(mid).push(m); }
 
-  // A unit is "finished" once its last session date is in the past. Units with no
-  // sessions yet have no end date, so they stay current.
+  // A unit is FINISHED when its teaching window has passed. The window (Unit.endDate)
+  // is what the Registers tab shows, so staff and students now agree; the last session
+  // date is only a fallback for units nobody has scheduled. Deriving it from sessions
+  // alone meant a unit whose registers were generated one term at a time read
+  // "finished" here while the Registers tab still said "Running now".
   const rowFor = (mod) => {
-    const endDate = endByUnit.get(mod.id) || null;
-    return { unit: sUnit(mod), summary: summarise(marksByUnit.get(mod.id) || []), endDate, finished: !!(endDate && endDate < today) };
+    const lastSession = endByUnit.get(mod.id) || null;
+    const endDate = mod.endDate || lastSession;
+    return {
+      unit: sUnit(mod),
+      summary: summarise(marksByUnit.get(mod.id) || []),
+      endDate, lastSessionDate: lastSession,
+      finished: !!(endDate && endDate < today),
+    };
   };
   const rows = units.map(rowFor);
   const currentRows = rows.filter((r) => !r.finished).sort((a, b) => (a.endDate || "9999").localeCompare(b.endDate || "9999"));

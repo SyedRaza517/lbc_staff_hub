@@ -49,7 +49,21 @@ router.get("/me/attendance", async (req, res) => {
   const marksByUnit = new Map();
   for (const m of marks) { const mid = sessMod.get(m.sessionId); if (!mid) continue; if (!marksByUnit.has(mid)) marksByUnit.set(mid, []); marksByUnit.get(mid).push(m); }
 
-  const rowFor = (mod) => { const endDate = endByUnit.get(mod.id) || null; return { unit: sUnit(mod), summary: summarise(marksByUnit.get(mod.id) || []), endDate, finished: !!(endDate && endDate < today) }; };
+  // A unit is FINISHED when its teaching window has passed. The window (Unit.endDate)
+  // is what staff see on the Registers tab, so both sides now agree; the last-session
+  // date is only a fallback for units nobody has scheduled yet. Using the session date
+  // alone meant a unit whose registers were generated a term at a time dropped out of
+  // a student's current attendance months before staff considered it over.
+  const rowFor = (mod) => {
+    const lastSession = endByUnit.get(mod.id) || null;
+    const endDate = mod.endDate || lastSession;
+    return {
+      unit: sUnit(mod),
+      summary: summarise(marksByUnit.get(mod.id) || []),
+      endDate, lastSessionDate: lastSession,
+      finished: !!(endDate && endDate < today),
+    };
+  };
   const rows = units.map(rowFor);
   const current = rows.filter((r) => !r.finished).sort((a, b) => (a.endDate || "9999").localeCompare(b.endDate || "9999"));
   const previous = rows.filter((r) => r.finished).sort((a, b) => (b.endDate || "").localeCompare(a.endDate || ""));
