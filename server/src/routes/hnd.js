@@ -332,7 +332,10 @@ router.get("/units", requireAuth, async (_req, res) => {
   const eMap = new Map(enrolAgg.map((e) => [e.unitId, e._count._all]));
   const sMap = new Map(sessAgg.map((s) => [s.unitId, s._count._all]));
   const endMap = new Map(sessAgg.map((s) => [s.unitId, s._max.date || null]));
-  res.json(rows.map((m) => ({ ...sUnit(m), studentCount: eMap.get(m.id) || 0, sessionCount: sMap.get(m.id) || 0, endDate: endMap.get(m.id) || null })));
+  // lastSessionDate is DERIVED (the newest register on this unit) and must not be
+  // called endDate — that is the unit's own, admin-set teaching end date, and
+  // spreading a derived value over it silently replaced the real one.
+  res.json(rows.map((m) => ({ ...sUnit(m), studentCount: eMap.get(m.id) || 0, sessionCount: sMap.get(m.id) || 0, lastSessionDate: endMap.get(m.id) || null })));
 });
 
 router.post("/units", requireAuth, requireHndWrite, async (req, res) => {

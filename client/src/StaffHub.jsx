@@ -4276,8 +4276,30 @@ function HndCourses({ store, onOpen }) {
   const [cohortProg, setCohortProg] = useState(null); // the course whose cohorts are being managed
   const YEARS = Array.from({ length: 7 }, (_, i) => nowYear - 2 + i);
 
+  const [cohortBusy, setCohortBusy] = useState(false);
+
   const openAdd = () => { setEdit(null); setForm({ name: "", colour: PROGRAMME_COLOURS[0], cohortMonth: 9, cohortYear: nowYear }); setModal(true); };
   const openEdit = (p) => { setEdit(p); setForm({ name: p.name, colour: p.colour || PROGRAMME_COLOURS[0], cohortMonth: 9, cohortYear: nowYear }); setModal(true); };
+
+  // Intakes belonging to the course being edited. Read from the store rather than
+  // held in state, so one added here shows up the moment the store refreshes.
+  const editCohorts = edit ? (store.cohorts || []).filter(c => c.courseId === edit.id) : [];
+  const newCohortName = `${MONTHS[form.cohortMonth - 1]} ${form.cohortYear}`;
+  // Intake names are unique per course, so adding a duplicate would be rejected by
+  // the API — say so up front instead of letting them press it and get an error.
+  const cohortExists = editCohorts.some(c => c.name.toLowerCase() === newCohortName.toLowerCase());
+  const addCohortNow = async () => {
+    if (!edit || cohortExists) return;
+    setCohortBusy(true);
+    try {
+      await store.addCohort({
+        courseId: edit.id,
+        name: newCohortName,
+        startDate: `${form.cohortYear}-${String(form.cohortMonth).padStart(2, "0")}-01`,
+      });
+    } catch (_e) { /* toast shown by the store */ }
+    setCohortBusy(false);
+  };
   const save = async () => {
     try {
       if (edit) {
@@ -4367,7 +4389,7 @@ function HndCourses({ store, onOpen }) {
               ))}
             </div>
           </Field>
-          {!edit && (
+          {!edit ? (
             <Field label="First cohort (intake)">
               <div className="grid grid-cols-2 gap-2">
                 <select value={form.cohortMonth} onChange={e => setForm(f => ({ ...f, cohortMonth: Number(e.target.value) }))} className={inputCls}>
@@ -4378,6 +4400,41 @@ function HndCourses({ store, onOpen }) {
                 </select>
               </div>
               <p className="mt-1 text-[11px] text-slate-400">Creates the first intake — <b>{MONTHS[form.cohortMonth - 1]} {form.cohortYear}</b>. You can add more later via Manage cohorts.</p>
+            </Field>
+          ) : (
+            /* Editing: intakes are managed here too, not only on the create screen —
+               otherwise a course made earlier can never gain a second intake without
+               hunting through the card menu. */
+            <Field label="Cohorts (intakes)">
+              <div className="rounded-xl border border-slate-200 p-2.5">
+                {editCohorts.length
+                  ? <div className="mb-2 flex flex-wrap gap-1.5">
+                      {editCohorts.map(c => (
+                        <span key={c.id} className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                          {c.name}{c.startDate ? <span className="ml-1 font-medium text-slate-400">· {c.startDate}</span> : null}
+                        </span>
+                      ))}
+                    </div>
+                  : <p className="mb-2 text-[11px] text-slate-400">No intakes on this course yet.</p>}
+                <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
+                  <select value={form.cohortMonth} onChange={e => setForm(f => ({ ...f, cohortMonth: Number(e.target.value) }))} className={inputCls}>
+                    {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                  </select>
+                  <select value={form.cohortYear} onChange={e => setForm(f => ({ ...f, cohortYear: Number(e.target.value) }))} className={inputCls}>
+                    {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                  <button type="button" onClick={addCohortNow} disabled={cohortBusy || cohortExists}
+                    className="press flex items-center gap-1.5 rounded-xl px-3 text-xs font-bold text-white transition disabled:opacity-40"
+                    style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>
+                    {cohortBusy ? <Loader size={14} /> : <Plus size={14} />} Add
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400">
+                  {cohortExists
+                    ? <><b>{newCohortName}</b> already exists on this course.</>
+                    : <>Adds <b>{newCohortName}</b> straight away — no need to press Save. Use <b>Manage cohorts</b> for start dates and terms.</>}
+                </p>
+              </div>
             </Field>
           )}
           <PrimaryBtn onClick={save} disabled={!form.name.trim()} className="w-full"><Save size={16} /> {edit ? "Save changes" : "Add course"}</PrimaryBtn>
@@ -4566,6 +4623,17 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
   const createWeekly = async () => {
     setBusy(true);
     try {
+      // The range you generate registers across IS the unit's teaching window, so
+      // record it on the unit too. Without this the unit still read "No dates set"
+      // after its registers had been created, which is what it looked like from the
+      // outside: registers appeared, dates never did.
+      //
+      // Widened, never narrowed — generating a second, later batch should extend the
+      // window rather than cut the earlier part of the unit off.
+      const u = store.units.find(x => x.id === savedId);
+      const start = u?.startDate && u.startDate < sched.start ? u.startDate : sched.start;
+      const end = u?.endDate && u.endDate > sched.end ? u.endDate : sched.end;
+      if (start !== u?.startDate || end !== u?.endDate) await store.updateUnit(savedId, { startDate: start, endDate: end });
       await store.generateSessions(savedId, sched);
       setModal(false);
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
@@ -4830,6 +4898,7 @@ function ScheduleStep({ sched, setSched, busy, onCreate, onSkip, unit = null }) 
             <p className="font-semibold text-slate-700">
               Registers for <b>{unit.code}</b>{unit.sessionCount ? <> — it already has {unit.sessionCount} register{unit.sessionCount === 1 ? "" : "s"}, and only missing ones are added.</> : "."}
               {" "}One register per 3 taught hours, weekly on the same weekday as the start date.
+              {" "}These dates also become the unit's teaching window.
             </p>
           </div>
         : <div className="flex items-start gap-2.5 rounded-xl bg-emerald-50 px-3.5 py-3 text-xs ring-1 ring-emerald-200">
