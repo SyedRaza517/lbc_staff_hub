@@ -190,6 +190,50 @@ const matchesPlace = (u, year, term) => {
   return true;
 };
 
+// Is the unit being taught right now, already finished, or still to come?
+//
+// Derived purely from its teaching window, so a unit with no dates is "unscheduled"
+// rather than being lumped in with either — guessing would put made-up units into
+// the "current attendance" figure, which is the one people act on.
+const unitStatus = (u, today) => {
+  if (!u?.startDate || !u?.endDate) return "unscheduled";
+  if (today < u.startDate) return "future";
+  if (today > u.endDate) return "past";
+  return "current";
+};
+const STATUS_META = {
+  current:     { label: "Running now", short: "Running",   bg: "bg-emerald-100", text: "text-emerald-700", colour: "#059669" },
+  past:        { label: "Finished",    short: "Finished",  bg: "bg-slate-200",   text: "text-slate-600",   colour: "#64748b" },
+  future:      { label: "Not started", short: "Upcoming",  bg: "bg-amber-100",   text: "text-amber-700",   colour: "#b45309" },
+  unscheduled: { label: "No dates set", short: "No dates", bg: "bg-rose-50",     text: "text-rose-600",    colour: "#e11d48" },
+};
+// Human-readable teaching window, e.g. "22 Sep – 31 Oct 2025".
+const fmtWindow = (u) => {
+  if (!u?.startDate || !u?.endDate) return "";
+  const f = (d, withYear) => new Date(`${d}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short", ...(withYear ? { year: "numeric" } : {}) });
+  const sameYear = u.startDate.slice(0, 4) === u.endDate.slice(0, 4);
+  return `${f(u.startDate, !sameYear)} – ${f(u.endDate, true)}`;
+};
+
+// Status filter over units. Mirrors PlaceFilter so both bars behave the same.
+function StatusFilter({ units, value, setValue, today, className = "" }) {
+  const counts = units.reduce((a, u) => { const s = unitStatus(u, today); a[s] = (a[s] || 0) + 1; return a; }, {});
+  const shown = ["current", "past", "future", "unscheduled"].filter(s => counts[s]);
+  if (shown.length < 2) return null;   // nothing to choose between
+  const pill = (on) => `press rounded-full px-3 py-1.5 text-xs font-bold shadow-sm ring-1 transition-all ${on ? "text-white ring-transparent" : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50"}`;
+  return (
+    <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
+      <span className="mr-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Status</span>
+      <button onClick={() => setValue("")} className={pill(!value)} style={!value ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}>All</button>
+      {shown.map(s => (
+        <button key={s} onClick={() => setValue(s)} className={pill(value === s)} style={value === s ? { background: STATUS_META[s].colour } : {}}>
+          {STATUS_META[s].short} <span className="opacity-60">{counts[s]}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // The year/term filter bar. Shown wherever units are listed so the same control
 // behaves identically everywhere. Terms offered are only those actually in use, so
 // a one-year course never shows empty Year 2 terms.
@@ -4181,7 +4225,7 @@ function CoursePattern({ seed, colour }) {
 
 // The "⋯" overflow menu on each course card — Edit / Delete, matching the
 // three-dot control in the reference design. Closes on outside click.
-function CourseMenu({ onEdit, onDelete, onCohorts, editLabel = "Edit course", deleteLabel = "Delete course" }) {
+function CourseMenu({ onEdit, onDelete, onCohorts, onSchedule, editLabel = "Edit course", deleteLabel = "Delete course" }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
@@ -4201,6 +4245,11 @@ function CourseMenu({ onEdit, onDelete, onCohorts, editLabel = "Edit course", de
             <button role="menuitem" onClick={() => { setOpen(false); onEdit(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-slate-600 transition hover:bg-slate-50">
               <Edit3 size={14} /> {editLabel}
             </button>
+            {onSchedule && (
+              <button role="menuitem" onClick={() => { setOpen(false); onSchedule(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-slate-600 transition hover:bg-slate-50">
+                <CalendarDays size={14} /> Create registers
+              </button>
+            )}
             <button role="menuitem" onClick={() => { setOpen(false); onDelete(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-rose-600 transition hover:bg-rose-50">
               <Trash2 size={14} /> {deleteLabel}
             </button>
@@ -4451,9 +4500,10 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
   const [modal, setModal] = useState(false);
   const [step, setStep] = useState("details");       // details -> schedule (new courses only)
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ code: "", unitNumber: "", name: "", tutor: "", courseId: "", cohortId: "", termId: "", year: "", termNumber: "" });
+  const [form, setForm] = useState({ code: "", unitNumber: "", name: "", tutor: "", courseId: "", cohortId: "", termId: "", year: "", termNumber: "", startDate: "", endDate: "" });
   const [yearFilter, setYearFilter] = useState("");   // "" = any year, "none" = not classified
   const [termFilter, setTermFilter] = useState("");   // "" = any term
+  const [statusFilter, setStatusFilter] = useState(""); // "" | current | past | future | unscheduled
   const [picked, setPicked] = useState([]);           // studentIds enrolled on this course
   const [pickQuery, setPickQuery] = useState("");     // search within the student picker
   const [sched, setSched] = useState({ start: todayISO(), end: "", hours: 3 });
@@ -4473,14 +4523,22 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
     // A new unit lands in whichever year/term is being filtered, so adding one while
     // looking at "Year 1 · Term 2" files it there without re-picking.
     setForm({ code: "", unitNumber: "", name: "", tutor: "", courseId: defaultCourse, cohortId: "", termId: "",
-      year: yearFilter && yearFilter !== "none" ? yearFilter : "", termNumber: yearFilter && yearFilter !== "none" ? termFilter : "" });
+      year: yearFilter && yearFilter !== "none" ? yearFilter : "", termNumber: yearFilter && yearFilter !== "none" ? termFilter : "", startDate: "", endDate: "" });
     setSched({ start: todayISO(), end: "", hours: 3 });
     setModal(true);
   };
   const openEdit = (m) => {
     setEdit(m); setStep("details"); setSavedId(m.id); setPicked(enrolledIds(m.id)); setPickQuery("");
     setForm({ code: m.code, unitNumber: m.unitNumber || "", name: m.name, tutor: m.tutor || "", courseId: m.courseId || "", cohortId: m.cohortId || "", termId: m.termId || "",
-      year: m.year ?? "", termNumber: m.termNumber ?? "" });
+      year: m.year ?? "", termNumber: m.termNumber ?? "", startDate: m.startDate || "", endDate: m.endDate || "" });
+    setModal(true);
+  };
+  // Generate registers for a unit that already exists — the imported units arrive
+  // with no sessions at all, so this is the only way they get any. Pre-filled from
+  // the unit's own teaching window.
+  const openSchedule = (m) => {
+    setEdit(m); setSavedId(m.id); setStep("schedule");
+    setSched({ start: m.startDate || todayISO(), end: m.endDate || "", hours: 3 });
     setModal(true);
   };
   const togglePick = (id) => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
@@ -4528,8 +4586,10 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
     if (courseFilter && courseFilter !== "none" && m.courseId !== courseFilter) return false;
     return true;
   });
+  const today = todayISO();
   const list = inCourse
     .filter(m => matchesPlace(m, yearFilter, termFilter))
+    .filter(m => !statusFilter || unitStatus(m, today) === statusFilter)
     .filter(m => !ql || m.code.toLowerCase().includes(ql) || m.name.toLowerCase().includes(ql) || (m.tutor || "").toLowerCase().includes(ql))
     // Teaching order — year, then term, then unit number — so the gallery reads the
     // way the course is actually delivered.
@@ -4558,7 +4618,8 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
         </div>
       )}
 
-      <PlaceFilter units={inCourse} year={yearFilter} setYear={setYearFilter} term={termFilter} setTerm={setTermFilter} className="mb-4" />
+      <PlaceFilter units={inCourse} year={yearFilter} setYear={setYearFilter} term={termFilter} setTerm={setTermFilter} className="mb-2.5" />
+      <StatusFilter units={inCourse} value={statusFilter} setValue={setStatusFilter} today={today} className="mb-4" />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
@@ -4591,7 +4652,7 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
               {/* Patterned banner with the course code as a cohort-style badge */}
               <div className="relative h-32">
                 <CoursePattern seed={seed} colour={colour} />
-                <div className="absolute right-3 top-3"><CourseMenu onEdit={() => openEdit(m)} onDelete={() => remove(m)} /></div>
+                <div className="absolute right-3 top-3"><CourseMenu onEdit={() => openEdit(m)} onSchedule={() => openSchedule(m)} onDelete={() => remove(m)} /></div>
                 <span className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-md bg-white/95 px-2.5 py-1 text-xs font-extrabold text-slate-800 shadow-sm">{m.unitNumber ? <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-extrabold text-white">Unit {m.unitNumber}</span> : null}{m.code}</span>
               </div>
 
@@ -4599,14 +4660,17 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
                 {prog
                   ? <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide" style={{ color: prog.colour }}><Layers size={11} /> {prog.name}</p>
                   : <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-300">No course</p>}
-                {(uCohort || uTerm || isPlaced(m)) && (
-                  <p className="mb-1 flex flex-wrap items-center gap-1 text-[10px] font-bold">
+                {/* Always shown: every unit has a status, even if that status is
+                    "no dates set" — which is the one people most need to see. */}
+                <p className="mb-1 flex flex-wrap items-center gap-1 text-[10px] font-bold">
                     {/* Where the unit sits in the course structure — from Moodle. */}
                     {isPlaced(m) && <span className="rounded px-1.5 py-0.5" style={{ background: `${NAVY}14`, color: NAVY }}>{placeLabel(m)}</span>}
+                    {/* Whether it is being taught now — from its own dates. */}
+                    {(() => { const s = STATUS_META[unitStatus(m, today)]; return <span className={`rounded px-1.5 py-0.5 ${s.bg} ${s.text}`}>{s.label}</span>; })()}
+                    {fmtWindow(m) && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-500">{fmtWindow(m)}</span>}
                     {uCohort && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">{uCohort.name}</span>}
-                    {uTerm && <span className={`rounded px-1.5 py-0.5 ${uState === "current" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{uTerm.name.replace("Year ", "Y").replace(" · Term ", "T")}{uState === "current" ? " · Current" : uState === "past" ? " · Ended" : " · Upcoming"}</span>}
-                  </p>
-                )}
+                  {uTerm && <span className={`rounded px-1.5 py-0.5 ${uState === "current" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{uTerm.name.replace("Year ", "Y").replace(" · Term ", "T")}{uState === "current" ? " · Current" : uState === "past" ? " · Ended" : " · Upcoming"}</span>}
+                </p>
                 <h3 className="text-[15px] font-extrabold leading-snug" style={{ color: NAVY_DARK }} title={m.name}>{m.name}</h3>
 
                 {/* Attendance figures kept — this is a register system, after all */}
@@ -4652,6 +4716,22 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
               <PlaceFields form={form} setForm={setForm} />
               <p className="mt-2 text-[10px] leading-relaxed text-slate-400">Used to group and filter units. Terms run 1-6 across the two years.</p>
             </div>
+            {/* The teaching window. Decides whether the unit counts as running or
+                finished, and pre-fills the register generator. */}
+            <div className="rounded-xl bg-slate-50 p-3">
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">When it is taught</p>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Start date"><input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} className={inputCls} /></Field>
+                <Field label="End date"><input type="date" value={form.endDate} min={form.startDate || undefined} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} className={inputCls} /></Field>
+              </div>
+              {form.startDate && form.endDate && form.endDate < form.startDate
+                ? <p className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold text-rose-600"><AlertCircle size={12} /> The end date is before the start date.</p>
+                : <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
+                    {form.startDate && form.endDate
+                      ? <>Registers can be generated across this window, and the unit counts as {unitStatus({ startDate: form.startDate, endDate: form.endDate }, todayISO()) === "current" ? "running now" : unitStatus({ startDate: form.startDate, endDate: form.endDate }, todayISO()) === "past" ? "finished" : "not started yet"}.</>
+                      : "Set both dates to mark this unit as running or finished, and to create its registers."}
+                  </p>}
+            </div>
             {/* Which intake + DATED term this unit runs in. Optional, but needed for
                 the term-based attendance pause/activate. Term list follows the cohort. */}
             <div className="grid grid-cols-2 gap-3">
@@ -4686,7 +4766,7 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
             </PrimaryBtn>
           </div>
         ) : (
-          <ScheduleStep sched={sched} setSched={setSched} busy={busy} onCreate={createWeekly} onSkip={() => setModal(false)} />
+          <ScheduleStep sched={sched} setSched={setSched} busy={busy} onCreate={createWeekly} onSkip={() => setModal(false)} unit={edit} />
         )}
       </Modal>
     </>
@@ -4731,7 +4811,7 @@ function StudentPicker({ students, picked, onToggle, query, setQuery, onAll, onN
 
 // Step 2 of course creation: pick the term's start/end and weekly time, and it
 // creates one register per week. Shows a live count of what will be created.
-function ScheduleStep({ sched, setSched, busy, onCreate, onSkip }) {
+function ScheduleStep({ sched, setSched, busy, onCreate, onSkip, unit = null }) {
   const perWeek = Math.max(1, Math.round((Number(sched.hours) || 3) / 3)); // 3h → 1, 6h → 2 …
   const valid = sched.start && sched.end && sched.end >= sched.start && Number(sched.hours) >= 3;
   // Count weeks the same way the server does — from the start, every 7 days.
@@ -4744,10 +4824,18 @@ function ScheduleStep({ sched, setSched, busy, onCreate, onSkip }) {
   const total = weeks * perWeek;
   return (
     <div className="space-y-3">
-      <div className="flex items-start gap-2.5 rounded-xl bg-emerald-50 px-3.5 py-3 text-xs ring-1 ring-emerald-200">
-        <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" />
-        <p className="font-semibold text-emerald-800">Unit saved. Set its dates and taught hours — one register is created per 3 hours, every week.</p>
-      </div>
+      {unit
+        ? <div className="flex items-start gap-2.5 rounded-xl bg-slate-50 px-3.5 py-3 text-xs ring-1 ring-slate-200">
+            <CalendarDays size={16} className="mt-0.5 shrink-0 text-slate-500" />
+            <p className="font-semibold text-slate-700">
+              Registers for <b>{unit.code}</b>{unit.sessionCount ? <> — it already has {unit.sessionCount} register{unit.sessionCount === 1 ? "" : "s"}, and only missing ones are added.</> : "."}
+              {" "}One register per 3 taught hours, weekly on the same weekday as the start date.
+            </p>
+          </div>
+        : <div className="flex items-start gap-2.5 rounded-xl bg-emerald-50 px-3.5 py-3 text-xs ring-1 ring-emerald-200">
+            <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" />
+            <p className="font-semibold text-emerald-800">Unit saved. Set its dates and taught hours — one register is created per 3 hours, every week.</p>
+          </div>}
       <div className="grid grid-cols-2 gap-3">
         <Field label="Start date"><input type="date" value={sched.start} onChange={e => setSched(s => ({ ...s, start: e.target.value }))} className={inputCls} /></Field>
         <Field label="End date"><input type="date" value={sched.end} min={sched.start} onChange={e => setSched(s => ({ ...s, end: e.target.value }))} className={inputCls} /></Field>

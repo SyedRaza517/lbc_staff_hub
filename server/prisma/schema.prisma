@@ -322,6 +322,17 @@ model Unit {
   // which runs on into year 2 (Year 2 is "Term 4"), so it is stored exactly as given.
   year        Int?
   termNumber  Int?
+  // WHEN THE UNIT IS TAUGHT — the teaching window, as YYYY-MM-DD.
+  //
+  // Owned by Staff Hub, not Moodle: Moodle holds no unit dates, and the sync never
+  // writes these, so an admin's dates survive every re-import. This is what makes a
+  // unit "running now", "finished" or "not started yet", and what the register
+  // generator uses as its default date range.
+  //
+  // Nullable — a unit with no dates is simply unscheduled and counts as neither
+  // current nor past, rather than being guessed at.
+  startDate   String?
+  endDate     String?
   // A unit can belong to a specific cohort + dated term (the intake and teaching term
   // it runs in). Nullable so existing units and the "just a unit" case still work;
   // set-null on delete keeps registers if a cohort/term is removed.

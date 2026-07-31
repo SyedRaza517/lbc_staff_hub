@@ -136,6 +136,19 @@ function placeFromBody(body) {
   return { year, termNumber };
 }
 
+// The unit's teaching window. Both dates or neither: a start with no end can't say
+// whether the unit has finished, which is the whole point of holding them.
+// Returns { startDate, endDate } or { error }.
+function windowFromBody(body) {
+  const blank = (v) => v === undefined || v === null || v === "";
+  if (blank(body?.startDate) && blank(body?.endDate)) return { startDate: null, endDate: null };
+  if (blank(body?.startDate) || blank(body?.endDate)) return { error: "Give both a start and an end date, or neither" };
+  const startDate = str(body.startDate), endDate = str(body.endDate);
+  if (!isDate(startDate) || !isDate(endDate)) return { error: "Dates must be real calendar dates (YYYY-MM-DD)" };
+  if (endDate < startDate) return { error: "The end date must be on or after the start date" };
+  return { startDate, endDate };
+}
+
 router.get("/courses", requireAuth, async (_req, res) => {
   const rows = await prisma.course.findMany({
     orderBy: { name: "asc" },
@@ -342,11 +355,14 @@ router.post("/units", requireAuth, requireHndWrite, async (req, res) => {
   if (ct.error) return res.status(400).json({ error: ct.error });
   const place = placeFromBody(req.body);
   if (place.error) return res.status(400).json({ error: place.error });
+  const win = windowFromBody(req.body);
+  if (win.error) return res.status(400).json({ error: win.error });
   try {
     const m = await prisma.unit.create({
       data: {
         code, unitNumber: str(req.body?.unitNumber), name, tutor: str(req.body?.tutor), courseId,
         year: place.year, termNumber: place.termNumber,
+        startDate: win.startDate, endDate: win.endDate,
         cohortId: ct.cohortId, termId: ct.termId,
       },
     });
@@ -392,6 +408,16 @@ router.put("/units/:id", requireAuth, requireHndWrite, async (req, res) => {
     });
     if (place.error) return res.status(400).json({ error: place.error });
     data.year = place.year; data.termNumber = place.termNumber;
+  }
+  // Teaching window — same all-or-nothing rule, and the partner date is carried over
+  // when only one of the two is being changed.
+  if (req.body?.startDate !== undefined || req.body?.endDate !== undefined) {
+    const win = windowFromBody({
+      startDate: req.body?.startDate !== undefined ? req.body.startDate : existing.startDate,
+      endDate: req.body?.endDate !== undefined ? req.body.endDate : existing.endDate,
+    });
+    if (win.error) return res.status(400).json({ error: win.error });
+    data.startDate = win.startDate; data.endDate = win.endDate;
   }
   // cohort/term are set together (the UI picks a cohort then its term).
   if (req.body?.cohortId !== undefined || req.body?.termId !== undefined) {
@@ -655,10 +681,12 @@ router.post("/units/:id/sessions/generate", requireAuth, requireHndWrite, async 
   const mod = await prisma.unit.findUnique({ where: { id: req.params.id } });
   if (!mod) return res.status(404).json({ error: "Unit not found" });
 
-  const start = str(req.body?.start);
-  const end = str(req.body?.end);
+  // Fall back to the unit's own teaching window, so "create the registers" needs no
+  // dates re-typed once the unit is scheduled.
+  const start = str(req.body?.start) || mod.startDate || "";
+  const end = str(req.body?.end) || mod.endDate || "";
   const audience = str(req.body?.audience) || "All students";
-  if (!isDate(start) || !isDate(end)) return res.status(400).json({ error: "Valid start and end dates required (YYYY-MM-DD)" });
+  if (!isDate(start) || !isDate(end)) return res.status(400).json({ error: "Valid start and end dates required (YYYY-MM-DD) — set the unit's teaching dates, or pass a range" });
   if (end < start) return res.status(400).json({ error: "End date must be on or after the start date" });
 
   // Registers per class day come from the taught hours: each register covers 3 hours,

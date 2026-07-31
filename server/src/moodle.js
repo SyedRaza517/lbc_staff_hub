@@ -179,6 +179,7 @@ async function syncFromMoodle({ dryRun = false } = {}) {
     const unplaced = [];
 
     const unitByCmid = new Map();  // course-module id → unit, to trace a grade item home
+    const courseUnits = [];        // every unit on this course, activities or not
     for (const { sec, parsed } of unitSections) {
       // A unit outside every "Year N - Term M" section keeps year/term null rather
       // than being guessed at — it is reported below so someone can place it.
@@ -211,6 +212,7 @@ async function syncFromMoodle({ dryRun = false } = {}) {
       // In a preview `unit` is null (nothing was written); keep the code so its
       // assessments and grades are still counted as new.
       const ref = unit || { id: null, code: parsed.code };
+      courseUnits.push(ref);
       for (const mod of sec.modules || []) unitByCmid.set(mod.id, ref);
     }
     if (unplaced.length) {
@@ -313,17 +315,19 @@ async function syncFromMoodle({ dryRun = false } = {}) {
     }
 
     // ---------- Enrolments ----------
-    // A student belongs to every unit whose assessments they appear against.
+    // Everyone on the course is enrolled on EVERY unit of that course.
+    //
+    // Moodle only ever enrols a student on the course, never on a unit, so unit
+    // enrolment has to be inferred. Inferring it from the gradebook ("they appear
+    // against this unit's assessments") looked reasonable but left every unit that
+    // has no assessments yet with nobody on it — you could not open a register for
+    // a unit until after its first assignment existed, which is backwards.
+    const courseUnitIds = [...new Set(courseUnits.map((u) => u.id).filter(Boolean))];
     const wantEnrol = new Set();
-    for (const ug of usergrades) {
-      const st = studentByMoodleId.get(ug.userid);
-      if (!st) continue;
-      for (const it of ug.gradeitems || []) {
-        const target = assessByItem.get(it.id);
-        if (target && target.unit.id) wantEnrol.add(`${st.id}|${target.unit.id}`);
-      }
+    for (const st of studentByMoodleId.values()) {
+      for (const unitId of courseUnitIds) wantEnrol.add(`${st.id}|${unitId}`);
     }
-    const unitIds = [...new Set([...wantEnrol].map((k) => k.split("|")[1]))];
+    const unitIds = courseUnitIds;
     const already = new Set(
       (unitIds.length
         ? await prisma.enrolment.findMany({ where: { unitId: { in: unitIds } }, select: { studentId: true, unitId: true } })

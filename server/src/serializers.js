@@ -55,6 +55,9 @@ const sUnit = (m) => ({
   // Where the unit sits in the course structure ("Year 1 · Term 2"), null when it
   // has not been classified. Separate from termId, which is a dated teaching term.
   year: m.year ?? null, termNumber: m.termNumber ?? null,
+  // The teaching window, which decides whether the unit is running, finished or
+  // still to come. Set in Staff Hub; never overwritten by the Moodle sync.
+  startDate: m.startDate ?? null, endDate: m.endDate ?? null,
   cohortId: m.cohortId ?? null, termId: m.termId ?? null,
   // Present only when the query asked Prisma to count relations.
   ...(m._count ? { sessionCount: m._count.sessions, studentCount: m._count.enrolments } : {}),
