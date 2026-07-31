@@ -309,8 +309,21 @@ model Unit {
   tutor       String     @default("")
   course   Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
   courseId String?
-  // A unit can belong to a specific cohort + term (the intake and teaching term it
-  // runs in). Nullable so existing units and the "just a unit" case still work;
+  // WHERE THE UNIT SITS IN THE COURSE STRUCTURE — "Year 1 · Term 2".
+  //
+  // This is curriculum classification, not a calendar: it says which stage of the
+  // programme the unit is taught at, and it is what Moodle records (as sections
+  // named "Year 1 - Term 1"). Deliberately separate from `term` below, which is a
+  // DATED teaching term used to lock registers — Moodle holds no dates, so inventing
+  // them there would silently open or lock the wrong registers.
+  //
+  // Nullable: a unit can sit outside every term section in Moodle, and units added
+  // by hand need not be classified. termNumber follows the college's own numbering,
+  // which runs on into year 2 (Year 2 is "Term 4"), so it is stored exactly as given.
+  year        Int?
+  termNumber  Int?
+  // A unit can belong to a specific cohort + dated term (the intake and teaching term
+  // it runs in). Nullable so existing units and the "just a unit" case still work;
   // set-null on delete keeps registers if a cohort/term is removed.
   cohort      Cohort?    @relation(fields: [cohortId], references: [id], onDelete: SetNull)
   cohortId    String?

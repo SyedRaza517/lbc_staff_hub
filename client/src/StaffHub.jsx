@@ -167,6 +167,84 @@ function pctTone(pct) {
   return { text: "text-rose-700", bg: "bg-rose-50", ring: "ring-rose-200", colour: "#dc2626" };
 }
 const fmtPct = (pct) => (pct === null || pct === undefined ? "—" : `${pct}%`);
+
+// Where a unit sits in the course structure. This is the curriculum position that
+// comes from Moodle ("Year 1 - Term 1" sections) — not the dated teaching term that
+// drives register locking, which is `unit.termId`.
+//
+// Terms are numbered 1-6 straight through the two years, because the college calls
+// Year 2's first term "Term 4"; the labels therefore print the number as given.
+const YEARS = [1, 2];
+const TERMS = [1, 2, 3, 4, 5, 6];
+const isPlaced = (u) => u?.year != null && u?.termNumber != null;
+const placeLabel = (u) => (isPlaced(u) ? `Year ${u.year} · Term ${u.termNumber}` : "");
+const placeShort = (u) => (isPlaced(u) ? `Y${u.year}·T${u.termNumber}` : "");
+// A stable sort key so units read in teaching order: year, then term, then unit
+// number. Unplaced units sort last rather than jumbling in among the placed ones.
+const placeKey = (u) => (isPlaced(u) ? u.year * 100 + u.termNumber : 9999);
+// Does a unit match the year/term filter? "" means "any".
+const matchesPlace = (u, year, term) => {
+  if (year === "none") return !isPlaced(u);
+  if (year && Number(year) !== u?.year) return false;
+  if (term && Number(term) !== u?.termNumber) return false;
+  return true;
+};
+
+// The year/term filter bar. Shown wherever units are listed so the same control
+// behaves identically everywhere. Terms offered are only those actually in use, so
+// a one-year course never shows empty Year 2 terms.
+function PlaceFilter({ units, year, setYear, term, setTerm, className = "" }) {
+  const inScope = year && year !== "none" ? units.filter(u => u.year === Number(year)) : units;
+  const terms = Array.from(new Set(inScope.filter(isPlaced).map(u => u.termNumber))).sort((a, b) => a - b);
+  const years = Array.from(new Set(units.filter(isPlaced).map(u => u.year))).sort((a, b) => a - b);
+  const anyUnplaced = units.some(u => !isPlaced(u));
+  if (!years.length) return null;
+  const pill = (active, on) => `press rounded-full px-3 py-1.5 text-xs font-bold shadow-sm ring-1 transition-all ${active ? "text-white ring-transparent" : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50"}`;
+  const activeStyle = { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` };
+  return (
+    <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
+      <span className="mr-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Year</span>
+      <button onClick={() => { setYear(""); setTerm(""); }} className={pill(!year)} style={!year ? activeStyle : {}}>All</button>
+      {years.map(y => (
+        // Changing year clears the term — a term from the old year may not exist in
+        // the new one, which would otherwise leave an empty list and no way back.
+        <button key={y} onClick={() => { setYear(String(y)); setTerm(""); }} className={pill(year === String(y))} style={year === String(y) ? activeStyle : {}}>Year {y}</button>
+      ))}
+      {anyUnplaced && <button onClick={() => { setYear("none"); setTerm(""); }} className={pill(year === "none")} style={year === "none" ? activeStyle : {}}>Not set</button>}
+      {year !== "none" && terms.length > 1 && (
+        <>
+          <span className="ml-2 mr-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Term</span>
+          <button onClick={() => setTerm("")} className={pill(!term)} style={!term ? activeStyle : {}}>All</button>
+          {terms.map(t => (
+            <button key={t} onClick={() => setTerm(String(t))} className={pill(term === String(t))} style={term === String(t) ? activeStyle : {}}>Term {t}</button>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+// The year/term pair as form fields. Both or neither — the API rejects a half-set
+// placement, so the control clears its partner rather than letting that be sent.
+function PlaceFields({ form, setForm }) {
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v, ...(k === "year" && !v ? { termNumber: "" } : {}) }));
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <Field label="Year">
+        <select value={form.year ?? ""} onChange={e => set("year", e.target.value)} className={inputCls}>
+          <option value="">Not set</option>
+          {YEARS.map(y => <option key={y} value={y}>Year {y}</option>)}
+        </select>
+      </Field>
+      <Field label="Term">
+        <select value={form.termNumber ?? ""} onChange={e => set("termNumber", e.target.value)} disabled={!form.year} className={`${inputCls} disabled:bg-slate-50 disabled:text-slate-400`}>
+          <option value="">{form.year ? "Choose a term" : "Pick a year first"}</option>
+          {TERMS.map(t => <option key={t} value={t}>Term {t}</option>)}
+        </select>
+      </Field>
+    </div>
+  );
+}
 // Which semester a date falls in (ranges never overlap), or null if none does.
 const semesterOf = (date, semesters) => (semesters || []).find(s => date >= s.start && date <= s.end) || null;
 // Narrow a session list to the selected scope: "" = all, "unassigned" = outside
@@ -1435,6 +1513,8 @@ function ExecutiveDashboard({ store }) {
   const [year, setYear] = useState("all");
   const [course, setCourse] = useState("all");
   const [unit, setUnit] = useState("all");
+  // Curriculum stage — which year and term of the course. "all" = the whole course.
+  const [stage, setStage] = useState("all");   // "all" | "1-2" (year-term)
 
   const [err, setErr] = useState("");
   // exec-summary loads once; monthly attendance re-scopes to the Course/Unit filters.
@@ -1464,20 +1544,35 @@ function ExecutiveDashboard({ store }) {
     } finally { setLoading(false); }
   }, []);
   useEffect(() => { load({}, true); }, [load]);
-  const scopeOf = (c, u) => ({ ...(c !== "all" ? { courseId: c } : {}), ...(u !== "all" ? { unitId: u } : {}) });
+  const stageParts = (s) => (s === "all" ? {} : { year: s.split("-")[0], termNumber: s.split("-")[1] });
+  const scopeOf = (c, u, s) => ({ ...(c !== "all" ? { courseId: c } : {}), ...(u !== "all" ? { unitId: u } : {}), ...stageParts(s) });
   // Units are listed per course, so changing the course must clear a unit that isn't
   // in it — otherwise the two filters AND together into an impossible scope and every
   // attendance tile silently reads zero while the student tiles show real numbers.
-  const unitsForCourse = course === "all" ? store.units : store.units.filter(u => u.courseId === course);
+  const coursesUnits = course === "all" ? store.units : store.units.filter(u => u.courseId === course);
+  // Stages present in the current course, so the dropdown never offers a term this
+  // course doesn't teach.
+  const stages = Array.from(new Set(coursesUnits.filter(isPlaced).map(u => `${u.year}-${u.termNumber}`)))
+    .sort((a, b) => Number(a.split("-")[0]) - Number(b.split("-")[0]) || Number(a.split("-")[1]) - Number(b.split("-")[1]));
+  // The Unit dropdown follows the stage as well as the course, for the same reason.
+  const unitsForCourse = stage === "all" ? coursesUnits
+    : coursesUnits.filter(u => `${u.year}-${u.termNumber}` === stage);
   const onCourse = (c) => {
     const keep = c === "all" || store.units.some(u => u.id === unit && u.courseId === c);
     const nextUnit = keep ? unit : "all";
     // Reset the Year too: the new scope may have no data in the selected year, which
     // left the dropdown showing a year that no longer exists and every attendance
-    // figure blank — the same impossible-filter trap the unit reset fixes.
-    setCourse(c); setUnit(nextUnit); setYear("all"); load(scopeOf(c, nextUnit), false);
+    // figure blank — the same impossible-filter trap the unit reset fixes. The stage
+    // resets for the same reason — courses don't share term structures.
+    setCourse(c); setUnit(nextUnit); setStage("all"); setYear("all"); load(scopeOf(c, nextUnit, "all"), false);
   };
-  const onUnit = (u) => { setUnit(u); setYear("all"); load(scopeOf(course, u), false); };
+  const onUnit = (u) => { setUnit(u); setYear("all"); load(scopeOf(course, u, stage), false); };
+  // Changing the stage clears the unit — the chosen unit may not be taught then.
+  const onStage = (s) => {
+    const keep = s === "all" || coursesUnits.some(u => u.id === unit && `${u.year}-${u.termNumber}` === s);
+    const nextUnit = keep ? unit : "all";
+    setStage(s); setUnit(nextUnit); setYear("all"); load(scopeOf(course, nextUnit, s), false);
+  };
 
   const months = monthly?.months || [];
   // Plain calendar years, from 2025 onwards (the college's first year on the system).
@@ -1507,7 +1602,9 @@ function ExecutiveDashboard({ store }) {
   const totalCourses = course === "all" ? (exec?.totals?.courses ?? store.courses.length) : 1;
   const assessmentsCount = course === "all" ? (exec?.totals?.assessments ?? store.assessments.length) : courses.reduce((a, c) => a + (c.assessments || 0), 0);
   // A Unit filter narrows attendance only — say so rather than mixing scopes silently.
-  const unitScoped = unit !== "all";
+  // Both the Unit and Year/Term filters narrow the attendance query only — the
+  // student and results figures come from exec-summary, which is course-wide.
+  const unitScoped = unit !== "all" || stage !== "all";
 
   return (
     <>
@@ -1518,10 +1615,14 @@ function ExecutiveDashboard({ store }) {
         {/* "__none__" is a synthetic bucket for students with no course, not a real
             course — selecting it would filter attendance by a courseId no unit has. */}
         <FilterSelect label="Course" value={course} onChange={onCourse} options={[{ v: "all", l: "All courses" }, ...allCourses.filter(c => c.courseId !== "__none__").map(c => ({ v: c.courseId, l: c.code }))]} />
+        {stages.length > 0 && (
+          <FilterSelect label="Year / Term" value={stage} onChange={onStage}
+            options={[{ v: "all", l: "Whole course" }, ...stages.map(s => ({ v: s, l: `Year ${s.split("-")[0]} · Term ${s.split("-")[1]}` }))]} />
+        )}
         <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...unitsForCourse.map(m => ({ v: m.id, l: m.code }))]} />
       </div>
       {err && <div className="mb-3 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 ring-1 ring-rose-200"><AlertCircle size={15} /> {err}</div>}
-      {unitScoped && <p className="mb-3 text-[11px] text-slate-400">Unit filter applies to the attendance figures; student and results figures cover the whole {course === "all" ? "college" : "course"}.</p>}
+      {unitScoped && <p className="mb-3 text-[11px] text-slate-400">The {unit !== "all" && stage !== "all" ? "Year / Term and Unit filters apply" : unit !== "all" ? "Unit filter applies" : "Year / Term filter applies"} to the attendance figures; student and results figures cover the whole {course === "all" ? "college" : "course"}.</p>}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         <ExecKpi label="Total Students" value={shownStudents} />
         <ExecKpi label="Total Courses" value={totalCourses} />
@@ -4350,7 +4451,9 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
   const [modal, setModal] = useState(false);
   const [step, setStep] = useState("details");       // details -> schedule (new courses only)
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ code: "", unitNumber: "", name: "", tutor: "", courseId: "", cohortId: "", termId: "" });
+  const [form, setForm] = useState({ code: "", unitNumber: "", name: "", tutor: "", courseId: "", cohortId: "", termId: "", year: "", termNumber: "" });
+  const [yearFilter, setYearFilter] = useState("");   // "" = any year, "none" = not classified
+  const [termFilter, setTermFilter] = useState("");   // "" = any term
   const [picked, setPicked] = useState([]);           // studentIds enrolled on this course
   const [pickQuery, setPickQuery] = useState("");     // search within the student picker
   const [sched, setSched] = useState({ start: todayISO(), end: "", hours: 3 });
@@ -4367,13 +4470,17 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
   const enrolledIds = (unitId) => store.students.filter(s => (s.unitIds || []).includes(unitId)).map(s => s.id);
   const openAdd = () => {
     setEdit(null); setStep("details"); setSavedId(null); setPicked([]); setPickQuery("");
-    setForm({ code: "", unitNumber: "", name: "", tutor: "", courseId: defaultCourse, cohortId: "", termId: "" });
+    // A new unit lands in whichever year/term is being filtered, so adding one while
+    // looking at "Year 1 · Term 2" files it there without re-picking.
+    setForm({ code: "", unitNumber: "", name: "", tutor: "", courseId: defaultCourse, cohortId: "", termId: "",
+      year: yearFilter && yearFilter !== "none" ? yearFilter : "", termNumber: yearFilter && yearFilter !== "none" ? termFilter : "" });
     setSched({ start: todayISO(), end: "", hours: 3 });
     setModal(true);
   };
   const openEdit = (m) => {
     setEdit(m); setStep("details"); setSavedId(m.id); setPicked(enrolledIds(m.id)); setPickQuery("");
-    setForm({ code: m.code, unitNumber: m.unitNumber || "", name: m.name, tutor: m.tutor || "", courseId: m.courseId || "", cohortId: m.cohortId || "", termId: m.termId || "" });
+    setForm({ code: m.code, unitNumber: m.unitNumber || "", name: m.name, tutor: m.tutor || "", courseId: m.courseId || "", cohortId: m.cohortId || "", termId: m.termId || "",
+      year: m.year ?? "", termNumber: m.termNumber ?? "" });
     setModal(true);
   };
   const togglePick = (id) => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
@@ -4413,11 +4520,20 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
   };
 
   const ql = query.trim().toLowerCase();
-  const list = store.units.filter(m => {
+  // Units in the chosen course, before the year/term filter — this is what the
+  // year/term bar offers its options from, so it never lists a term that the
+  // current course doesn't teach.
+  const inCourse = store.units.filter(m => {
     if (courseFilter === "none" && m.courseId) return false;
     if (courseFilter && courseFilter !== "none" && m.courseId !== courseFilter) return false;
-    return !ql || m.code.toLowerCase().includes(ql) || m.name.toLowerCase().includes(ql) || (m.tutor || "").toLowerCase().includes(ql);
+    return true;
   });
+  const list = inCourse
+    .filter(m => matchesPlace(m, yearFilter, termFilter))
+    .filter(m => !ql || m.code.toLowerCase().includes(ql) || m.name.toLowerCase().includes(ql) || (m.tutor || "").toLowerCase().includes(ql))
+    // Teaching order — year, then term, then unit number — so the gallery reads the
+    // way the course is actually delivered.
+    .sort((a, b) => placeKey(a) - placeKey(b) || (Number(a.unitNumber) || 999) - (Number(b.unitNumber) || 999) || a.code.localeCompare(b.code));
 
   // The course filter pills: All, each course, then "No course" if needed.
   const chips = [{ id: "", label: "All courses" },
@@ -4441,6 +4557,8 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
           })}
         </div>
       )}
+
+      <PlaceFilter units={inCourse} year={yearFilter} setYear={setYearFilter} term={termFilter} setTerm={setTermFilter} className="mb-4" />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
@@ -4481,8 +4599,10 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
                 {prog
                   ? <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide" style={{ color: prog.colour }}><Layers size={11} /> {prog.name}</p>
                   : <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-300">No course</p>}
-                {(uCohort || uTerm) && (
+                {(uCohort || uTerm || isPlaced(m)) && (
                   <p className="mb-1 flex flex-wrap items-center gap-1 text-[10px] font-bold">
+                    {/* Where the unit sits in the course structure — from Moodle. */}
+                    {isPlaced(m) && <span className="rounded px-1.5 py-0.5" style={{ background: `${NAVY}14`, color: NAVY }}>{placeLabel(m)}</span>}
                     {uCohort && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">{uCohort.name}</span>}
                     {uTerm && <span className={`rounded px-1.5 py-0.5 ${uState === "current" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{uTerm.name.replace("Year ", "Y").replace(" · Term ", "T")}{uState === "current" ? " · Current" : uState === "past" ? " · Ended" : " · Upcoming"}</span>}
                   </p>
@@ -4524,8 +4644,16 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
                 {store.courses.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </Field>
-            {/* Which intake + term this unit runs in. Optional, but needed for the
-                term-based attendance pause/activate. Term list follows the cohort. */}
+            {/* Where the unit sits in the course structure. Moodle fills this in for
+                imported units; it is set by hand for the rest. Purely descriptive —
+                it classifies and filters, and never affects registers. */}
+            <div className="rounded-xl bg-slate-50 p-3">
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Where it sits in the course</p>
+              <PlaceFields form={form} setForm={setForm} />
+              <p className="mt-2 text-[10px] leading-relaxed text-slate-400">Used to group and filter units. Terms run 1-6 across the two years.</p>
+            </div>
+            {/* Which intake + DATED term this unit runs in. Optional, but needed for
+                the term-based attendance pause/activate. Term list follows the cohort. */}
             <div className="grid grid-cols-2 gap-3">
               <Field label="Cohort">
                 <select value={form.cohortId} onChange={e => setForm(f => ({ ...f, cohortId: e.target.value, termId: "" }))} disabled={!form.courseId} className={inputCls}>
@@ -4533,7 +4661,7 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
                   {store.cohorts.filter(c => c.courseId === form.courseId).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </Field>
-              <Field label="Term">
+              <Field label="Dated term (registers)">
                 <select value={form.termId} onChange={e => setForm(f => ({ ...f, termId: e.target.value }))} disabled={!form.cohortId} className={inputCls}>
                   <option value="">— none —</option>
                   {store.terms.filter(t => t.cohortId === form.cohortId).sort((a, b) => a.year - b.year || a.index - b.index).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -4760,7 +4888,10 @@ function HndSemesters({ store }) {
    course, per student and overall.
    ============================================================ */
 const ASSESS_TYPES = ["Assignment", "Exam", "Presentation", "Project", "Portfolio"];
-const bandOf = (pct) => (pct == null ? null : pct >= 70 ? "Distinction" : pct >= 60 ? "Merit" : pct >= 40 ? "Pass" : "Fail");
+// The college's grade boundaries: 70+ Distinction, 60-69 Merit, 50-59 Pass, below
+// 50 Fail. The same boundaries live in the server's routes/assessments.js and
+// routes/student.js — a mark must never band differently on the two sides.
+const bandOf = (pct) => (pct == null ? null : pct >= 70 ? "Distinction" : pct >= 60 ? "Merit" : pct >= 50 ? "Pass" : "Fail");
 const gradeTone = (band) =>
   band === "Distinction" ? { bg: "bg-emerald-100", text: "text-emerald-700", colour: "#059669" }
     : band === "Merit" ? { bg: "bg-blue-100", text: "text-blue-700", colour: "#2563eb" }
@@ -4896,13 +5027,19 @@ function AssessmentCourses({ store, onView }) {
 /* ----- Assessments ▸ Units: the same units as Registers, read-only ----- */
 function AssessmentUnits({ store, courseFilter, setCourseFilter, onView }) {
   const [query, setQuery] = useState("");
+  const [yearFilter, setYearFilter] = useState("");
+  const [termFilter, setTermFilter] = useState("");
   const perUnit = Object.fromEntries((store.assessmentOverview?.units || []).map(u => [u.id, u]));
   const ql = query.trim().toLowerCase();
-  const list = store.units.filter(u => {
+  const inCourse = store.units.filter(u => {
     if (courseFilter === "none" && u.courseId) return false;
     if (courseFilter && courseFilter !== "none" && u.courseId !== courseFilter) return false;
-    return !ql || u.code.toLowerCase().includes(ql) || u.name.toLowerCase().includes(ql);
+    return true;
   });
+  const list = inCourse
+    .filter(u => matchesPlace(u, yearFilter, termFilter))
+    .filter(u => !ql || u.code.toLowerCase().includes(ql) || u.name.toLowerCase().includes(ql))
+    .sort((a, b) => placeKey(a) - placeKey(b) || (Number(a.unitNumber) || 999) - (Number(b.unitNumber) || 999) || a.code.localeCompare(b.code));
   const courseById = Object.fromEntries(store.courses.map(c => [c.id, c]));
   const pills = [{ v: "", l: "All courses" }, ...store.courses.map(c => ({ v: c.id, l: c.name })), ...(store.units.some(u => !u.courseId) ? [{ v: "none", l: "No course" }] : [])];
   return (
@@ -4915,6 +5052,7 @@ function AssessmentUnits({ store, courseFilter, setCourseFilter, onView }) {
         </div>
         <div className="ml-auto flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200"><Search size={15} className="text-slate-400" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search units…" className="w-40 bg-transparent text-sm outline-none sm:w-56" /></div>
       </div>
+      <PlaceFilter units={inCourse} year={yearFilter} setYear={setYearFilter} term={termFilter} setTerm={setTermFilter} className="mb-4" />
       <p className="mb-3 text-[11px] text-slate-500">Units come from the Registers section — add or edit them there. Open one to define its assessments and enter marks.</p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {list.map((u, i) => {
@@ -4927,7 +5065,10 @@ function AssessmentUnits({ store, courseFilter, setCourseFilter, onView }) {
                 <span className="flex h-9 w-12 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{u.code.slice(0, 5)}</span>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-extrabold" style={{ color: NAVY_DARK }} title={u.name}>{u.name}</p>
-                  <p className="truncate text-[11px] text-slate-400">{u.unitNumber ? `Unit ${u.unitNumber} · ` : ""}{course ? course.name : "No course"} · {u.studentCount ?? 0} students</p>
+                  <p className="truncate text-[11px] text-slate-400">
+                    {isPlaced(u) && <span className="mr-1 rounded px-1 py-0.5 text-[10px] font-bold" style={{ background: `${NAVY}14`, color: NAVY }}>{placeShort(u)}</span>}
+                    {u.unitNumber ? `Unit ${u.unitNumber} · ` : ""}{course ? course.name : "No course"} · {u.studentCount ?? 0} students
+                  </p>
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-1.5 text-center">
@@ -5221,7 +5362,7 @@ function UnitGradeGrid({ store, unit, assessments }) {
           </tbody>
         </table>
       </div>
-      <p className="px-4 py-3 text-[11px] text-slate-400">Type a mark to change it, or clear the box to remove it. Nothing is saved until you press <b>Save marks</b>. Grades: 70%+ Distinction · 60–69 Merit · 40–59 Pass · below 40 Fail.</p>
+      <p className="px-4 py-3 text-[11px] text-slate-400">Type a mark to change it, or clear the box to remove it. Nothing is saved until you press <b>Save marks</b>. Grades: 70%+ Distinction · 60–69 Merit · 50–59 Pass · below 50 Fail.</p>
     </div>
   );
 }
@@ -5333,7 +5474,7 @@ function GradeEntry({ store, assessment, onBack }) {
         </div>
       </div>
       <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
-      <p className="mt-3 text-[11px] text-slate-400">Grades: 70%+ Distinction · 60–69 Merit · 40–59 Pass · below 40 Fail. Leave a mark blank to clear it.</p>
+      <p className="mt-3 text-[11px] text-slate-400">Grades: 70%+ Distinction · 60–69 Merit · 50–59 Pass · below 50 Fail. Leave a mark blank to clear it.</p>
     </>
   );
 }
@@ -5495,7 +5636,7 @@ function AssessmentRecords({ store }) {
         </div>
       </div>
       <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
-      <p className="mt-3 text-[11px] text-slate-400">{list.length.toLocaleString()} record{list.length === 1 ? "" : "s"}{query ? " matching" : ""}{fUnit ? " for this unit" : fCourse ? " for this course" : ""}{meta.capped ? ` (of ${meta.total.toLocaleString()} total — narrow the filter to load all)` : ""}. Grades: 70%+ Distinction · 60–69 Merit · 40–59 Pass · below 40 Fail.</p>
+      <p className="mt-3 text-[11px] text-slate-400">{list.length.toLocaleString()} record{list.length === 1 ? "" : "s"}{query ? " matching" : ""}{fUnit ? " for this unit" : fCourse ? " for this course" : ""}{meta.capped ? ` (of ${meta.total.toLocaleString()} total — narrow the filter to load all)` : ""}. Grades: 70%+ Distinction · 60–69 Merit · 50–59 Pass · below 50 Fail.</p>
 
       <Modal open={modal} onClose={() => !busy && setModal(false)} title={edit ? "Edit grade record" : "Add grade record"} width={520}>
         <div className="space-y-3">

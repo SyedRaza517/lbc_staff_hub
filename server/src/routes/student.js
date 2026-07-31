@@ -11,7 +11,9 @@ const { notifyAdmins } = require("../notify");
 
 router.use(requireAuth, requireStudent);
 
-const bandOf = (pct) => (pct == null ? null : pct >= 70 ? "Distinction" : pct >= 60 ? "Merit" : pct >= 40 ? "Pass" : "Fail");
+// 70+ Distinction, 60-69 Merit, 50-59 Pass, below 50 Fail. Must match the same
+// boundaries in routes/assessments.js and the client.
+const bandOf = (pct) => (pct == null ? null : pct >= 70 ? "Distinction" : pct >= 60 ? "Merit" : pct >= 50 ? "Pass" : "Fail");
 // Clamped 0–100, matching the admin gradebook: an historic mark above its
 // assessment maximum would otherwise show the student a percentage over 100.
 const pctOf = (marks, max) => (max > 0 ? Math.min(100, Math.max(0, Math.round((marks / max) * 1000) / 10)) : null);

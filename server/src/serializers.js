@@ -52,6 +52,9 @@ const sCohort = (c) => ({ id: c.id, name: c.name, courseId: c.courseId, startDat
 const sTerm = (t) => ({ id: t.id, cohortId: t.cohortId, year: t.year, index: t.index, name: t.name, start: t.start, end: t.end });
 const sUnit = (m) => ({
   id: m.id, code: m.code, unitNumber: m.unitNumber ?? "", name: m.name, tutor: m.tutor, courseId: m.courseId ?? null,
+  // Where the unit sits in the course structure ("Year 1 · Term 2"), null when it
+  // has not been classified. Separate from termId, which is a dated teaching term.
+  year: m.year ?? null, termNumber: m.termNumber ?? null,
   cohortId: m.cohortId ?? null, termId: m.termId ?? null,
   // Present only when the query asked Prisma to count relations.
   ...(m._count ? { sessionCount: m._count.sessions, studentCount: m._count.enrolments } : {}),

@@ -20,7 +20,13 @@ const TYPES = ["Assignment", "Exam", "Presentation", "Project", "Portfolio"];
 const str = (v) => (typeof v === "string" ? v.trim() : "");
 const isInt = (v) => Number.isInteger(v);
 // HND-style banding of a percentage.
-const bandOf = (pct) => (pct == null ? null : pct >= 70 ? "Distinction" : pct >= 60 ? "Merit" : pct >= 40 ? "Pass" : "Fail");
+// The college's grade boundaries: 70+ Distinction, 60-69 Merit, 50-59 Pass, below
+// 50 Fail. Repeated in routes/student.js and the client — keep all three in step.
+// PASS_MARK is the Pass boundary; pass RATES must use it rather than a literal, or
+// the headline pass rate silently disagrees with the Distinction/Merit/Pass counts
+// sitting beside it.
+const PASS_MARK = 50;
+const bandOf = (pct) => (pct == null ? null : pct >= 70 ? "Distinction" : pct >= 60 ? "Merit" : pct >= PASS_MARK ? "Pass" : "Fail");
 // Percentage of a mark out of its maximum, clamped to 0–100. The clamp is a safety
 // net for any historic row whose mark exceeds the assessment's current maximum — an
 // uncapped value would report >100% and skew averages, bands and pass rates.
@@ -227,7 +233,7 @@ router.get("/overview", requireAuth, async (_req, res) => {
     const pct = pctOf(g.marks, a.maxMarks); if (pct == null) continue;
     const band = bandOf(pct);
     const pm = perUnit.get(a.unitId); if (pm) { pm.sum += pct; pm.n++; pm.dist[band]++; }
-    sumAll += pct; nAll++; distAll[band]++; if (pct >= 40) passAll++;
+    sumAll += pct; nAll++; distAll[band]++; if (pct >= PASS_MARK) passAll++;
   }
   const unitsOut = units.map((m) => {
     const pm = perUnit.get(m.id);
@@ -336,7 +342,7 @@ async function execSummary(req, res) {
     const g = perStudent.get(st.id);
     if (g && g.n > 0) {
       b.graded += 1; totalGraded += 1;
-      if (g.sum / g.n >= 40) { b.passed += 1; totalPassed += 1; }
+      if (g.sum / g.n >= PASS_MARK) { b.passed += 1; totalPassed += 1; }
     }
   }
   // Pass rate is measured over students who have actually been ASSESSED (graded),

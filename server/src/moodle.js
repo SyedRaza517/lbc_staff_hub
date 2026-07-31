@@ -57,6 +57,34 @@ function parseUnitSection(name) {
   return { number, name: title || raw, code: `UNIT ${number}` };
 }
 
+// Which year and term a unit is taught in.
+//
+// Moodle records this structurally: a section named "Year 1 - Term 1" holds one
+// `subsection` activity per unit, and that activity's customdata points at the unit's
+// own section id — e.g. {"sectionid":"11"}. So the term sections give section id →
+// {year, term}, which is then matched against the units by their section id.
+//
+// Matching on the id rather than the repeated unit name matters: the same unit name
+// appears in several courses, and the names are inconsistently punctuated.
+const TERM_RE = /year\s*(\d+)\s*[-–]?\s*term\s*(\d+)/i;
+function termsBySectionId(sections) {
+  const out = new Map();
+  for (const sec of sections) {
+    const m = String(sec.name || "").match(TERM_RE);
+    if (!m) continue;
+    const place = { year: Number(m[1]), termNumber: Number(m[2]) };
+    for (const mod of sec.modules || []) {
+      if (mod.modname !== "subsection") continue;
+      let target = null;
+      try { target = Number(JSON.parse(mod.customdata || "{}").sectionid); } catch (_) { /* not a link we understand */ }
+      // Term sections also carry non-unit subsections such as "Useful Links"; those
+      // simply never match a unit section, so they fall away on their own.
+      if (Number.isFinite(target)) out.set(target, place);
+    }
+  }
+  return out;
+}
+
 const clean = (s) => String(s ?? "").replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").trim();
 const initialsOf = (f, l) => `${clean(f)[0] || ""}${clean(l)[0] || ""}`.toUpperCase() || "??";
 const PALETTE = ["#1a3a8f", "#9e1b32", "#0d7a5f", "#b45309", "#6d28d9", "#0e7490", "#be123c"];
@@ -147,12 +175,21 @@ async function syncFromMoodle({ dryRun = false } = {}) {
     const unitBySection = new Map(existingUnits.filter((u) => u.moodleSectionId != null).map((u) => [u.moodleSectionId, u]));
     const unitByCode = new Map(existingUnits.map((u) => [u.code, u]));
 
+    const placeOf = termsBySectionId(sections);
+    const unplaced = [];
+
     const unitByCmid = new Map();  // course-module id → unit, to trace a grade item home
     for (const { sec, parsed } of unitSections) {
+      // A unit outside every "Year N - Term M" section keeps year/term null rather
+      // than being guessed at — it is reported below so someone can place it.
+      const place = placeOf.get(sec.id) || null;
+      if (!place) unplaced.push(parsed.code);
       const data = {
         code: parsed.code,
         unitNumber: parsed.number,
         name: parsed.name,
+        year: place ? place.year : null,
+        termNumber: place ? place.termNumber : null,
         courseId: dbCourse ? dbCourse.id : null,
         moodleSectionId: sec.id,
         moodleCourseId: course.id,
@@ -175,6 +212,9 @@ async function syncFromMoodle({ dryRun = false } = {}) {
       // assessments and grades are still counted as new.
       const ref = unit || { id: null, code: parsed.code };
       for (const mod of sec.modules || []) unitByCmid.set(mod.id, ref);
+    }
+    if (unplaced.length) {
+      note(`${label}: ${unplaced.join(", ")} ${unplaced.length === 1 ? "is" : "are"} not inside any "Year N - Term M" section in Moodle, so ${unplaced.length === 1 ? "it has" : "they have"} no year or term. Set ${unplaced.length === 1 ? "it" : "them"} on the Registers tab, or move ${unplaced.length === 1 ? "it" : "them"} into a term in Moodle and sync again.`);
     }
 
     // ---------- Students (role "student" only) ----------

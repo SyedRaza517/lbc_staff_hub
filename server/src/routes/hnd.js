@@ -119,6 +119,23 @@ async function resolveCohortTerm(rawCohort, rawTerm) {
   return { cohortId, termId: null };
 }
 
+// Where a unit sits in the course structure: "Year 1 · Term 2". Both parts are set
+// together or both cleared — a year with no term (or the reverse) is a half-placement
+// that no filter could show sensibly. Terms are numbered 1-6 straight through, because
+// the college calls Year 2's first term "Term 4".
+const MAX_YEAR = 2;
+const MAX_TERM = 6;
+function placeFromBody(body) {
+  const blank = (v) => v === undefined || v === null || v === "";
+  if (blank(body?.year) && blank(body?.termNumber)) return { year: null, termNumber: null };
+  if (blank(body?.year) || blank(body?.termNumber)) return { error: "Choose both a year and a term, or neither" };
+  const year = Number(body.year);
+  const termNumber = Number(body.termNumber);
+  if (!Number.isInteger(year) || year < 1 || year > MAX_YEAR) return { error: `Year must be between 1 and ${MAX_YEAR}` };
+  if (!Number.isInteger(termNumber) || termNumber < 1 || termNumber > MAX_TERM) return { error: `Term must be between 1 and ${MAX_TERM}` };
+  return { year, termNumber };
+}
+
 router.get("/courses", requireAuth, async (_req, res) => {
   const rows = await prisma.course.findMany({
     orderBy: { name: "asc" },
@@ -323,9 +340,15 @@ router.post("/units", requireAuth, requireHndWrite, async (req, res) => {
   if (clash) return res.status(409).json({ error: courseId ? `Unit code "${code}" already exists in this course` : `Unit code "${code}" already exists among units with no course` });
   const ct = await resolveCohortTerm(req.body?.cohortId, req.body?.termId);
   if (ct.error) return res.status(400).json({ error: ct.error });
+  const place = placeFromBody(req.body);
+  if (place.error) return res.status(400).json({ error: place.error });
   try {
     const m = await prisma.unit.create({
-      data: { code, unitNumber: str(req.body?.unitNumber), name, tutor: str(req.body?.tutor), courseId, cohortId: ct.cohortId, termId: ct.termId },
+      data: {
+        code, unitNumber: str(req.body?.unitNumber), name, tutor: str(req.body?.tutor), courseId,
+        year: place.year, termNumber: place.termNumber,
+        cohortId: ct.cohortId, termId: ct.termId,
+      },
     });
     res.status(201).json(sUnit(m));
   } catch (e) {
@@ -361,6 +384,15 @@ router.put("/units/:id", requireAuth, requireHndWrite, async (req, res) => {
   }
   if (req.body?.tutor !== undefined) data.tutor = str(req.body.tutor);
   if (req.body?.unitNumber !== undefined) data.unitNumber = str(req.body.unitNumber);
+  // Year/term travel together — "Year 1" with no term is not a placement.
+  if (req.body?.year !== undefined || req.body?.termNumber !== undefined) {
+    const place = placeFromBody({
+      year: req.body?.year !== undefined ? req.body.year : existing.year,
+      termNumber: req.body?.termNumber !== undefined ? req.body.termNumber : existing.termNumber,
+    });
+    if (place.error) return res.status(400).json({ error: place.error });
+    data.year = place.year; data.termNumber = place.termNumber;
+  }
   // cohort/term are set together (the UI picks a cohort then its term).
   if (req.body?.cohortId !== undefined || req.body?.termId !== undefined) {
     const ct = await resolveCohortTerm(req.body?.cohortId, req.body?.termId);
@@ -783,8 +815,16 @@ router.get("/attendance/monthly", requireAuth, async (req, res) => {
   const studentId = str(req.query?.studentId);
   const unitId = str(req.query?.unitId);
   const courseId = str(req.query?.courseId);
-  // Only join Unit when we need to filter by course.
-  const unitJoin = courseId ? `JOIN "Unit" u ON u.id = se."unitId"` : "";
+  // Curriculum stage — "Year 1 · Term 2". Narrows to the units taught at that point
+  // in the course. Ignored unless it parses to a sensible number, so a stray query
+  // string can never silently empty the dashboard.
+  const yearNum = Number(req.query?.year);
+  const termNum = Number(req.query?.termNumber);
+  const byYear = Number.isInteger(yearNum) && yearNum >= 1 && yearNum <= MAX_YEAR;
+  const byTerm = Number.isInteger(termNum) && termNum >= 1 && termNum <= MAX_TERM;
+  // Join Unit when filtering by course or by curriculum stage.
+  const needUnit = Boolean(courseId || byYear || byTerm);
+  const unitJoin = needUnit ? `JOIN "Unit" u ON u.id = se."unitId"` : "";
   const base = `
     SELECT left(se.date, 7) ym,
       count(*) FILTER (WHERE am.status='P')::int p,
@@ -796,6 +836,8 @@ router.get("/attendance/monthly", requireAuth, async (req, res) => {
   if (studentId) { params.push(studentId); conds.push(`am."studentId" = $${params.length}`); }
   if (unitId) { params.push(unitId); conds.push(`se."unitId" = $${params.length}`); }
   if (courseId) { params.push(courseId); conds.push(`u."courseId" = $${params.length}`); }
+  if (byYear) { params.push(yearNum); conds.push(`u."year" = $${params.length}`); }
+  if (byTerm) { params.push(termNum); conds.push(`u."termNumber" = $${params.length}`); }
   const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
   const rows = await prisma.$queryRawUnsafe(`${base}${where} GROUP BY 1 ORDER BY 1`, ...params);
   let P = 0, L = 0, E = 0, A = 0;
@@ -807,10 +849,12 @@ router.get("/attendance/monthly", requireAuth, async (req, res) => {
   const t = summariseCounts(P, L, E, A);
   // Session count under the SAME course/unit scope (independent of student/marks),
   // so the dashboard's "Total Sessions" tracks the filters too.
-  const sJoin = courseId ? `JOIN "Unit" u ON u.id = se."unitId"` : "";
+  const sJoin = needUnit ? `JOIN "Unit" u ON u.id = se."unitId"` : "";
   const sConds = [], sParams = [];
   if (unitId) { sParams.push(unitId); sConds.push(`se."unitId" = $${sParams.length}`); }
   if (courseId) { sParams.push(courseId); sConds.push(`u."courseId" = $${sParams.length}`); }
+  if (byYear) { sParams.push(yearNum); sConds.push(`u."year" = $${sParams.length}`); }
+  if (byTerm) { sParams.push(termNum); sConds.push(`u."termNumber" = $${sParams.length}`); }
   const sWhere = sConds.length ? ` WHERE ${sConds.join(" AND ")}` : "";
   const sessRows = await prisma.$queryRawUnsafe(`SELECT count(*)::int n FROM "HndSession" se ${sJoin}${sWhere}`, ...sParams);
   res.json({ months, totals: { pct: t.pct, marked: t.marked, present: P, late: L, excused: E, absent: A }, sessions: sessRows[0]?.n || 0 });

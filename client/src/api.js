@@ -179,7 +179,9 @@ export const api = {
   saveRegister: (sessionId, marks, override) => request(`/hnd/sessions/${sessionId}/register`, { method: "PUT", body: { marks, ...(override ? { override: true } : {}) } }),
   // semesterId: "" = all semesters, "unassigned" = sessions outside every semester
   getAttendance: (semesterId, termId) => request(`/hnd/attendance${termId ? `?termId=${encodeURIComponent(termId)}` : semesterId ? `?semesterId=${encodeURIComponent(semesterId)}` : ""}`),
-  attendanceMonthly: (opts = {}) => { const q = new URLSearchParams(); if (opts.studentId) q.set("studentId", opts.studentId); if (opts.unitId) q.set("unitId", opts.unitId); if (opts.courseId) q.set("courseId", opts.courseId); const s = q.toString(); return request(`/hnd/attendance/monthly${s ? `?${s}` : ""}`); },
+  // year/termNumber scope to a curriculum stage ("Year 1 · Term 2") by narrowing to
+  // the units taught at that point in the course.
+  attendanceMonthly: (opts = {}) => { const q = new URLSearchParams(); if (opts.studentId) q.set("studentId", opts.studentId); if (opts.unitId) q.set("unitId", opts.unitId); if (opts.courseId) q.set("courseId", opts.courseId); if (opts.year) q.set("year", opts.year); if (opts.termNumber) q.set("termNumber", opts.termNumber); const s = q.toString(); return request(`/hnd/attendance/monthly${s ? `?${s}` : ""}`); },
   // A student's attendance grouped by term (current + previous terms).
   studentTermAttendance: (id) => request(`/hnd/students/${id}/attendance-terms`),
   // PAT (Personal Academic Tutor) interactions
