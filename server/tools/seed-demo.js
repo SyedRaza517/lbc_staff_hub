@@ -8,10 +8,10 @@
 //   node seed-demo.js
 //
 // Login afterwards:  raza@lbc.ac.uk / 123456789  (super admin)
-require("dotenv").config();
+require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 const crypto = require("crypto");
 const { PrismaClient } = require("@prisma/client");
-const { hashPassword } = require("./src/auth");
+const { hashPassword } = require("../src/auth");
 const prisma = new PrismaClient();
 
 const uid = () => crypto.randomUUID();

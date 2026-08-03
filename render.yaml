@@ -28,9 +28,29 @@ services:
         sync: false              # your dashboard URL, e.g. https://lbc-hub.vercel.app  (set after step 2)
       - key: CORS_ORIGINS
         sync: false              # dashboard URL + mobile: "https://lbc-hub.vercel.app,capacitor://localhost,http://localhost"
-      # --- email (optional; console-stub if omitted) ---
+      - key: APP_TIMEZONE
+        value: Europe/London     # the organisation's wall clock; drives dates, the term
+                                 # gate and the 02:00 Moodle sync
+      # --- Moodle (VLE) import ---
+      # WITHOUT these the whole VLE feature silently does nothing in production: the
+      # "Sync now" button reports "not set up" and the nightly job never runs. They
+      # live in server/.env locally, which is gitignored and never reaches Render, so
+      # this is a difference that only shows up once deployed.
+      - key: MOODLE_URL
+        sync: false              # e.g. https://lbcvle.uk  (no trailing slash, no /login)
+      - key: MOODLE_TOKEN
+        sync: false              # the 32-character web-services token — a secret
+      - key: MOODLE_AUTO_SYNC
+        value: "on"              # "off" disables the 02:00 nightly import
+      # --- email ---
+      # REQUIRED in production. With none of these set, sendEmail falls back to a
+      # console stub: nobody receives anything, and the password-reset LINK is printed
+      # into Render's log stream, where anyone with log access can use it. Render's
+      # free tier also blocks outbound SMTP, so RESEND_API_KEY is the one to use.
+      - key: RESEND_API_KEY
+        sync: false              # preferred — HTTP API, works on the free plan
       - key: SMTP_HOST
-        sync: false
+        sync: false              # alternative to Resend; blocked on Render free
       - key: SMTP_PORT
         sync: false
       - key: SMTP_SECURE

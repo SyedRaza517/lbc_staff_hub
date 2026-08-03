@@ -7,7 +7,7 @@
 //      still running or already finished.
 //
 // Prints no student names. Run from the server folder:  node moodle-attendance-probe.js
-require("dotenv").config();
+require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
 const BASE = (process.env.MOODLE_URL || "").replace(/\/+$/, "");
 const TOKEN = process.env.MOODLE_TOKEN || "";

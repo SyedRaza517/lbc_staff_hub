@@ -171,7 +171,11 @@ export function useApiStore(notify, user) {
   const effectiveAllowance = useCallback((id, year = thisYear) => { const s = staff.find((x) => x.id === id); return (s?.allowance || 0) + adjDays(id, year); }, [staff, adjDays, thisYear]);
   // The bookable pot (e.g. 20): total entitlement minus the 8 bank holidays, which
   // are never bookable. This is the "total" on the Holiday Allowance card.
-  const bookableAllowance = useCallback((id, year = thisYear) => Math.max(0, effectiveAllowance(id, year) - bankHolidayTotal), [effectiveAllowance, bankHolidayTotal, thisYear]);
+  // The bank-holiday pot is per YEAR, matching the server's bankHolidayCount(year).
+  // Using the current year's count while scoping everything else to the requested one
+  // meant a January booking made in December could be sized against the wrong pot.
+  const bankHolidayCountIn = useCallback((year) => bankHolidays.filter((h) => h.date.slice(0, 4) === String(year)).length, [bankHolidays]);
+  const bookableAllowance = useCallback((id, year = thisYear) => Math.max(0, effectiveAllowance(id, year) - bankHolidayCountIn(year)), [effectiveAllowance, bankHolidayCountIn, thisYear]);
   // Remaining in a specific leave year. Booking forms MUST pass the year they are
   // booking into - pinning this to the current year stopped staff booking January
   // leave in December, and hid next year's already-approved bookings.
@@ -291,6 +295,7 @@ export function useApiStore(notify, user) {
     saveSummary: run((date, text) => api.saveSummary(date, text), "Daily summary saved"),
     // leave
     requestLeave: run((data) => api.requestLeave(data), "Leave request submitted"),
+    cancelLeave: run((id) => api.cancelLeave(id), "Leave cancelled — those days are back in the allowance"),
     // Admin adds an already-approved holiday: create the request, then approve it in
     // one action so it lands straight on the calendar. The allowance is still enforced
     // server-side on the approval (paid types); unpaid never draws down.
@@ -363,8 +368,10 @@ export function useApiStore(notify, user) {
         const made = r?.created ?? 0;
         const parts = [made ? `${made} register${made === 1 ? "" : "s"} created` : "No new registers — they already exist"];
         if (r?.truncatedAt) parts.push(`stopped at ${r.truncatedAt} (60-week limit)`);
-        if (r?.strayCount) parts.push(`${r.strayCount} existing register${r.strayCount === 1 ? "" : "s"} fall outside these dates`);
-        notify?.(parts.join(" · "), r?.truncatedAt || r?.strayCount ? "error" : "success");
+        // Registers outside the window are usually a PREVIOUS term's — normal, worth
+        // mentioning, not a failure. Only truncation means something was lost.
+        if (r?.strayCount) parts.push(`${r.strayCount} other register${r.strayCount === 1 ? "" : "s"} on this unit sit outside these dates`);
+        notify?.(parts.join(" · "), r?.truncatedAt ? "error" : "success");
         refreshHnd().catch(() => {});
         return r;
       } catch (e) {

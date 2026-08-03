@@ -174,6 +174,10 @@ router.put("/:id/access", requireAuth, requireSuperAdmin, async (req, res) => {
 router.post("/:id/invite", requireAuth, requireAnyPage(["staff", "settings"]), async (req, res) => {
   const staff = await prisma.staff.findUnique({ where: { id: req.params.id } });
   if (!staff) return res.status(404).json({ error: "Staff not found" });
+  // The last staff-mutating route without the guard. Re-sending an invite emails a
+  // link that sets a password, so it belongs behind the same protection as the rest.
+  const blockedInvite = guardSuperAdmin(staff, req);
+  if (blockedInvite) return res.status(403).json({ error: blockedInvite });
   if (!staff.pendingActivation) return res.status(400).json({ error: "This account is already active" });
   await sendInvite(staff, { invitedBy: req.user.name });
   res.json({ ok: true, message: `Invitation re-sent to ${staff.email}` });

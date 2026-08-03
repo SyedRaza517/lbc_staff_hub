@@ -135,29 +135,46 @@ router.post("/", requireAuth, async (req, res) => {
 // kept consuming the allowance for good, and the only workaround (a balance
 // adjustment) then applied to every future year as well.
 router.delete("/:id", requireAuth, async (req, res) => {
-  const existing = await prisma.leave.findUnique({ where: { id: req.params.id } });
-  if (!existing) return res.status(404).json({ error: "Leave not found" });
+  // Read the row once outside the lock only to learn WHOSE queue to join — every
+  // check that matters is redone inside it. Guarding on a row read beforehand let a
+  // staff member cancel a booking in the instant between their read and a manager's
+  // approval, defeating the "approved needs an admin" rule entirely.
+  const peek = await prisma.leave.findUnique({ where: { id: req.params.id }, select: { staffId: true } });
+  if (!peek) return res.status(404).json({ error: "Leave not found" });
   const isLeaveAdmin = hasPage(req.user, LEAVE_ADMIN_PAGES);
-  // Staff may withdraw their OWN request; only a leave admin can cancel someone
-  // else's, or anything already approved.
-  if (existing.staffId !== req.user.id && !isLeaveAdmin) return res.status(403).json({ error: "You can only cancel your own leave" });
-  if (existing.status === "approved" && !isLeaveAdmin) {
-    return res.status(403).json({ error: "This leave is already approved — ask an administrator to cancel it." });
-  }
-  // Cancelling leave that has already been taken would rewrite history; an admin can
-  // still do it, but ordinary staff cannot.
-  if (existing.end < today() && !isLeaveAdmin) {
-    return res.status(400).json({ error: "That leave has already been taken." });
-  }
-  await withStaffLock(existing.staffId, () => prisma.leave.delete({ where: { id: existing.id } }));
-  if (existing.staffId !== req.user.id) {
-    notifyStaff(existing.staffId, {
+
+  const outcome = await withStaffLock(peek.staffId, async () => {
+    const existing = await prisma.leave.findUnique({ where: { id: req.params.id } });
+    if (!existing) return { status: 404, body: { error: "Leave not found" } };
+    // Staff may withdraw their OWN request; only a leave admin can cancel someone
+    // else's, or anything already approved.
+    if (existing.staffId !== req.user.id && !isLeaveAdmin) return { status: 403, body: { error: "You can only cancel your own leave" } };
+    if (existing.status === "approved" && !isLeaveAdmin) {
+      return { status: 403, body: { error: "This leave is already approved — ask an administrator to cancel it." } };
+    }
+    // Cancelling leave already taken would rewrite history; an admin still can.
+    if (existing.end < today() && !isLeaveAdmin) {
+      return { status: 400, body: { error: "That leave has already been taken." } };
+    }
+    try {
+      await prisma.leave.delete({ where: { id: existing.id } });
+    } catch (e) {
+      // Already gone — a double-tap, or a retry on a flaky connection. Not an error.
+      if (e?.code === "P2025") return { status: 404, body: { error: "Leave not found" } };
+      throw e;
+    }
+    return { status: 200, body: { ok: true, days: existing.days }, cancelled: existing };
+  });
+
+  const c = outcome.cancelled;
+  if (c && c.staffId !== req.user.id) {
+    notifyStaff(c.staffId, {
       type: "info",
-      message: `${req.user.name} cancelled your ${existing.type} leave for ${existing.start} to ${existing.end}. Those days are back in your allowance.`,
+      message: `${req.user.name} cancelled your ${c.type} leave for ${c.start} to ${c.end}. Those days are back in your allowance.`,
       link: "leave",
     });
   }
-  res.json({ ok: true, days: existing.days });
+  res.status(outcome.status).json(outcome.body);
 });
 
 // PUT /api/leave/:id/decision  (admin) — approve / reject with optional note

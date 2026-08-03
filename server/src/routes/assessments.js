@@ -177,7 +177,10 @@ router.get("/:id/grades", requireAuth, async (req, res) => {
     rows: students.map((s) => {
       const g = byStudent.get(s.id);
       const pct = g ? pctOf(g.marks, a.maxMarks) : null;
-      return { student: sStudent(s), marks: g ? g.marks : null, grade: bandOf(pct), pct, enrolled: enrolments.some((e) => e.studentId === s.id) };
+      // source tells the marker whether this mark is protected from the Moodle sync
+      // ("manual") or will be refreshed by it ("moodle"). Without it, that guarantee
+      // was only observable on the flat /assessments/grades list.
+      return { student: sStudent(s), marks: g ? g.marks : null, grade: bandOf(pct), pct, source: g ? (g.source ?? "manual") : null, gradedBy: g ? g.gradedBy : null, enrolled: enrolments.some((e) => e.studentId === s.id) };
     }),
   });
 });
@@ -200,9 +203,21 @@ router.put("/:id/grades", requireAuth, requireAdmin, async (req, res) => {
     rows.push({ studentId, marks });
   }
   const ids = rows.map((r) => r.studentId);
+  if (ids.length !== new Set(ids).size) return res.status(400).json({ error: "The same student appears twice in one save" });
   if (ids.length) {
-    const found = await prisma.student.count({ where: { id: { in: ids } } });
-    if (found !== new Set(ids).size) return res.status(400).json({ error: "One or more students do not exist" });
+    // Enrolment, not mere existence — the register endpoint already works this way.
+    // Checking only that the student exists let a mistyped id attach a mark to
+    // somebody who was never on the unit.
+    const enrolled = await prisma.enrolment.findMany({ where: { unitId: a.unitId, studentId: { in: ids } }, select: { studentId: true } });
+    const okIds = new Set(enrolled.map((e) => e.studentId));
+    // A student marked before being un-enrolled stays editable, so historic marks
+    // remain correctable.
+    if (okIds.size !== ids.length) {
+      const existing = await prisma.assessmentGrade.findMany({ where: { assessmentId: a.id, studentId: { in: ids } }, select: { studentId: true } });
+      for (const e of existing) okIds.add(e.studentId);
+    }
+    const stray = ids.filter((id) => !okIds.has(id));
+    if (stray.length) return res.status(400).json({ error: `${stray.length} student${stray.length === 1 ? " is" : "s are"} not enrolled on this unit` });
   }
   const gradedBy = req.user?.name || null;
   await prisma.$transaction(rows.map((r) => (

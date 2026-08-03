@@ -31,18 +31,30 @@ const str = (v) => (typeof v === "string" ? v.trim() : "");
 // each address gets a small burst allowance.
 const SIGNUP_HITS = new Map();
 const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
-const SIGNUP_MAX = 5;
+// A whole college shares one address behind NAT, so this has to accommodate a real
+// enrolment session — 128 students registering from campus wifi in the same hour is
+// normal, not abuse. The point is to stop a script, not to ration genuine sign-ups.
+const SIGNUP_MAX = 60;
+
+// Whether this address may make ANOTHER request. Read-only: a request is only counted
+// once it has passed validation, so somebody mistyping the form five times does not
+// spend their quota — that turned a fumbled sign-up into an hour-long lockout.
 function signupAllowed(ip) {
   const now = Date.now();
   const hits = (SIGNUP_HITS.get(ip) || []).filter((t) => now - t < SIGNUP_WINDOW_MS);
-  if (hits.length >= SIGNUP_MAX) { SIGNUP_HITS.set(ip, hits); return false; }
-  hits.push(now);
-  SIGNUP_HITS.set(ip, hits);
-  // Cheap sweep so the map can't grow without bound on a long-lived process.
+  if (hits.length) SIGNUP_HITS.set(ip, hits); else SIGNUP_HITS.delete(ip);
+  // Sweep here rather than on the record path, so a blocked address can't stop the
+  // map being tidied.
   if (SIGNUP_HITS.size > 5000) {
     for (const [k, v] of SIGNUP_HITS) if (!v.some((t) => now - t < SIGNUP_WINDOW_MS)) SIGNUP_HITS.delete(k);
   }
-  return true;
+  return hits.length < SIGNUP_MAX;
+}
+function recordSignup(ip) {
+  const now = Date.now();
+  const hits = (SIGNUP_HITS.get(ip) || []).filter((t) => now - t < SIGNUP_WINDOW_MS);
+  hits.push(now);
+  SIGNUP_HITS.set(ip, hits);
 }
 
 router.post("/", async (req, res) => {
@@ -159,8 +171,15 @@ router.post("/", async (req, res) => {
 
 // GET /api/signup — admin. Optional ?status=pending|approved|rejected
 router.get("/", requireAuth, requirePage("signups"), async (req, res) => {
-  const status = str(req.query?.status);
-  const where = ["pending", "approved", "rejected"].includes(status) ? { status } : {};
+  // Case-insensitive, and an unrecognised value is an ERROR rather than "no filter".
+  // Failing open meant ?status=PENDING or a typo returned every request, including
+  // approved ones — a "pending" queue quietly showing already-handled applications.
+  const status = str(req.query?.status).toLowerCase();
+  const ALLOWED = ["pending", "approved", "rejected"];
+  if (status && !ALLOWED.includes(status)) {
+    return res.status(400).json({ error: `status must be one of: ${ALLOWED.join(", ")}` });
+  }
+  const where = status ? { status } : {};
   const rows = await prisma.signupRequest.findMany({ where, orderBy: { createdAt: "desc" } });
   res.json(rows.map(sSignup));
 });

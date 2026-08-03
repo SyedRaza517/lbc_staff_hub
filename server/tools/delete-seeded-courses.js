@@ -13,8 +13,8 @@
 //
 //   node delete-seeded-courses.js            ← shows what would go, deletes nothing
 //   node delete-seeded-courses.js --confirm  ← actually deletes it
-require("dotenv").config();
-const prisma = require("./src/db");
+require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+const prisma = require("../src/db");
 
 const NAMES = [
   "HND Leadership and Management",

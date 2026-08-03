@@ -6,8 +6,8 @@
 // Prints both so we can see which one is trustworthy. No student names.
 //
 //   node moodle-timeline.js
-require("dotenv").config();
-const { parseUnitSection } = require("./src/moodle");
+require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+const { parseUnitSection } = require("../src/moodle");
 
 const BASE = (process.env.MOODLE_URL || "").replace(/\/+$/, "");
 const TOKEN = process.env.MOODLE_TOKEN || "";

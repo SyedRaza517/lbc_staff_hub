@@ -2,8 +2,8 @@
 // a delete would take with it before anything is deleted.
 //
 //   node audit-courses.js
-require("dotenv").config();
-const prisma = require("./src/db");
+require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+const prisma = require("../src/db");
 
 (async () => {
   const courses = await prisma.course.findMany({ orderBy: { name: "asc" } });

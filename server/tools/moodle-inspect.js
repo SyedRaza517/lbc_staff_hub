@@ -20,7 +20,7 @@
 // or add these two lines to server/.env and just run `node moodle-inspect.js`:
 //   MOODLE_URL="https://vle.yourcollege.ac.uk"
 //   MOODLE_TOKEN="your-token"
-require("dotenv").config();
+require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
 const BASE = (process.env.MOODLE_URL || "").replace(/\/+$/, "");
 const TOKEN = process.env.MOODLE_TOKEN || "";

@@ -155,6 +155,8 @@ export const api = {
   // leave
   listLeave: () => request("/leave"),
   requestLeave: (data) => request("/leave", { method: "POST", body: data }),
+  // Cancel/withdraw a booking and return the days to the allowance.
+  cancelLeave: (id) => request(`/leave/${id}`, { method: "DELETE" }),
   decideLeave: (id, status, note) => request(`/leave/${id}/decision`, { method: "PUT", body: { status, note } }),
   // adjustments
   listAdjustments: () => request("/adjustments"),

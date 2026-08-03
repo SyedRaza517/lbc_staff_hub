@@ -9,14 +9,14 @@
 //
 // From the server folder (reads MOODLE_URL / MOODLE_TOKEN from .env):
 //   node moodle-plan.js
-require("dotenv").config();
+require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
 const BASE = (process.env.MOODLE_URL || "").replace(/\/+$/, "");
 const TOKEN = process.env.MOODLE_TOKEN || "";
 
 // The same rules the sync applies — imported rather than copied, so this can never
 // drift from what the sync actually does.
-const { parseUnitSection } = require("./src/moodle");
+const { parseUnitSection } = require("../src/moodle");
 
 async function call(wsfunction, params = {}) {
   const body = new URLSearchParams({ wstoken: TOKEN, moodlewsrestformat: "json", wsfunction });

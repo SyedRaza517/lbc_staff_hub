@@ -35,9 +35,13 @@ router.get("/status", async (req, res) => {
   // (it keys off finishedAt) and the nightly job's 12-hour dedupe counted the ghost as
   // tonight's run and skipped. Anything still "running" while nothing is in flight is
   // by definition abandoned.
+  // Only rows old enough that no live run could still own them. isRunning() is
+  // per-process, so on a multi-instance deploy this GET could otherwise mark ANOTHER
+  // instance's in-flight sync as failed. A real run never approaches this age.
+  const STALE_AFTER_MS = 60 * 60 * 1000;
   if (!moodle.isRunning()) {
     await prisma.moodleSync.updateMany({
-      where: { status: "running" },
+      where: { status: "running", startedAt: { lt: new Date(Date.now() - STALE_AFTER_MS) } },
       data: { status: "failed", finishedAt: new Date(), error: "Interrupted — the server restarted while this sync was running." },
     });
   }

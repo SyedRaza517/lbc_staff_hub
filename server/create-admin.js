@@ -29,12 +29,14 @@ const BANNED = ["123456789", "password123", "password", "changeme", "admin123"];
     console.error("\n✗ Set ADMIN_EMAIL to a valid address.\n");
     process.exitCode = 1; return;
   }
-  if (password.length < MIN_PASSWORD) {
-    console.error(`\n✗ Set ADMIN_PASSWORD to at least ${MIN_PASSWORD} characters.\n`);
-    process.exitCode = 1; return;
-  }
+  // Banned list FIRST: every entry is shorter than MIN_PASSWORD, so checking length
+  // first made this branch unreachable and its specific warning never appeared.
   if (BANNED.includes(password.toLowerCase())) {
     console.error("\n✗ That is one of the default passwords this project used to ship. Choose another.\n");
+    process.exitCode = 1; return;
+  }
+  if (password.length < MIN_PASSWORD) {
+    console.error(`\n✗ Set ADMIN_PASSWORD to at least ${MIN_PASSWORD} characters.\n`);
     process.exitCode = 1; return;
   }
 
@@ -46,7 +48,11 @@ const BANNED = ["123456789", "password123", "password", "changeme", "admin123"];
       where: { email },
       // tokenVersion increments so any session or reset link issued under the previous
       // password stops working the moment this runs.
-      update: { passwordHash, accountRole: "ADMIN", isSuperAdmin: true, adminPages: null, pendingActivation: false, tokenVersion: { increment: 1 } },
+      update: { passwordHash, accountRole: "ADMIN", isSuperAdmin: true, adminPages: null, pendingActivation: false, tokenVersion: { increment: 1 },
+        // Also clear two-step verification. This is the documented recovery script,
+        // and an account locked out by a lost authenticator could not otherwise be
+        // recovered — the super-admin guard stops any other admin resetting it.
+        totpEnabled: false, totpSecret: null, mustSetupTotp: false },
       create: {
         name, jobTitle: "Administrator", dept: "Administration", email,
         passwordHash, accountRole: "ADMIN", isSuperAdmin: true, adminPages: null,

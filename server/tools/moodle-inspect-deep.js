@@ -14,7 +14,7 @@
 //
 // Run from the server folder (reads MOODLE_URL / MOODLE_TOKEN from .env):
 //   node moodle-inspect-deep.js
-require("dotenv").config();
+require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
 const BASE = (process.env.MOODLE_URL || "").replace(/\/+$/, "");
 const TOKEN = process.env.MOODLE_TOKEN || "";

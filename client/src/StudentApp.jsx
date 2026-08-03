@@ -30,11 +30,14 @@ const pctTone = (p) => p == null ? { bg: "bg-slate-100", text: "text-slate-400",
 // 60 Merit / 50 Pass / below 50 Fail, so a mark must never be coloured with the
 // attendance scale above — that painted every 50% Pass in the same red as a Fail,
 // contradicting the band tiles on the very same screen.
-const gradeTone = (p) => p == null ? { colour: "#94a3b8", soft: "#f1f5f9" }
-  : p >= 70 ? { colour: "#059669", soft: "#ecfdf5" }   // Distinction
-    : p >= 60 ? { colour: "#2563eb", soft: "#eff6ff" } // Merit
-      : p >= 50 ? { colour: "#ea580c", soft: "#fff7ed" } // Pass
-        : { colour: "#e11d48", soft: "#fff1f2" };       // Fail
+// Returns the SAME keys as pctTone. The two are used interchangeably at call sites,
+// so a narrower shape here silently rendered `ring-1 undefined undefined undefined`
+// on every mark chip — the class names vanish rather than erroring.
+const gradeTone = (p) => p == null ? { bg: "bg-slate-100", text: "text-slate-400", ring: "ring-slate-200", colour: "#94a3b8", soft: "#f1f5f9" }
+  : p >= 70 ? { bg: "bg-emerald-50", text: "text-emerald-700", ring: "ring-emerald-200", colour: "#059669", soft: "#ecfdf5" }   // Distinction
+    : p >= 60 ? { bg: "bg-blue-50", text: "text-blue-700", ring: "ring-blue-200", colour: "#2563eb", soft: "#eff6ff" }          // Merit
+      : p >= 50 ? { bg: "bg-amber-50", text: "text-amber-800", ring: "ring-amber-200", colour: "#b45309", soft: "#fffbeb" }     // Pass
+        : { bg: "bg-rose-50", text: "text-rose-800", ring: "ring-rose-200", colour: "#9e1b32", soft: "#fff1f2" };               // Fail
 const fmtDate = (iso) => { if (!iso) return null; const [y, m, d] = iso.split("-"); const mm = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1] || m; return `${Number(d)} ${mm} ${y}`; };
 
 // Attendance statuses. These are STATUS colours, so they always ship with the letter
@@ -186,7 +189,7 @@ export default function StudentApp({ user, logout }) {
       const which = [a.status === "rejected" && "attendance", r.status === "rejected" && "results", q.status === "rejected" && "messages"].filter(Boolean);
       setErr(failed.length === 3
         ? (failed[0].reason?.message || "Could not load your information")
-        : `Could not load your ${which.join(" or ")}. Pull down to refresh — the rest of this page is up to date.`);
+        : `Could not load your ${which.join(" or ")}. Tap the refresh icon at the top to try again — everything else here is up to date.`);
     }
     setBusy(false);
   }, []);
@@ -306,7 +309,9 @@ function Header({ title, screen, setScreen, user, onRefresh, busy }) {
 /* ============================== home ============================== */
 
 function Home({ user, attendance, results, queries, busy, err, setScreen, newReplies }) {
-  if (err) return <Screen><ErrBox>{err}</ErrBox></Screen>;
+  // Only blank the screen when nothing at all arrived. One failed call must not
+  // hide the data that did load — that was the old silent-wrong-data bug inverted.
+  if (err && !attendance && !results) return <Screen><ErrBox>{err}</ErrBox></Screen>;
   if (busy && !attendance && !results) return <LoadingScreen />;
 
   const cur = attendance?.current || {};
@@ -395,7 +400,7 @@ function HeroTile({ onClick, pct, label, tone, foot, i }) {
     <button onClick={onClick} className="press fade-up rounded-3xl p-4 shadow-card ring-1"
       style={{ background: tone.soft, "--tw-ring-color": tone.colour + "2e", animationDelay: `${i * 70}ms` }}>
       <div className="flex flex-col items-center">
-        <Ring pct={pct} size={112} stroke={11} />
+        <Ring pct={pct} size={112} stroke={11} colour={tone.colour} />
         <p className="mt-2.5 text-[11px] font-extrabold uppercase tracking-widest" style={{ color: tone.colour }}>{label}</p>
         <p className="mt-0.5 flex items-center gap-0.5 text-[11px] font-semibold text-slate-500">{foot}<ChevronRight size={12} className="text-slate-400" /></p>
       </div>
@@ -455,8 +460,8 @@ function UnitAtt({ mr, ended }) {
 }
 
 function AttendanceScreen({ attendance, busy, err }) {
-  if (err) return <Screen><ErrBox>{err}</ErrBox></Screen>;
-  if (!attendance) return busy ? <LoadingScreen /> : <Screen><ErrBox>Could not load attendance.</ErrBox></Screen>;
+  // The screen's OWN data decides; a failure elsewhere shows as text in its place.
+  if (!attendance) return busy ? <LoadingScreen /> : <Screen><ErrBox>{err || "Could not load attendance."}</ErrBox></Screen>;
   const cur = attendance.current || {};
   const curUnits = cur.units || cur.modules || [];
   const o = cur.overall || {};
@@ -514,19 +519,21 @@ function Empty({ icon: Icon, title, msg }) {
 /* ============================== results ============================== */
 
 function ResultsScreen({ results, busy, err }) {
-  if (err) return <Screen><ErrBox>{err}</ErrBox></Screen>;
-  if (!results) return busy ? <LoadingScreen /> : <Screen><ErrBox>Could not load results.</ErrBox></Screen>;
+  // Same here: missing results is what blanks this screen, not any error at all.
+  if (!results) return busy ? <LoadingScreen /> : <Screen><ErrBox>{err || "Could not load results."}</ErrBox></Screen>;
   const list = results.assessments || [];
   const graded = list.filter(a => a.pct != null);
   const bands = { Distinction: 0, Merit: 0, Pass: 0, Fail: 0 };
   graded.forEach(a => { if (bands[a.grade] != null) bands[a.grade]++; });
-  const BAND_C = { Distinction: "#059669", Merit: "#2563eb", Pass: "#ea580c", Fail: "#e11d48" };
+  // Derived from gradeTone so the band tiles can never drift from the mark chips
+  // below them — they disagreed once already.
+  const BAND_C = { Distinction: gradeTone(75).colour, Merit: gradeTone(65).colour, Pass: gradeTone(55).colour, Fail: gradeTone(20).colour };
 
   return (
     <div className="space-y-3.5 px-4 pb-8 pt-5">
       <div className="fade-up rounded-3xl p-5 shadow-card-lg ring-1" style={{ background: gradeTone(results.averagePct).soft, "--tw-ring-color": gradeTone(results.averagePct).colour + "2e" }}>
         <div className="flex flex-col items-center">
-          <Ring pct={results.averagePct ?? null} label="average" />
+          <Ring pct={results.averagePct ?? null} label="average" colour={gradeTone(results.averagePct).colour} />
           <span className="mt-2 rounded-xl px-3 py-1 text-sm font-extrabold ring-1" style={{ background: gradeTone(results.averagePct).colour + "14", color: gradeTone(results.averagePct).colour, "--tw-ring-color": gradeTone(results.averagePct).colour + "33" }}>
             {results.averageGrade || "Not graded yet"}
           </span>

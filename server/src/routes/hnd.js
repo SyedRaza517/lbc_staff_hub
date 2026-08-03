@@ -632,14 +632,22 @@ router.post("/sessions", requireAuth, requireHndWrite, async (req, res) => {
   if (!isTime(start) || !isTime(end)) return res.status(400).json({ error: "Valid start and end times required (HH:MM)" });
   if (end <= start) return res.status(400).json({ error: "End time must be after the start time" });
 
-  const s = await prisma.hndSession.create({
-    data: {
-      unitId, date, startTime: start, endTime: end,
-      description: str(req.body?.description) || mod.code,
-      audience: str(req.body?.audience) || "All students",
-      kind: str(req.body?.kind) || "",
-    },
-  });
+  // One register per unit / date / start-time is now enforced by the database. A
+  // clash must read as a conflict the admin can act on, not "Server error".
+  let s;
+  try {
+    s = await prisma.hndSession.create({
+      data: {
+        unitId, date, startTime: start, endTime: end,
+        description: str(req.body?.description) || mod.code,
+        audience: str(req.body?.audience) || "All students",
+        kind: str(req.body?.kind) || "",
+      },
+    });
+  } catch (e) {
+    if (e?.code === "P2002") return res.status(409).json({ error: `${mod.code} already has a register on ${date} at ${start}.` });
+    throw e;
+  }
   res.status(201).json(sSession(s));
 });
 
@@ -665,7 +673,14 @@ router.put("/sessions/:id", requireAuth, requireHndWrite, async (req, res) => {
   if (req.body?.description !== undefined) data.description = str(req.body.description);
   if (req.body?.audience !== undefined) data.audience = str(req.body.audience) || "All students";
   if (req.body?.kind !== undefined) data.kind = str(req.body.kind);
-  const s = await prisma.hndSession.update({ where: { id: existing.id }, data });
+  let s;
+  try {
+    s = await prisma.hndSession.update({ where: { id: existing.id }, data });
+  } catch (e) {
+    // Moving a register onto a slot the unit already uses.
+    if (e?.code === "P2002") return res.status(409).json({ error: "There is already a register for this unit at that date and time." });
+    throw e;
+  }
   res.json(sSession(s));
 });
 
@@ -737,7 +752,10 @@ router.post("/units/:id/sessions/generate", requireAuth, requireHndWrite, async 
     });
   }
   // skipDuplicates so a race with another generate is a no-op rather than a 500.
-  if (toCreate.length) await prisma.hndSession.createMany({ data: toCreate, skipDuplicates: true });
+  // Report what the DATABASE actually inserted. With skipDuplicates a concurrent run
+  // can win some rows, so the intended count over-states what this call achieved.
+  let createdCount = 0;
+  if (toCreate.length) createdCount = (await prisma.hndSession.createMany({ data: toCreate, skipDuplicates: true })).count;
 
   // Registers on this unit that fall OUTSIDE the requested window — usually a
   // previous run on a different weekday, which used to be invisible.
@@ -745,7 +763,7 @@ router.post("/units/:id/sessions/generate", requireAuth, requireHndWrite, async 
     where: { unitId: mod.id, OR: [{ date: { lt: start } }, { date: { gt: end } }] },
   });
   res.status(201).json({
-    ok: true, weeks: dates.length, registersPerWeek: blocks.length, created: toCreate.length,
+    ok: true, weeks: dates.length, registersPerWeek: blocks.length, created: createdCount,
     truncatedAt, strayCount,
   });
 });
@@ -996,12 +1014,19 @@ router.get("/attendance", requireAuth, async (req, res) => {
   const rows = students.map((s) => {
     const per = index.get(s.id) || new Map();
     const enrolledIds = new Set(s.enrolments.map((e) => e.unitId));
+    // Marks on units the student has since LEFT are still listed (flagged
+    // enrolled:false, so the register view can badge them) but are NOT counted in
+    // their overall percentage. Including them made this matrix disagree with both
+    // the per-student drill-down and the student's own app, which have always
+    // counted current enrolments only — one student, two compliance figures.
     const relevant = new Set([...enrolledIds, ...per.keys()]);
     const unitsOut = {};
     const acc = { P: 0, L: 0, E: 0, A: 0 };
     for (const modId of relevant) {
       const c = per.get(modId) || { p: 0, l: 0, e: 0, a: 0 };
-      unitsOut[modId] = { ...summariseCounts(c.p, c.l, c.e, c.a), enrolled: enrolledIds.has(modId) };
+      const enrolled = enrolledIds.has(modId);
+      unitsOut[modId] = { ...summariseCounts(c.p, c.l, c.e, c.a), enrolled };
+      if (!enrolled) continue;
       acc.P += c.p; acc.L += c.l; acc.E += c.e; acc.A += c.a;
     }
     return { student: sStudent(s), units: unitsOut, overall: summariseCounts(acc.P, acc.L, acc.E, acc.A) };

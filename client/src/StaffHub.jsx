@@ -199,11 +199,17 @@ const matchesPlace = (u, year, term) => {
 // Derived purely from its teaching window, so a unit with no dates is "unscheduled"
 // rather than being lumped in with either — guessing would put made-up units into
 // the "current attendance" figure, which is the one people act on.
+// The unit's own end date wins; its last register is the fallback. Both the server
+// and the student app use exactly this rule, so omitting the fallback here made the
+// Registers tab read "No dates set" for a unit the student app had already moved to
+// "Previous units" and dropped from their current attendance.
 const unitStatus = (u, today) => {
-  if (!u?.startDate || !u?.endDate) return "unscheduled";
-  if (today < u.startDate) return "future";
-  if (today > u.endDate) return "past";
-  return "current";
+  const end = u?.endDate || u?.lastSessionDate || null;
+  if (!u?.startDate && !end) return "unscheduled";
+  if (end && today > end) return "past";
+  if (u?.startDate && today < u.startDate) return "future";
+  // Running, or running-by-implication because it has registers but no dates.
+  return u?.startDate && u?.endDate ? "current" : (end ? "current" : "unscheduled");
 };
 const STATUS_META = {
   current:     { label: "Running now", short: "Running",   bg: "bg-emerald-100", text: "text-emerald-700", colour: "#059669" },
@@ -822,11 +828,29 @@ function BalanceScreen({ store, me }) {
 }
 function LeaveRow({ l, i = 0, store }) {
   const t = leaveTypeMeta(l.type); const T = t.icon;
+  const [busy, setBusy] = useState(false);
+  // Staff may withdraw a request that is still pending and still in the future. An
+  // approved booking needs an administrator — the server enforces both rules; this
+  // only decides whether to offer the button.
+  const canWithdraw = l.status === "pending" && l.end >= todayISO();
+  const withdraw = async () => {
+    const days = store.chargeableDays(l.start, l.end);
+    if (!window.confirm(`Withdraw your ${t.label.toLowerCase()} request for ${fmtDate(l.start)}${l.end !== l.start ? ` → ${fmtDate(l.end)}` : ""}?\n\n${days} day${days === 1 ? "" : "s"} will go back into your allowance.`)) return;
+    setBusy(true);
+    try { await store.cancelLeave(l.id); } catch (_) { /* the store toasts the error */ }
+    setBusy(false);
+  };
   return (
     <Card className="!p-3 fade-up" style={{ animationDelay: `${i * 50}ms` }}>
       <div className="flex items-center gap-3">
         <span className="flex h-10 w-10 items-center justify-center rounded-xl transition-transform duration-300 hover:scale-110" style={{ background: t.colour + "1a" }}><T size={18} style={{ color: t.colour }} /></span>
         <div className="flex-1"><p className="text-sm font-semibold text-slate-700">{t.label}</p><p className="text-xs text-slate-400">{fmtDate(l.start)}{l.end !== l.start && ` → ${fmtDate(l.end)}`} · {store.chargeableDays(l.start, l.end)}d</p></div>
+        {canWithdraw && (
+          <button onClick={withdraw} disabled={busy} title="Withdraw this request"
+            className="press rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500 disabled:opacity-40">
+            {busy ? <Loader size={15} /> : <Trash2 size={15} />}
+          </button>
+        )}
         <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${statusBadge(l.status)}`}>{l.status}</span>
       </div>
       {l.note && l.status !== "pending" && <p className="mt-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] italic text-slate-500">Manager: "{l.note}"</p>}
@@ -1566,7 +1590,12 @@ function ExecutiveDashboard({ store }) {
 
   const [err, setErr] = useState("");
   // exec-summary loads once; monthly attendance re-scopes to the Course/Unit filters.
+  // Only the NEWEST request may write state. Switching course twice quickly could
+  // otherwise let the first response land last, painting course A's attendance under
+  // course B's name — the same stale-numbers symptom by a different route.
+  const loadSeq = useRef(0);
   const load = useCallback(async (scope, withExec) => {
+    const seq = ++loadSeq.current;
     setLoading(true); setErr("");
     try {
       // Fetched INDEPENDENTLY: /assessments/exec-summary needs the assessments or
@@ -1576,6 +1605,7 @@ function ExecutiveDashboard({ store }) {
         withExec ? api.execSummary() : Promise.resolve(null),
         api.attendanceMonthly(scope || {}),
       ]);
+      if (seq !== loadSeq.current) return;   // a newer request has already answered
       const [execRes, monthlyRes] = results;
       if (withExec && execRes.status === "fulfilled") setExec(execRes.value);
       if (monthlyRes.status === "fulfilled") setMonthly(monthlyRes.value);
@@ -1588,12 +1618,13 @@ function ExecutiveDashboard({ store }) {
         const denied = failed.some((e) => e?.status === 403);
         setErr(denied
           ? "Some figures are hidden — your account doesn't have access to all of this data."
-          : `${failed[0]?.message || "Could not load some dashboard data"} — the attendance figures below are unavailable, not zero.`);
+          : `${failed[0]?.message || "Could not load some dashboard data"}${monthlyRes.status === "rejected" ? " — the attendance figures below are unavailable, not zero." : ""}`);
       }
-      setRefreshed(new Date());
+      // Do not stamp a fresh time over numbers that failed to refresh.
+      if (!failed.length) setRefreshed(new Date());
     } catch (e) {
-      setErr(e?.message || "Could not load dashboard data");
-    } finally { setLoading(false); }
+      if (seq === loadSeq.current) setErr(e?.message || "Could not load dashboard data");
+    } finally { if (seq === loadSeq.current) setLoading(false); }
   }, []);
   useEffect(() => { load({}, true); }, [load]);
   // Defensive on the argument: a missing stage previously threw inside the Refresh
@@ -1678,16 +1709,16 @@ function ExecutiveDashboard({ store }) {
           <FilterSelect label="Year / Term" value={stage} onChange={onStage}
             options={[{ v: "all", l: "Whole course" }, ...stages.map(s => ({ v: s, l: `Year ${s.split("-")[0]} · Term ${s.split("-")[1]}` }))]} />
         )}
-        <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...unitsForCourse.map(m => ({ v: m.id, l: `${m.code} — ${m.name}` }))]} />
+        <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...unitsForCourse.map(m => ({ v: m.id, l: course === "all" ? `${m.code} — ${m.name} · ${courses.find(c => c.id === m.courseId)?.code || "unassigned"}` : `${m.code} — ${m.name}` }))]} />
       </div>
       {err && <div className="mb-3 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 ring-1 ring-rose-200"><AlertCircle size={15} /> {err}</div>}
       {unitScoped && <p className="mb-3 text-[11px] text-slate-400">The {unit !== "all" && stage !== "all" ? "Year / Term and Unit filters apply" : unit !== "all" ? "Unit filter applies" : "Year / Term filter applies"} to the attendance figures; student and results figures cover the whole {course === "all" ? "college" : "course"}.</p>}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <ExecKpi label="Total Students" value={shownStudents} />
-        <ExecKpi label="Total Courses" value={totalCourses} />
+        <ExecKpi label="Total Students" value={exec ? shownStudents : "—"} />
+        <ExecKpi label="Total Courses" value={exec ? totalCourses : "—"} />
         <ExecKpi label="Attendance %" value={attPct == null ? "—" : `${attPct}%`} tone={pctColour(attPct)} />
         <ExecKpi label="Assessments" value={assessmentsCount == null ? "—" : assessmentsCount} />
-        <ExecKpi label="Student Pass Rate" value={shownPassRate == null ? "—" : `${shownPassRate}%`} tone={pctColour(shownPassRate)} sub={shownGraded ? `of ${shownGraded} assessed` : "no marks yet"} />
+        <ExecKpi label="Student Pass Rate" value={shownPassRate == null ? "—" : `${shownPassRate}%`} tone={pctColour(shownPassRate)} sub={shownPassed == null ? "unavailable" : shownGraded ? `of ${shownGraded} assessed` : "no marks yet"} />
         <ExecKpi label="Students Passed" value={shownPassed == null ? "—" : shownPassed} tone="#0d7a5f" />
         <ExecKpi label="Total Sessions" value={totalSessions == null ? "—" : totalSessions} sub={totalSessions == null ? "all years only" : undefined} />
         <ExecKpi label="Total Attendance" value={totalMarks == null ? "—" : kNum(totalMarks)} sub="marks recorded" />
@@ -1704,7 +1735,7 @@ function ExecutiveDashboard({ store }) {
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
-        <ChartCard title="Pass Rate % by Course Code">
+        <ChartCard title="Students passing (average ≥ 50%) by course">
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={courseData} layout="vertical" margin={{ top: 5, right: 24, left: 10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#eef1f6" horizontal={false} />
@@ -3744,7 +3775,10 @@ function AdminStudents({ store }) {
   const attnToday = todayISO();
   const unitEndById = {};
   (store.sessions || []).forEach(se => { const cur = unitEndById[se.unitId]; if (!cur || se.date > cur) unitEndById[se.unitId] = se.date; });
-  const isCurrentUnit = (mid) => { const end = unitEndById[mid]; return !end || end >= attnToday; };
+  // Same rule as unitStatus and the server: the unit's own end date wins, with the
+  // last session as the fallback. Using sessions alone made this drawer call a unit
+  // finished days before the Registers tab and the student's own app did.
+  const isCurrentUnit = (mid) => { const end = unitById[mid]?.endDate || unitEndById[mid]; return !end || end >= attnToday; };
   const currentPctOf = (s) => {
     const row = attnRowById[s.id];
     if (!row) return null;
@@ -4136,7 +4170,7 @@ function StudentAttendanceDetail({ student, store }) {
 
       <div className="grid grid-cols-3 gap-2">
         <MiniKpi label="Avg mark" value={assessDenied ? "🔒" : avgMark == null ? "—" : Math.round(avgMark)} tone={pctColour(avgMark)} />
-        <MiniKpi label="Pass rate" value={assessDenied ? "🔒" : passRate == null ? "—" : `${Math.round(passRate)}%`} tone={pctColour(passRate)} />
+        <MiniKpi label="Marks 50%+" value={assessDenied ? "🔒" : passRate == null ? "—" : `${Math.round(passRate)}%`} tone={pctColour(passRate)} />
         <MiniKpi label="Units done" value={assessDenied ? "🔒" : `${unitsWithMark}/${enrolledCount}`} tone={NAVY} />
         <MiniKpi label="Present" value={allOverall.P} tone="#0d7a5f" />
         <MiniKpi label="Absent" value={allOverall.A} tone={MAROON} />
@@ -4684,7 +4718,9 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
       const u = store.units.find(x => x.id === savedId);
       const start = u?.startDate && u.startDate < sched.start ? u.startDate : sched.start;
       const end = u?.endDate && u.endDate > sched.end ? u.endDate : sched.end;
-      if (start !== u?.startDate || end !== u?.endDate) await store.updateUnit(savedId, { startDate: start, endDate: end });
+      // Saved via the API directly rather than store.updateUnit, so this step does not
+      // fire its own "Unit updated" toast on top of the register result below.
+      if (start !== u?.startDate || end !== u?.endDate) await api.updateUnit(savedId, { startDate: start, endDate: end });
       await store.generateSessions(savedId, sched);
       setModal(false);
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
@@ -5220,7 +5256,7 @@ function AssessmentCourses({ store, onView }) {
                 <div className="mt-3 grid grid-cols-3 gap-1.5 text-center">
                   <div className="rounded-lg bg-slate-50 py-1.5"><p className="text-sm font-extrabold tabular-nums text-slate-700">{st.graded}</p><p className="text-[9px] uppercase tracking-wide text-slate-400">Marks</p></div>
                   <div className={`rounded-lg py-1.5 ${tone.bg}`}><p className={`text-sm font-extrabold tabular-nums ${tone.text}`}>{fmtPct(st.avgPct)}</p><p className="text-[9px] uppercase tracking-wide text-slate-400">Average</p></div>
-                  <div className="rounded-lg bg-slate-50 py-1.5"><p className="text-sm font-extrabold tabular-nums" style={{ color: pctColour(st.passRate) }}>{fmtPct(st.passRate)}</p><p className="text-[9px] uppercase tracking-wide text-slate-400">Pass</p></div>
+                  <div className="rounded-lg bg-slate-50 py-1.5"><p className="text-sm font-extrabold tabular-nums" style={{ color: pctColour(st.passRate) }}>{fmtPct(st.passRate)}</p><p className="text-[9px] uppercase tracking-wide text-slate-400">Marks 50%+</p></div>
                 </div>
                 <button onClick={() => onView(c.id)} className="press mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-slate-200 py-2 text-xs font-bold transition hover:border-indigo-300 hover:bg-indigo-50" style={{ color: NAVY }}>View units <ArrowRight size={15} /></button>
               </div>
@@ -5319,7 +5355,7 @@ function AssessmentsOverview({ store }) {
       <div className="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Assessments" value={o.assessments} sub="defined across units" Icon={ClipboardList} tone={NAVY} delay={0} animate />
         <StatCard label="Average mark" value={fmtPct(o.avgPct)} sub="across all grades" Icon={Percent} tone={pctTone(o.avgPct).colour} delay={60} animate />
-        <StatCard label="Pass rate" value={fmtPct(o.passRate)} sub="graded at 50%+" Icon={Award} tone={pctTone(o.passRate).colour} delay={120} animate />
+        <StatCard label="Marks at 50%+" value={fmtPct(o.passRate)} sub="share of graded submissions" Icon={Award} tone={pctTone(o.passRate).colour} delay={120} animate />
         <StatCard label="Grades entered" value={o.gradedSubmissions} sub="marked submissions" Icon={CheckCircle2} tone="#0d7a5f" delay={180} animate />
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -6706,7 +6742,11 @@ function MoodleCard({ store }) {
     };
     const id = setInterval(tick, 2000);
     return () => { live = false; clearInterval(id); };
-  }, [polling, store]);
+    // `store` is deliberately not a dependency: useApiStore returns a fresh object on
+    // every render, so listing it tore this interval down and rebuilt it continuously.
+    // The closure only calls store methods, which are stable enough for that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [polling]);
 
   const runPreview = async () => {
     setBusy("preview"); setPreview(null); setShowIssues(false);
