@@ -601,7 +601,8 @@ model StaffReview {
   dateCompleted String?                 // YYYY-MM-DD
   status        String   @default("submitted")  // draft | submitted
   answers       String   @default("{}")         // JSON, validated against the form
-  completedBy   String?                 // the admin who recorded it
+  completedBy   String?                 // whoever recorded it
+  origin        String   @default("admin")  // admin | self (submitted by the lecturer)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

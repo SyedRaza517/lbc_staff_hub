@@ -17,6 +17,10 @@
 const STRATEGIC = {
   type: "strategic",
   title: "Strategic Lecturer Self-Reflection",
+  // A SELF-reflection: the lecturer fills this in about their own term, so it is
+  // offered in the staff app as well as the admin console. The monthly review is
+  // written by a reviewer ABOUT a lecturer, so it stays admin-only.
+  selfService: true,
   blurb: "Your feedback supports excellence in teaching and learning.",
   sections: [
     {

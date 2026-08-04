@@ -231,6 +231,13 @@ export const api = {
   // The question definitions come FROM the server, so a new form or a reworded
   // question needs no client release.
   reviewForms: () => request("/staff-reviews/forms"),
+  // A staff member's OWN reflections, from the staff app. staffId is never sent —
+  // the server always uses the signed-in user, so there is no id to tamper with.
+  myReviewForms: () => request("/my-reviews/forms"),
+  listMyReviews: () => request("/my-reviews"),
+  addMyReview: (data) => request("/my-reviews", { method: "POST", body: data }),
+  updateMyReview: (id, data) => request(`/my-reviews/${id}`, { method: "PUT", body: data }),
+  removeMyReview: (id) => request(`/my-reviews/${id}`, { method: "DELETE" }),
   listStaffReviews: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/staff-reviews${q ? `?${q}` : ""}`); },
   getStaffReview: (id) => request(`/staff-reviews/${id}`),
   addStaffReview: (data) => request("/staff-reviews", { method: "POST", body: data }),

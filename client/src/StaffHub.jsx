@@ -440,7 +440,7 @@ export function StaffApp({ store, currentStaffId, setCurrentStaffId, logout, onC
   // Tapping a push notification opens the screen it refers to — the `link` the
   // server attached (e.g. "balance" for a leave decision, "approvals" for admins).
   useEffect(() => {
-    const KNOWN = ["home", "checkin", "balance", "calendar", "request", "documents", "approval", "summary", "timesheet", "more"];
+    const KNOWN = ["home", "checkin", "balance", "calendar", "request", "documents", "approval", "summary", "timesheet", "reflection", "more"];
     const onOpen = (e) => {
       const link = e.detail === "approvals" ? "approval" : e.detail;
       setScreen(KNOWN.includes(link) ? link : "home");
@@ -469,6 +469,7 @@ export function StaffApp({ store, currentStaffId, setCurrentStaffId, logout, onC
       {screen === "approval" && <ApprovalScreen store={store} me={me} />}
       {screen === "summary" && <SummaryScreen store={store} me={me} />}
       {screen === "timesheet" && <TimesheetScreen store={store} me={me} />}
+      {screen === "reflection" && <SelfReflectionScreen store={store} me={me} />}
       {screen === "more" && <MoreScreen store={store} me={me} logout={logout} onChangePassword={onChangePassword} onSwitchToAdmin={onSwitchToAdmin} />}
 
       {showNotes && <NotePanel store={store} onClose={() => setShowNotes(false)} />}
@@ -493,7 +494,7 @@ function StatusBar() {
 }
 
 function AppHeader({ me, staff, setCurrentStaffId, screen, setScreen, store, showNotes, setShowNotes }) {
-  const title = { home: "Staff Hub", checkin: "Daily Check-In", balance: "Holiday Balance", calendar: "Holiday Calendar", request: "Request Leave", documents: "Documents", approval: "Manager Approval", summary: "Daily Summary", timesheet: "My Timesheet", more: "More" }[screen];
+  const title = { home: "Staff Hub", checkin: "Daily Check-In", balance: "Holiday Balance", calendar: "Holiday Calendar", request: "Request Leave", documents: "Documents", approval: "Manager Approval", summary: "Daily Summary", timesheet: "My Timesheet", reflection: "Self-Reflection", more: "More" }[screen];
   const unread = store.notes.length;
   const greet = greetingFor();
   const Greet = greet.Icon;
@@ -577,6 +578,7 @@ const TILES = [
   { key: "approval", label: "Manager Approval", Icon: ThumbsUp, sub: "Review requests" },
   { key: "summary", label: "Staff Daily Summary", Icon: UserPlus, sub: "Log your day" },
   { key: "timesheet", label: "Send Timesheet", Icon: ClipboardList, sub: "Log hours & submit" },
+  { key: "reflection", label: "Self-Reflection", Icon: Award, sub: "Strategic lecturer review" },
   { key: "more", label: "More", Icon: ArrowRight, sub: "Profile & settings" },
 ];
 const STAFF_TIPS = [
@@ -4343,6 +4345,223 @@ function CourseMenu({ onEdit, onDelete, onCohorts, onSchedule, editLabel = "Edit
   );
 }
 
+/* ----- Staff app: my own Strategic Self-Reflection ----- */
+// The lecturer fills this in about their own term. It saves to the same table the
+// admin console reads, so a submission appears in Staff Reviews immediately.
+//
+// Reuses ReviewField / ReviewAnswers / srVisibleSections from the admin side — one
+// renderer, so a change to a question shows up identically in both places.
+function SelfReflectionScreen({ store, me }) {
+  const [forms, setForms] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [mode, setMode] = useState("list");     // list | fill | view
+  const [current, setCurrent] = useState(null); // the row being viewed/edited
+  const [answers, setAnswers] = useState({});
+  const [step, setStep] = useState(0);
+  const [pageErr, setPageErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr("");
+    try {
+      const [f, r] = await Promise.all([api.myReviewForms(), api.listMyReviews()]);
+      setForms(f); setRows(r);
+    } catch (e) { setErr(e.message || "Could not load your reflections"); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  // Only one self-service form today, but this stays generic so a second needs no
+  // change here — the server decides what a lecturer may fill in.
+  const form = forms[0] || null;
+  const pages = srVisibleSections(form, answers);
+  useEffect(() => { setStep(s => Math.min(s, Math.max(0, pages.length - 1))); }, [pages.length]);
+
+  // Android back: leave the form rather than the whole screen.
+  useBackHandler(mode !== "list", () => { setMode("list"); return true; });
+
+  const startNew = () => {
+    setCurrent(null);
+    // The name is theirs and the app already knows it.
+    setAnswers({ fullName: me.name });
+    setStep(0); setPageErr(""); setMode("fill");
+  };
+  const resume = (r) => { setCurrent(r); setAnswers(r.answers || {}); setStep(0); setPageErr(""); setMode("fill"); };
+  const view = (r) => { setCurrent(r); setMode("view"); };
+
+  const setAnswer = (id, v) => setAnswers(a => ({ ...a, [id]: v }));
+
+  const next = () => {
+    const missing = (pages[step]?.questions || []).filter(q => {
+      if (!q.required) return false;
+      const v = answers[q.id];
+      if (q.kind === "grid") return !v || q.rows.some(r => !v[r.key]);
+      return v == null || String(v).trim() === "";
+    });
+    if (missing.length) { setPageErr(`Please answer: ${missing.map(q => q.label).join(" · ")}`); return; }
+    setPageErr(""); setStep(s => Math.min(s + 1, pages.length - 1));
+  };
+  const back = () => { setPageErr(""); setStep(s => Math.max(0, s - 1)); };
+
+  const save = async (status) => {
+    setBusy(true); setPageErr("");
+    try {
+      const body = { type: form.type, answers, status };
+      if (current) await api.updateMyReview(current.id, body);
+      else await api.addMyReview(body);
+      store.notify(status === "draft" ? "Saved as a draft" : "Reflection submitted — thank you");
+      setMode("list");
+      await load();
+    } catch (e) {
+      setPageErr(e.message || "Could not save your reflection");
+    }
+    setBusy(false);
+  };
+
+  const discard = async () => {
+    setBusy(true);
+    try { await api.removeMyReview(confirmDiscard.id); setConfirmDiscard(null); await load(); store.notify("Draft discarded", "error"); }
+    catch (e) { store.notify(e.message || "Could not discard the draft", "error"); }
+    setBusy(false);
+  };
+
+  /* ---------------------------------------------------------------- list ---- */
+  if (mode === "list") {
+    return (
+      <Screen>
+        {err && <Card className="!bg-rose-50 !ring-rose-200 text-sm font-semibold text-rose-600">{err}</Card>}
+        {loading ? <><div className="skeleton h-24 rounded-2xl" /><div className="skeleton h-20 rounded-2xl" /></> : (
+          <>
+            <div className="animated-gradient relative overflow-hidden rounded-2xl p-4 text-white shadow-md fade-up" style={{ background: `linear-gradient(135deg, ${NAVY} 0%, ${NAVY_DARK} 55%, ${MAROON} 140%)`, backgroundSize: "200% 200%" }}>
+              <Sparkles size={56} className="float-slow absolute -right-2 -top-2 text-white/10" />
+              <p className="relative text-base font-extrabold">{form?.title || "Self-Reflection"}</p>
+              <p className="relative mt-1 text-[12px] text-white/75">{form?.blurb}</p>
+            </div>
+
+            {form
+              ? <button onClick={startNew} className="press flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3.5 text-sm font-bold text-white shadow-md" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>
+                  <Plus size={17} /> Start a new reflection
+                </button>
+              : <Card className="text-sm text-slate-500">No self-reflection form is available yet.</Card>}
+
+            <p className="px-1 pt-1 text-[11px] font-extrabold uppercase tracking-widest text-slate-400">My reflections</p>
+            {rows.length === 0 && <Card className="text-sm text-slate-400">You haven't completed one yet. Tap “Start a new reflection” above.</Card>}
+            {rows.map((r, i) => (
+              <Card key={r.id} className="!p-3.5 fade-up" style={{ animationDelay: `${i * 55}ms` }}>
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: (r.status === "draft" ? "#b4530922" : "#0d7a5f22") }}>
+                    <ClipboardList size={18} style={{ color: r.status === "draft" ? "#b45309" : "#0d7a5f" }} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-slate-700">{r.formTitle}</p>
+                    <p className="text-[11px] text-slate-400">
+                      {[r.term, r.academicYear].filter(Boolean).join(" · ") || "Not yet dated"}
+                      {r.dateCompleted ? ` · ${fmtDate(r.dateCompleted)}` : ""}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${r.status === "draft" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>
+                    {r.status === "draft" ? "Draft" : "Submitted"}
+                  </span>
+                </div>
+                <div className="mt-2.5 flex gap-2">
+                  <button onClick={() => view(r)} className="press flex-1 rounded-xl bg-slate-100 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-200">View</button>
+                  {r.status === "draft" && <>
+                    <button onClick={() => resume(r)} className="press flex-1 rounded-xl py-2 text-xs font-bold text-white" style={{ background: NAVY }}>Continue</button>
+                    <button onClick={() => setConfirmDiscard(r)} title="Discard draft" className="press rounded-xl bg-rose-50 px-3 py-2 text-rose-500 transition hover:bg-rose-100"><Trash2 size={15} /></button>
+                  </>}
+                </div>
+              </Card>
+            ))}
+            <p className="px-1 pb-2 text-center text-[10px] leading-relaxed text-slate-400">
+              Once submitted, your reflection goes to the college and can no longer be edited here.
+            </p>
+          </>
+        )}
+
+        <ConfirmDialog
+          open={!!confirmDiscard}
+          title="Discard this draft?"
+          message="Everything you have typed into this draft will be deleted. This cannot be undone."
+          confirmLabel={busy ? "Discarding…" : "Discard draft"}
+          danger
+          onConfirm={discard}
+          onCancel={() => !busy && setConfirmDiscard(null)}
+        />
+      </Screen>
+    );
+  }
+
+  /* ---------------------------------------------------------------- view ---- */
+  if (mode === "view") {
+    return (
+      <Screen>
+        <button onClick={() => setMode("list")} className="press flex items-center gap-1.5 text-sm font-bold text-slate-500"><ChevronLeft size={16} /> Back to my reflections</button>
+        <Card>
+          <p className="text-sm font-extrabold text-slate-700">{current?.formTitle}</p>
+          <p className="mt-0.5 text-[11px] text-slate-400">
+            {[current?.term, current?.academicYear].filter(Boolean).join(" · ") || "—"}
+            {current?.dateCompleted ? ` · ${fmtDate(current.dateCompleted)}` : ""}
+            {" · "}{current?.status === "draft" ? "Draft" : "Submitted"}
+          </p>
+        </Card>
+        <Card><ReviewAnswers form={form} answers={current?.answers || {}} /></Card>
+      </Screen>
+    );
+  }
+
+  /* ---------------------------------------------------------------- fill ---- */
+  const page = pages[step];
+  const isLast = step === pages.length - 1;
+  return (
+    <Screen>
+      <div>
+        <div className="mb-1.5 flex items-center justify-between text-[11px] font-bold text-slate-400">
+          <span className="truncate pr-2">{page?.title}</span>
+          <span className="shrink-0">Page {step + 1} of {pages.length}</span>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+          <div className="h-full rounded-full transition-all duration-300" style={{ width: `${((step + 1) / Math.max(1, pages.length)) * 100}%`, background: `linear-gradient(90deg, ${NAVY}, ${NAVY_DARK})` }} />
+        </div>
+      </div>
+
+      <Card>
+        <div className="space-y-4">
+          {(page?.questions || []).map(q => (
+            <ReviewField key={q.id} q={q} value={answers[q.id]} onChange={setAnswer} disabled={busy} />
+          ))}
+        </div>
+      </Card>
+
+      {pageErr && <Card className="!bg-rose-50 !ring-rose-200 text-[12px] font-semibold text-rose-600">{pageErr}</Card>}
+
+      <div className="flex items-center gap-2">
+        <button onClick={step === 0 ? () => setMode("list") : back} disabled={busy}
+          className="press rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:opacity-40">
+          {step === 0 ? "Cancel" : "Back"}
+        </button>
+        <button onClick={() => save("draft")} disabled={busy}
+          className="press rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-200 disabled:opacity-40">
+          Save draft
+        </button>
+        <div className="flex-1" />
+        {isLast
+          ? <button onClick={() => save("submitted")} disabled={busy}
+              className="press flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white shadow-md disabled:opacity-40" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>
+              {busy ? <Loader size={16} /> : <Check size={16} />} Submit
+            </button>
+          : <button onClick={next} disabled={busy}
+              className="press flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white shadow-md disabled:opacity-40" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>
+              Next <ArrowRight size={16} />
+            </button>}
+      </div>
+      <p className="pb-2 text-center text-[10px] text-slate-400">“Save draft” keeps your answers without submitting, so you can finish later.</p>
+    </Screen>
+  );
+}
+
 /* ----- Staff Reviews: Strategic Self-Reflection & Monthly Performance ----- */
 // --- Staff review helpers: conditional questions, and the two export formats -----
 
@@ -7157,7 +7376,7 @@ function AdminStaff({ store }) {
               </select>
             </Field>
           </div>
-          <Field label="Email address"><input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@lbc.ac.uk" className={inputCls} /></Field>
+          <Field label="Email address"><input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@londonbrookescollege.co.uk" className={inputCls} /></Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Site"><select value={form.site} onChange={e => setForm(f => ({ ...f, site: e.target.value }))} className={inputCls}><option value="">Not set</option>{HOME_SITES.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>
             <Field label="Holiday allowance (days)"><input type="number" min={0} value={form.allowance} onChange={e => setForm(f => ({ ...f, allowance: e.target.value }))} className={inputCls} /></Field>
@@ -7548,7 +7767,7 @@ function AdminSettings({ store }) {
           <Field label="Full name"><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Maria Gonzalez" className={inputCls} /></Field>
           <Field label="Role"><input value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} placeholder="e.g. Physics Teacher" className={inputCls} /></Field>
           <div className="grid grid-cols-2 gap-3"><Field label="Department"><select value={form.dept} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))} className={inputCls}>{deptOptions.map(d => <option key={d}>{d}</option>)}</select></Field><Field label="Allowance (days)"><input type="number" value={form.allowance} onChange={e => setForm(f => ({ ...f, allowance: e.target.value }))} className={inputCls} /></Field></div>
-          <Field label="Email"><input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@lbc.ac.uk" className={inputCls} /></Field>
+          <Field label="Email"><input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@londonbrookescollege.co.uk" className={inputCls} /></Field>
           <PrimaryBtn onClick={save} disabled={!form.name.trim()} className="w-full"><Save size={16} /> {edit ? "Save changes" : "Add staff member"}</PrimaryBtn>
         </div>
       </Modal>

@@ -126,7 +126,7 @@ export function ForgotPasswordForm({ onBack, prefillEmail = "" }) {
 
       <Labelled label="Email" Icon={Mail}>
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy}
-          placeholder="name@lbc.ac.uk" autoComplete="username" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+          placeholder="name@londonbrookescollege.co.uk" autoComplete="username" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
       </Labelled>
 
       <Note>{error}</Note>

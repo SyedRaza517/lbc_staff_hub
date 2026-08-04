@@ -127,7 +127,7 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
 
       <Labelled label="Email" Icon={Mail}>
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy}
-          placeholder="name@lbc.ac.uk" autoComplete="username" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+          placeholder="name@londonbrookescollege.co.uk" autoComplete="username" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
       </Labelled>
 
       <Labelled label="Password" Icon={Lock}>
@@ -253,7 +253,7 @@ function SignUp({ goSignIn }) {
       </Labelled>
 
       <Labelled label="Email" Icon={Mail}>
-        <input type="email" value={form.email} onChange={set("email")} disabled={busy} placeholder={role === "student" ? "your college email" : "name@lbc.ac.uk"} autoComplete="email" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+        <input type="email" value={form.email} onChange={set("email")} disabled={busy} placeholder={role === "student" ? "100121@londonbrookescollege.co.uk" : "name@londonbrookescollege.co.uk"} autoComplete="email" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
       </Labelled>
 
       {role === "student" && (
