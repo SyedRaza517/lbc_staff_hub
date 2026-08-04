@@ -7,6 +7,14 @@ node_modules
 .env.production
 */.env.production
 
+# app-signing keys — never commit. Leaking the upload key lets anyone publish an
+# update to the real listing, and it cannot be revoked without Google's help.
+# client/android/.gitignore also covers these, but only inside that folder; these
+# rules apply repo-wide so a key saved anywhere is still ignored.
+*.jks
+*.keystore
+keystore.properties
+
 # databases & backups (data — never commit)
 *.db
 *.db-journal

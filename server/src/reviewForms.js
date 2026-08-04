@@ -621,6 +621,10 @@ const visibleQuestions = (form, answers) => allQuestions(form).filter((q) => isV
 
 // Validate an `answers` object against a form. Returns { answers } or { error }.
 // `draft` skips the required checks so a part-finished review can be saved.
+// The longest a single free-text answer may be. Generous for a considered paragraph,
+// small enough that one person can't store megabytes per review.
+const MAX_ANSWER = 5000;
+
 function validateAnswers(form, raw, { draft = false } = {}) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error: "Answers must be an object" };
   const out = {};
@@ -639,7 +643,8 @@ function validateAnswers(form, raw, { draft = false } = {}) {
     switch (q.kind) {
       case "checkbox": {
         // "Select all that apply" — an array, so it is stored and exported as one.
-        const list = Array.isArray(v) ? v.map(String) : [String(v)];
+        if (!Array.isArray(v)) return { error: `"${q.label}": expected a list of choices` };
+        const list = v.map(String);
         const bad = list.find((x) => !q.options.includes(x));
         if (bad) return { error: `"${q.label}": "${bad}" is not one of the listed options` };
         // Keep the form's own order rather than the order they were ticked, so two
@@ -680,13 +685,21 @@ function validateAnswers(form, raw, { draft = false } = {}) {
         break;
       }
       default: {
-        const s = String(v).trim();
+        // Must be a string. String(v) turned an object into the literal "[object Object]"
+        // and an array into "a,b", storing garbage that then flowed into the review, the
+        // PDF and the CSV. Only the UI's own value type is accepted.
+        if (typeof v !== "string") return { error: `"${q.label}": expected text` };
+        const s = v.trim();
         if (!s) { if (q.required && !draft) return { error: `"${q.label}" is required` }; break; }
-        out[q.id] = s.slice(0, 5000);
+        // Refuse rather than truncate. Silently dropping everything past 5000 characters
+        // meant a lecturer who pasted a long answer lost it with no warning, and only
+        // discovered the loss when they reopened the review.
+        if (s.length > MAX_ANSWER) return { error: `"${q.label}" is too long — please keep it under ${MAX_ANSWER.toLocaleString()} characters (currently ${s.length.toLocaleString()})` };
+        out[q.id] = s;
       }
     }
   }
   return { answers: out };
 }
 
-module.exports = { FORMS, STRATEGIC, MONTHLY, EVALUATION, TEACHING_QUALITY, byType, allQuestions, visibleQuestions, isVisible, validateAnswers };
+module.exports = { FORMS, STRATEGIC, MONTHLY, EVALUATION, TEACHING_QUALITY, byType, allQuestions, visibleQuestions, isVisible, validateAnswers, MAX_ANSWER };

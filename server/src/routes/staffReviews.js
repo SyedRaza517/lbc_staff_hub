@@ -52,7 +52,10 @@ router.get("/", async (req, res) => {
   const rows = await prisma.staffReview.findMany({
     where,
     include: { staff: true },
-    orderBy: [{ dateCompleted: "desc" }, { createdAt: "desc" }],
+    // nulls:"last" — Postgres sorts NULLs FIRST on a DESC column, so an undated review
+    // (a draft, or a form whose date question is unanswered) pinned itself above every
+    // properly dated one at the top of the list.
+    orderBy: [{ dateCompleted: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
   });
   res.json(rows.map(sReview));
 });
@@ -100,7 +103,11 @@ function denormalise(form, answers, body) {
     // is the same either way, so take whichever the form actually asked for.
     term: (first("reviewTerm", "reviewMonth") || str(body?.term)).slice(0, 60),
     academicYear: (first("academicYear") || str(body?.academicYear)).slice(0, 30),
-    dateCompleted: first("dateCompleted", "reviewDate", "dateConducted") || str(body?.dateCompleted) || null,
+    // Each form names its date differently: strategic/teaching-quality "dateCompleted",
+    // monthly "reviewDate"/"dateConducted", evaluation "dateReviewed". Every id a form
+    // actually uses must be listed here, or the list row and the CSV show no date at
+    // all — which is what happened to every Evaluation until dateReviewed was added.
+    dateCompleted: first("dateCompleted", "reviewDate", "dateConducted", "dateReviewed") || str(body?.dateCompleted) || null,
   };
 }
 
@@ -137,10 +144,20 @@ router.put("/:id", requireAdmin, async (req, res) => {
   const form = byType(existing.type);
   const data = { ...v.data };
   delete data.type;
+  // Who the review is about is fixed at creation, for the same reason the type is:
+  // the answers were written about this person. Moving them silently re-attributes
+  // someone's appraisal to a colleague.
+  delete data.staffId;
 
-  if (req.body?.answers !== undefined) {
-    const status = data.status || existing.status;
-    const a = validateAnswers(form, req.body.answers, { draft: status === "draft" });
+  // Validate whenever the answers change OR the review is being submitted. Gating this
+  // on `answers` alone let `PUT {"status":"submitted"}` promote a one-answer draft to a
+  // filed review without ever running the required-field checks — and, because a
+  // submitted self-reflection then locks, it left the lecturer unable to fix their own.
+  const status = data.status || existing.status;
+  const submitting = status !== "draft";
+  if (req.body?.answers !== undefined || submitting) {
+    const raw = req.body?.answers !== undefined ? req.body.answers : parse(existing.answers, {});
+    const a = validateAnswers(form, raw, { draft: !submitting });
     if (a.error) return res.status(400).json({ error: a.error });
     data.answers = JSON.stringify(a.answers);
     Object.assign(data, denormalise(form, a.answers, req.body));

@@ -237,6 +237,11 @@ export const api = {
   // decided by the server from the token: staff see their own, students see the ones
   // about them, admins see everything.
   studentReviewOptions: () => request("/student-reviews/options"),
+  // The student/unit pickers. Deliberately NOT listStudents()/listUnits(): those live on
+  // /api/hnd, which is gated on page grants an ordinary lecturer doesn't hold, so the
+  // pickers 403'd for exactly the staff the feature is for. This one is open to anyone
+  // who may write a review and returns only what a dropdown needs.
+  studentReviewRoster: () => request("/student-reviews/roster"),
   listStudentReviews: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/student-reviews${q ? `?${q}` : ""}`); },
   myStudentReviews: () => request("/student-reviews?mine=true"),
   studentReviewsAboutMe: () => request("/student/me/reviews"),

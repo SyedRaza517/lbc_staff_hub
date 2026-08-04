@@ -88,6 +88,14 @@ const WINDOW_MS = 15 * 60 * 1000;
 const MAX_ATTEMPTS = 8;
 const LOCK_MS = 15 * 60 * 1000;
 const keyFor = (req, email) => `${req.ip}|${String(email || "").toLowerCase()}`;
+// A second, address-independent key. The per-account counter is the floor that holds
+// even if the address is forged; the per-address one still gives a single IP a tighter
+// budget across different accounts. A lockout on either key refuses the attempt.
+const accountKeyFor = (email) => `account|${String(email || "").toLowerCase()}`;
+// Deliberately higher than MAX_ATTEMPTS: a whole office behind one NAT address shares
+// nothing here (this key is per-account), but a real person fumbling their password on
+// several devices should not lock themselves out sooner than the per-address rule does.
+const MAX_ACCOUNT_ATTEMPTS = 20;
 // Clear every lockout for an address, whatever IP produced it. Called after a
 // successful password reset: forgetting your password and guessing a few times is
 // exactly what drives someone into that flow, so leaving them locked out means the
@@ -95,6 +103,7 @@ const keyFor = (req, email) => `${req.ip}|${String(email || "").toLowerCase()}`;
 function clearLockoutsFor(email) {
   const suffix = `|${String(email || "").toLowerCase()}`;
   for (const key of [...ATTEMPTS.keys()]) if (key.endsWith(suffix)) ATTEMPTS.delete(key);
+  ATTEMPTS.delete(accountKeyFor(email));
 }
 
 // --- Second-factor guessing limiter (per account) ---
@@ -141,9 +150,14 @@ router.post("/login", async (req, res) => {
 
   const key = keyFor(req, email);
   const s = rateState(key);
+  const acctKey = accountKeyFor(email);
+  const acct = rateState(acctKey);
   const now = Date.now();
-  if (s.lockedUntil && now < s.lockedUntil) {
-    const mins = Math.ceil((s.lockedUntil - now) / 60000);
+  // Locked on EITHER key. The per-address counter is the tight one; the per-account
+  // counter is the floor that still holds when the address can't be trusted.
+  const lockedUntil = Math.max(s.lockedUntil || 0, acct.lockedUntil || 0);
+  if (lockedUntil && now < lockedUntil) {
+    const mins = Math.ceil((lockedUntil - now) / 60000);
     return res.status(429).json({ error: `Too many failed attempts. Try again in ${mins} minute${mins === 1 ? "" : "s"}.` });
   }
 
@@ -154,7 +168,7 @@ router.post("/login", async (req, res) => {
   const staffOk = staff && !staff.pendingActivation && verifyPassword(password, staff.passwordHash);
 
   if (staffOk) {
-    ATTEMPTS.delete(key); // successful login clears the counter
+    ATTEMPTS.delete(key); ATTEMPTS.delete(acctKey); // successful login clears both counters
     // An account that has enrolled an authenticator is always challenged — otherwise
     // the app shows "two-step verification: On" while letting a password alone in.
     if (totpRequiredFor(staff)) {
@@ -173,13 +187,15 @@ router.post("/login", async (req, res) => {
   // approved) or a deactivated one cannot sign in.
   const student = await prisma.student.findUnique({ where: { email: emailLc } });
   if (student && student.passwordHash && student.active !== false && verifyPassword(password, student.passwordHash)) {
-    ATTEMPTS.delete(key);
+    ATTEMPTS.delete(key); ATTEMPTS.delete(acctKey);
     return res.json({ token: signStudentToken(student), user: { ...sStudent(student), kind: "student" } });
   }
 
   // Neither a staff nor a student match — count the failure and return generically.
   s.count += 1;
   if (s.count >= MAX_ATTEMPTS) s.lockedUntil = now + LOCK_MS;
+  acct.count += 1;
+  if (acct.count >= MAX_ACCOUNT_ATTEMPTS) acct.lockedUntil = now + LOCK_MS;
   const left = Math.max(0, MAX_ATTEMPTS - s.count);
   return res.status(401).json({ error: s.lockedUntil ? "Too many failed attempts. Account locked for 15 minutes." : `Invalid email or password${left <= 3 ? ` (${left} attempt${left === 1 ? "" : "s"} left)` : ""}` });
 });

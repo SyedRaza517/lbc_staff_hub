@@ -14,7 +14,19 @@ const { isRealDate } = require("../validate");
 
 const PROGRESS = ["On Track", "Monitor", "At Risk"];
 const CONCERNS = ["Attendance", "Assessment Progress", "Academic Performance", "Wellbeing", "Engagement", "No Concerns"];
-const ADMIN_PAGES = ["studentreviews", "pat", "students"];
+// Exactly the page the Access grid offers for this feature — nothing else. It also
+// accepted "pat" and "students", which meant granting either of those silently handed
+// over every lecturer's pastoral records, including the right to edit and delete them,
+// with no checkbox anywhere saying so. A permission grid nobody can trust is worse than
+// a narrow one. Super admins (adminPages === null) are unaffected.
+const ADMIN_PAGES = ["studentreviews"];
+
+// Matches the cap on a staff-review free-text answer, so the two forms behave alike.
+const MAX_TEXT_LEN = 5000;
+// A conversation can't have happened before the college kept these records, and a
+// far-future typo like 9999-12-31 would sit at the top of the date-sorted list for ever.
+const MIN_DATE = "2000-01-01";
+const MAX_DATE = "2100-12-31";
 
 const str = (v) => (typeof v === "string" ? v.trim() : "");
 const parse = (s, fallback) => { try { return JSON.parse(s); } catch { return fallback; } };
@@ -24,7 +36,7 @@ router.use(requireAuth);
 const sReview = (r) => ({
   id: r.id,
   studentId: r.studentId,
-  student: r.student ? { id: r.student.id, name: `${r.student.firstName} ${r.student.lastName}`, studentRef: r.student.studentRef, initials: r.student.initials, colour: r.student.colour } : null,
+  student: r.student ? { id: r.student.id, name: `${r.student.firstName} ${r.student.lastName}`, studentRef: r.student.studentRef, email: r.student.email, initials: r.student.initials, colour: r.student.colour } : null,
   unitId: r.unitId,
   unit: r.unit ? { id: r.unit.id, code: r.unit.code, name: r.unit.name } : null,
   staffId: r.staffId,
@@ -45,6 +57,35 @@ const INCLUDE = { student: true, unit: true, staff: { select: { name: true } } }
 
 // The fixed choice lists, so the three clients never hard-code them.
 router.get("/options", (_req, res) => res.json({ progress: PROGRESS, concerns: CONCERNS }));
+
+// The student and unit pickers for the review form.
+//
+// This exists because /api/hnd is gated on requireAnyPage(["registers","students",
+// "executive"]) for the whole router, and an ordinary lecturer holds none of those. The
+// Student Review tile is shown to every staff member and the server accepts a review
+// from any of them — so without this, the one group the feature is FOR opened the screen
+// to an empty student list and a permanently disabled "New review" button. An admin
+// granted only the "Student Reviews" page hit the same wall on the admin tab.
+//
+// Deliberately minimal: just enough to identify a person and a unit in a dropdown. No
+// contact details, no enrolments, no attendance or grades — filing a review needs a
+// name, not a record. Anyone who can write a review can read this.
+router.get("/roster", async (_req, res) => {
+  const [students, units] = await Promise.all([
+    prisma.student.findMany({
+      select: { id: true, firstName: true, lastName: true, studentRef: true, email: true, initials: true, colour: true },
+      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+    }),
+    prisma.unit.findMany({ select: { id: true, code: true, name: true }, orderBy: { code: "asc" } }),
+  ]);
+  res.json({
+    students: students.map((s) => ({
+      id: s.id, name: `${s.firstName} ${s.lastName}`.trim(),
+      studentRef: s.studentRef, email: s.email, initials: s.initials, colour: s.colour,
+    })),
+    units,
+  });
+});
 
 // A student never reaches this router: requireAuth blocks a student token on every
 // mount except /api/student. Their own reviews are served by GET /api/student/me/reviews.
@@ -68,12 +109,13 @@ router.get("/", async (req, res) => {
     where.progress = progress;
   }
   if (req.query?.followUp === "true") where.followUp = true;
+  else if (req.query?.followUp === "false") where.followUp = false;
   const rows = await prisma.studentReview.findMany({ where, include: INCLUDE, orderBy: [{ date: "desc" }, { createdAt: "desc" }] });
   res.json(rows.map(sReview));
 });
 
 // Validate a create/update body. `partial` allows omitted fields on update.
-async function validate(body, partial) {
+async function validate(body, partial, current) {
   const data = {};
   const need = (k) => !partial || body?.[k] !== undefined;
 
@@ -95,6 +137,7 @@ async function validate(body, partial) {
   if (need("date")) {
     const date = str(body?.date);
     if (!isRealDate(date)) return { error: "Enter a real date for the conversation (YYYY-MM-DD)" };
+    if (date < MIN_DATE || date > MAX_DATE) return { error: `That date looks wrong — enter a date between ${MIN_DATE} and ${MAX_DATE}` };
     data.date = date;
   }
   if (need("progress")) {
@@ -103,7 +146,8 @@ async function validate(body, partial) {
     data.progress = progress;
   }
   if (body?.concerns !== undefined) {
-    const list = Array.isArray(body.concerns) ? body.concerns.map(String) : [];
+    if (!Array.isArray(body.concerns)) return { error: "Concerns must be a list" };
+    const list = body.concerns.map(String);
     const bad = list.find((c) => !CONCERNS.includes(c));
     if (bad) return { error: `"${bad}" is not one of the listed concerns` };
     // "No Concerns" is a statement that there are none, so it cannot sit alongside a
@@ -114,8 +158,15 @@ async function validate(body, partial) {
     // Store in the form's own order so two reviews always read the same way.
     data.concerns = JSON.stringify(CONCERNS.filter((c) => list.includes(c)));
   }
-  if (body?.summary !== undefined) data.summary = str(body.summary).slice(0, 5000);
-  if (body?.agreedActions !== undefined) data.agreedActions = str(body.agreedActions).slice(0, 5000);
+  // Refuse rather than truncate. Silently dropping everything past 5000 characters lost
+  // the tail of a long summary with no warning — including from the student's own copy.
+  for (const [key, label] of [["summary", "Summary of the conversation"], ["agreedActions", "Agreed actions"]]) {
+    if (body?.[key] === undefined) continue;
+    if (typeof body[key] !== "string") return { error: `${label} must be text` };
+    const v = str(body[key]);
+    if (v.length > MAX_TEXT_LEN) return { error: `${label} is too long — please keep it under ${MAX_TEXT_LEN.toLocaleString()} characters (currently ${v.length.toLocaleString()})` };
+    data[key] = v;
+  }
 
   if (body?.followUp !== undefined) {
     if (typeof body.followUp !== "boolean") return { error: "followUp must be true or false" };
@@ -123,10 +174,17 @@ async function validate(body, partial) {
   }
   // A follow-up date only means anything when a follow-up is actually required; the
   // date is cleared otherwise so a "No" can't leave a stale date behind.
-  const wantsFollowUp = data.followUp !== undefined ? data.followUp : undefined;
+  //
+  // `current` is the row being edited, so a partial update that sends only a new date
+  // still knows a follow-up is outstanding. Reading `data.followUp` alone made
+  // PUT {followUpDate} a silent no-op that returned 200 and changed nothing.
+  const wantsFollowUp = data.followUp !== undefined ? data.followUp : current?.followUp;
   if (wantsFollowUp === true) {
-    const d = str(body?.followUpDate);
+    const d = str(body?.followUpDate) || (body?.followUpDate === undefined ? str(current?.followUpDate) : "");
     if (!isRealDate(d)) return { error: "Enter a follow-up date" };
+    // A follow-up is by definition after the conversation it follows.
+    const on = data.date || current?.date;
+    if (on && d < on) return { error: "The follow-up date can't be before the date of the conversation" };
     data.followUpDate = d;
   } else if (wantsFollowUp === false) {
     data.followUpDate = null;
@@ -136,7 +194,7 @@ async function validate(body, partial) {
 
 router.post("/", async (req, res) => {
   if (req.user?.kind === "student") return res.status(403).json({ error: "Students can't file reviews" });
-  const v = await validate(req.body, false);
+  const v = await validate(req.body, false, null);
   if (v.error) return res.status(400).json({ error: v.error });
   const row = await prisma.studentReview.create({
     // staffId always comes from the token — never the body.
@@ -166,23 +224,31 @@ router.get("/:id", async (req, res) => {
 router.put("/:id", async (req, res) => {
   if (req.user?.kind === "student") return res.status(403).json({ error: "Students can't edit reviews" });
   const found = await mayEdit(req, req.params.id);
-  if (found.error === 404) return res.status(404).json({ error: "Review not found" });
-  if (found.error === 403) return res.status(403).json({ error: "You can only edit reviews you wrote" });
-  const v = await validate(req.body, true);
+  if (found.error) return res.status(404).json({ error: "Review not found" });
+  const v = await validate(req.body, true, found.row);
   if (v.error) return res.status(400).json({ error: v.error });
-  const row = await prisma.studentReview.update({ where: { id: found.row.id }, data: v.data, include: INCLUDE });
-  res.json(sReview(row));
+  try {
+    const row = await prisma.studentReview.update({ where: { id: found.row.id }, data: v.data, include: INCLUDE });
+    res.json(sReview(row));
+  } catch (e) {
+    // Two admins on the same review: one deletes while the other saves. P2025 is "record
+    // not found" — the honest answer is 404, not a 500 "Something went wrong".
+    if (e?.code === "P2025") return res.status(404).json({ error: "Review not found" });
+    throw e;
+  }
 });
 
 router.delete("/:id", async (req, res) => {
   if (req.user?.kind === "student") return res.status(403).json({ error: "Students can't delete reviews" });
   const found = await mayEdit(req, req.params.id);
-  if (found.error === 404) return res.status(404).json({ error: "Review not found" });
-  if (found.error === 403) return res.status(403).json({ error: "You can only delete reviews you wrote" });
-  await prisma.studentReview.delete({ where: { id: found.row.id } });
-  res.json({ ok: true });
+  if (found.error) return res.status(404).json({ error: "Review not found" });
+  try {
+    await prisma.studentReview.delete({ where: { id: found.row.id } });
+    res.json({ ok: true });
+  } catch (e) {
+    if (e?.code === "P2025") return res.status(404).json({ error: "Review not found" });
+    throw e;
+  }
 });
 
 module.exports = router;
-module.exports.PROGRESS = PROGRESS;
-module.exports.CONCERNS = CONCERNS;

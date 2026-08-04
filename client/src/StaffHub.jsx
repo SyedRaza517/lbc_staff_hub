@@ -3654,7 +3654,7 @@ function HndStudents({ store }) {
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
   };
   const remove = async (s) => {
-    if (!window.confirm(`Remove ${s.name}?\n\nTheir enrolments, attendance marks, assessment grades and sign-up record will be deleted too, so the same email can register again.\n\nThis cannot be undone.`)) return;
+    if (!window.confirm(`Remove ${s.name}?\n\nTheir enrolments, attendance marks, assessment grades, progress reviews and sign-up record will be deleted too, so the same email can register again.\n\nThis cannot be undone.`)) return;
     await store.removeStudent(s.id);
   };
 
@@ -3821,7 +3821,7 @@ function AdminStudents({ store }) {
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
   };
   const remove = async (s) => {
-    if (!window.confirm(`Remove ${s.name}?\n\nTheir enrolments, attendance marks, assessment grades and sign-up record will be deleted too, so the same email can register again.\n\nThis cannot be undone.`)) return;
+    if (!window.confirm(`Remove ${s.name}?\n\nTheir enrolments, attendance marks, assessment grades, progress reviews and sign-up record will be deleted too, so the same email can register again.\n\nThis cannot be undone.`)) return;
     await store.removeStudent(s.id);
   };
 
@@ -4350,6 +4350,19 @@ function CourseMenu({ onEdit, onDelete, onCohorts, onSchedule, editLabel = "Edit
 }
 
 /* ----- Staff app: my own Strategic Self-Reflection ----- */
+// Required questions on `list` that the user hasn't answered yet. Mirrors the server's
+// own required check in reviewForms.validateAnswers, including its treatment of a
+// partially-filled grid and an empty checkbox array as "not answered".
+function srMissing(list, answers) {
+  return (list || []).filter(q => {
+    if (!q.required) return false;
+    const v = answers[q.id];
+    if (q.kind === "grid") return !v || q.rows.some(r => !v[r.key]);
+    if (q.kind === "checkbox") return !Array.isArray(v) || v.length === 0;
+    return v == null || String(v).trim() === "";
+  });
+}
+
 // The lecturer fills this in about their own term. It saves to the same table the
 // admin console reads, so a submission appears in Staff Reviews immediately.
 //
@@ -4378,9 +4391,11 @@ function SelfReflectionScreen({ store, me }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // Only one self-service form today, but this stays generic so a second needs no
-  // change here — the server decides what a lecturer may fill in.
-  const form = forms[0] || null;
+  // The form belonging to the review being viewed or resumed; forms[0] only for a new
+  // one. This said forms[0] unconditionally — which is right while there is exactly one
+  // self-service form and silently wrong the moment there are two: opening a review of
+  // type B would render type A's questions against B's answers and re-save it as A.
+  const form = (current && forms.find(f => f.type === current.type)) || forms[0] || null;
   const pages = srVisibleSections(form, answers);
   useEffect(() => { setStep(s => Math.min(s, Math.max(0, pages.length - 1))); }, [pages.length]);
 
@@ -4399,19 +4414,17 @@ function SelfReflectionScreen({ store, me }) {
   const setAnswer = (id, v) => setAnswers(a => ({ ...a, [id]: v }));
 
   const next = () => {
-    const missing = (pages[step]?.questions || []).filter(q => {
-      if (!q.required) return false;
-      const v = answers[q.id];
-      if (q.kind === "grid") return !v || q.rows.some(r => !v[r.key]);
-      if (q.kind === "checkbox") return !Array.isArray(v) || v.length === 0;
-      return v == null || String(v).trim() === "";
-    });
+    const missing = srMissing(pages[step]?.questions, answers);
     if (missing.length) { setPageErr(`Please answer: ${missing.map(q => q.label).join(" · ")}`); return; }
     setPageErr(""); setStep(s => Math.min(s + 1, pages.length - 1));
   };
   const back = () => { setPageErr(""); setStep(s => Math.max(0, s - 1)); };
 
   const save = async (status) => {
+    if (status !== "draft") {
+      const missing = srMissing(pages.flatMap(p => p.questions), answers);
+      if (missing.length) { setPageErr(`Please answer: ${missing.map(q => q.label).join(" · ")}`); return; }
+    }
     setBusy(true); setPageErr("");
     try {
       const body = { type: form.type, answers, status };
@@ -4784,11 +4797,11 @@ function ReviewAnswers({ form, answers }) {
   if (!form) return null;
   return (
     <div className="space-y-4">
-      {form.sections.map(sec => (
+      {srVisibleSections(form, answers).map(sec => (
         <div key={sec.title}>
           <p className="mb-2 border-b border-slate-100 pb-1 text-[11px] font-extrabold uppercase tracking-widest" style={{ color: NAVY }}>{sec.title}</p>
           <div className="space-y-2.5">
-            {sec.questions.map(q => {
+            {sec.questions.filter(q => srVisible(q, answers)).map(q => {
               const v = answers[q.id];
               const empty = v == null || v === ""
                 || (q.kind === "grid" && !Object.keys(v || {}).length)
@@ -4867,13 +4880,7 @@ function AdminStaffReviews({ store }) {
     if (step === 0) {
       if (!staffId) { setPageErr("Choose the staff member this review is for."); return; }
     } else {
-      const missing = (pages[step - 1]?.questions || []).filter(q => {
-        if (!q.required) return false;
-        const v = answers[q.id];
-        if (q.kind === "grid") return !v || q.rows.some(r => !v[r.key]);
-      if (q.kind === "checkbox") return !Array.isArray(v) || v.length === 0;
-        return v == null || String(v).trim() === "";
-      });
+      const missing = srMissing(pages[step - 1]?.questions, answers);
       if (missing.length) { setPageErr(`Please answer: ${missing.map(q => q.label).join(" · ")}`); return; }
     }
     setPageErr(""); setStep(s => Math.min(s + 1, pages.length));
@@ -4886,12 +4893,18 @@ function AdminStaffReviews({ store }) {
   const chooseStaff = (id) => {
     setStaffId(id);
     const person = store.staff.find(s => s.id === id);
-    if (person && activeForm?.sections?.[0]?.questions?.some(q => q.id === "fullName") && !answers.fullName) {
-      setAnswers(a => ({ ...a, fullName: person.name }));
-    }
+    if (!person) return;
+    const nameQ = (activeForm?.sections || [])
+      .flatMap(sec => sec.questions)
+      .find(q => q.id === "fullName" || q.id === "lecturerName");
+    if (nameQ && !answers[nameQ.id]) setAnswers(a => ({ ...a, [nameQ.id]: person.name }));
   };
 
   const save = async (status) => {
+    if (status !== "draft") {
+      const missing = srMissing(pages.flatMap(p => p.questions), answers);
+      if (missing.length) { setPageErr(`Please answer: ${missing.map(q => q.label).join(" · ")}`); return; }
+    }
     setBusy(true);
     try {
       const body = { type: pickedType, staffId, answers, status };
@@ -4942,9 +4955,12 @@ function AdminStaffReviews({ store }) {
     .filter(r => !ql || (r.staff?.name || "").toLowerCase().includes(ql) || (r.formTitle || "").toLowerCase().includes(ql) || (r.term || "").toLowerCase().includes(ql));
   const paged = usePaged(list, 10, `${typeFilter}|${ql}`);
 
-  const typeTone = (t) => t === "strategic"
-    ? { bg: "bg-indigo-50", text: "text-indigo-700", colour: "#4f46e5" }
-    : { bg: "bg-cyan-50", text: "text-cyan-700", colour: "#0891b2" };
+  const typeTone = (t) => ({
+    strategic:          { bg: "bg-indigo-50",  text: "text-indigo-700",  colour: "#4f46e5" },
+    monthly:            { bg: "bg-cyan-50",    text: "text-cyan-700",    colour: "#0891b2" },
+    evaluation:         { bg: "bg-amber-50",   text: "text-amber-700",   colour: "#b45309" },
+    "teaching-quality": { bg: "bg-emerald-50", text: "text-emerald-700", colour: "#0d7a5f" },
+  }[t] || { bg: "bg-slate-100", text: "text-slate-600", colour: "#64748b" });
 
   return (
     <>
@@ -5209,6 +5225,8 @@ function StudentReviewScreen({ store, me }) {
   // registers pages, so on this screen they are normally empty.
   const [roster, setRoster] = useState({ students: [], units: [] });
   const [rosterErr, setRosterErr] = useState("");
+  const [query, setQuery] = useState("");
+  const [progressFilter, setProgressFilter] = useState("all");
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -5226,16 +5244,16 @@ function StudentReviewScreen({ store, me }) {
     let alive = true;
     (async () => {
       try {
-        const [st, un] = await Promise.all([api.listStudents(), api.listUnits()]);
-        if (alive) setRoster({ students: st, units: un });
+        // The review router's own roster, open to any staff member. The /hnd lists are
+        // page-gated, so using them here left every ordinary lecturer — the people this
+        // screen exists for — with an empty picker and a dead "New review" button.
+        const { students: st, units: un } = await api.studentReviewRoster();
+        if (alive) setRoster({ students: st || [], units: un || [] });
       } catch (e) {
         if (!alive) return;
-        // Student records are page-gated, so a lecturer without that grant gets a
-        // 403 here. They can still read, correct and delete the reviews they have
-        // already written — only the pickers are withdrawn, never the whole screen.
-        setRosterErr(e?.status === 403
-          ? "Your account can't see the student list, so a new review can't be started here. Ask an administrator for access to student records."
-          : (e.message || "Could not load the student list. Check your connection and try again."));
+        // They can still read, correct and delete reviews they have already written —
+        // only the pickers are withdrawn, never the whole screen.
+        setRosterErr(e.message || "Could not load the student list. Check your connection and try again.");
       }
     })();
     return () => { alive = false; };
@@ -5291,6 +5309,19 @@ function StudentReviewScreen({ store, me }) {
     setBusy(false);
   };
 
+  // Search matches the three things a lecturer actually knows about a student: their
+  // name, their college ID and their email. Whitespace-separated terms must ALL match
+  // somewhere, so "sam 1001" narrows rather than widens.
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const visibleRows = rows.filter(r => {
+    if (progressFilter !== "all" && r.progress !== progressFilter) return false;
+    if (!terms.length) return true;
+    const hay = [r.student?.name, r.student?.studentRef, r.student?.email, r.unit?.code, r.unit?.name]
+      .filter(Boolean).join(" ").toLowerCase();
+    return terms.every(t => hay.includes(t));
+  });
+  const filtering = terms.length > 0 || progressFilter !== "all";
+
   /* ---------------------------------------------------------------- list ---- */
   if (mode === "list") {
     return (
@@ -5318,8 +5349,53 @@ function StudentReviewScreen({ store, me }) {
               </button>
 
               <p className="px-1 pt-1 text-[11px] font-extrabold uppercase tracking-widest text-slate-400">My reviews</p>
+
+              {/* Only worth showing once there is enough to sift through. */}
+              {rows.length > 3 && (
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={query} onChange={e => setQuery(e.target.value)}
+                      type="search" inputMode="search" autoComplete="off"
+                      placeholder="Search name, college ID or email"
+                      className="w-full rounded-2xl bg-white py-3 pl-9 pr-9 text-sm shadow-sm ring-1 ring-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2"
+                      style={{ WebkitAppearance: "none" }}
+                    />
+                    {query && (
+                      <button type="button" onClick={() => setQuery("")} aria-label="Clear search"
+                        className="press absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100">
+                        <X size={15} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
+                    {["all", ...(options.progress || [])].map(p => {
+                      const on = progressFilter === p;
+                      const t = p === "all" ? null : progressTone(p);
+                      return (
+                        <button key={p} type="button" onClick={() => setProgressFilter(p)}
+                          className={`press shrink-0 rounded-full px-3 py-1.5 text-[12px] font-bold ring-1 transition ${on ? "text-white ring-transparent" : "bg-white text-slate-500 ring-slate-200"}`}
+                          style={on ? { background: t?.colour || NAVY } : undefined}>
+                          {p === "all" ? "All" : p}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {rows.length === 0 && <Card className="text-sm text-slate-400">You haven't recorded a student review yet. Tap “New review” above.</Card>}
-              {rows.map((r, i) => {
+              {rows.length > 0 && visibleRows.length === 0 && (
+                <Card className="text-sm text-slate-400">
+                  No reviews match{query ? <> “<b className="text-slate-500">{query}</b>”</> : null}.
+                  <button type="button" onClick={() => { setQuery(""); setProgressFilter("all"); }} className="ml-1 font-bold text-slate-500 underline">Clear</button>
+                </Card>
+              )}
+              {filtering && visibleRows.length > 0 && (
+                <p className="px-1 text-[11px] font-semibold text-slate-400">{visibleRows.length} of {rows.length}</p>
+              )}
+              {visibleRows.map((r, i) => {
                 const t = progressTone(r.progress);
                 return (
                   <Card key={r.id} className="!p-3.5 fade-up" style={{ animationDelay: `${i * 55}ms` }}>
@@ -5534,8 +5610,8 @@ function StudentReviewDetail({ r }) {
 
 /* ----- Dashboard: Student Reviews — every review, whoever filed it ----- */
 function AdminStudentReviews({ store }) {
-  const { refreshHnd } = store;
   const [rows, setRows] = useState([]);
+  const [roster, setRoster] = useState({ students: [], units: [] });
   const [options, setOptions] = useState({ progress: [], concerns: [] });
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -5553,25 +5629,34 @@ function AdminStudentReviews({ store }) {
   const load = useCallback(async () => {
     setLoading(true); setErr("");
     try {
-      const [opts, list] = await Promise.all([api.studentReviewOptions(), api.listStudentReviews()]);
+      // The roster comes from the review router, not the HND collections. refreshHnd()
+      // needs a "registers"/"students"/"executive" grant, so an admin given only the
+      // Student Reviews page saw an access-denied toast and empty pickers on the very
+      // tab they were granted.
+      const [opts, list, roster] = await Promise.all([
+        api.studentReviewOptions(), api.listStudentReviews(), api.studentReviewRoster(),
+      ]);
       setOptions(opts); setRows(list);
+      setRoster({ students: roster.students || [], units: roster.units || [] });
     } catch (e) { setErr(e.message || "Could not load student reviews"); }
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
-  // The student and unit pickers come from the HND collections, which only load on
-  // the pages that ask for them.
-  useEffect(() => { refreshHnd(); }, [refreshHnd]);
 
-  // A review's own student stays in the picker even if the HND list hasn't arrived,
-  // so an existing review can always be corrected.
+  // Prefer whatever the shared store already holds (richer rows, already loaded on the
+  // HND pages) and fall back to the roster this tab fetches for itself.
+  const rosterStudents = store.students.length ? store.students : roster.students;
+  const rosterUnits = store.units.length ? store.units : roster.units;
+
+  // A review's own student stays in the picker even if the list hasn't arrived, so an
+  // existing review can always be corrected.
   const pickerStudents = useMemo(() => {
-    const list = store.students;
+    const list = rosterStudents;
     if (editing?.student && !list.some(s => s.id === editing.student.id)) {
       return [{ ...editing.student, email: "" }, ...list];
     }
     return list;
-  }, [store.students, editing]);
+  }, [rosterStudents, editing]);
 
   const progressChoices = options.progress?.length ? options.progress : Object.keys(PROGRESS_TONE);
   const concernChoices = options.concerns || [];
@@ -5726,7 +5811,7 @@ function AdminStudentReviews({ store }) {
             <Field label="Unit (optional)">
               <select value={form.unitId} onChange={e => set("unitId", e.target.value)} className={inputCls}>
                 <option value="">— not unit specific —</option>
-                {store.units.map(u => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
+                {rosterUnits.map(u => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
               </select>
             </Field>
             <Field label="Date of conversation"><input type="date" value={form.date} onChange={e => set("date", e.target.value)} className={inputCls} /></Field>

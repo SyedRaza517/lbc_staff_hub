@@ -42,17 +42,26 @@ const sMine = (r) => ({
 // The forms this user may fill in about themselves.
 router.get("/forms", (_req, res) => res.json(SELF_FORMS()));
 
+// This router's scope is BOTH conditions: the review is about you AND it is a form you
+// fill in yourself. Ownership alone is not enough — a Monthly, Evaluation or Teaching
+// Quality review is *about* a lecturer but written by their reviewer, and contains
+// candid judgements (escalation to the COO, "Intervention Required") the subject is not
+// meant to read here. Filtering on staffId only meant this route handed a lecturer their
+// own management review, and let them delete their reviewer's draft of it.
+const SELF_TYPES = () => SELF_FORMS().map((f) => f.type);
+const mineAndSelfService = (req) => ({ staffId: req.user.id, type: { in: SELF_TYPES() } });
+
 router.get("/", async (req, res) => {
   const rows = await prisma.staffReview.findMany({
-    where: { staffId: req.user.id },
-    orderBy: [{ dateCompleted: "desc" }, { createdAt: "desc" }],
+    where: mineAndSelfService(req),
+    orderBy: [{ dateCompleted: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
   });
   res.json(rows.map(sMine));
 });
 
 router.get("/:id", async (req, res) => {
-  const row = await prisma.staffReview.findUnique({ where: { id: req.params.id } });
-  if (!row || row.staffId !== req.user.id) return res.status(404).json({ error: "Review not found" });
+  const row = await prisma.staffReview.findFirst({ where: { id: req.params.id, ...mineAndSelfService(req) } });
+  if (!row) return res.status(404).json({ error: "Review not found" });
   res.json(sMine(row));
 });
 
@@ -62,7 +71,8 @@ function denormalise(answers) {
   return {
     term: first("reviewTerm", "reviewMonth").slice(0, 60),
     academicYear: first("academicYear").slice(0, 30),
-    dateCompleted: first("dateCompleted", "reviewDate", "dateConducted") || null,
+    // Must list every id any form uses — kept in step with routes/staffReviews.js.
+    dateCompleted: first("dateCompleted", "reviewDate", "dateConducted", "dateReviewed") || null,
   };
 }
 
@@ -89,8 +99,8 @@ router.post("/", async (req, res) => {
 });
 
 router.put("/:id", async (req, res) => {
-  const existing = await prisma.staffReview.findUnique({ where: { id: req.params.id } });
-  if (!existing || existing.staffId !== req.user.id) return res.status(404).json({ error: "Review not found" });
+  const existing = await prisma.staffReview.findFirst({ where: { id: req.params.id, ...mineAndSelfService(req) } });
+  if (!existing) return res.status(404).json({ error: "Review not found" });
   // A submitted reflection is a record their reviewer may already have read, so it
   // stops being editable. Drafts stay open until the author is ready.
   if (existing.status !== "draft") {
@@ -99,8 +109,13 @@ router.put("/:id", async (req, res) => {
   const form = selfForm(existing.type);
   if (!form) return res.status(400).json({ error: "That review isn't one you can edit." });
 
-  const status = req.body?.status === "draft" ? "draft" : "submitted";
-  const a = validateAnswers(form, req.body?.answers, { draft: status === "draft" });
+  const status = req.body?.status === undefined
+    ? existing.status
+    : (req.body.status === "draft" ? "draft" : "submitted");
+  // Answers are replaced wholesale, so a body that omits them would blank the review.
+  // Treat "no answers sent" as "keep what's there" and re-validate that instead.
+  const raw = req.body?.answers !== undefined ? req.body.answers : parse(existing.answers, {});
+  const a = validateAnswers(form, raw, { draft: status === "draft" });
   if (a.error) return res.status(400).json({ error: a.error });
 
   const row = await prisma.staffReview.update({
@@ -113,8 +128,12 @@ router.put("/:id", async (req, res) => {
 // A draft is the author's own working copy, so they may discard it. A submitted
 // reflection is not theirs to delete — it belongs to the review record.
 router.delete("/:id", async (req, res) => {
-  const existing = await prisma.staffReview.findUnique({ where: { id: req.params.id } });
-  if (!existing || existing.staffId !== req.user.id) return res.status(404).json({ error: "Review not found" });
+  // Scoped to self-service types as well as ownership. Without the type check this was
+  // the one write on this router with no `selfForm()` guard, so a lecturer could destroy
+  // their reviewer's in-progress Monthly review of them — and the staff app rendered a
+  // "Discard draft" button that did exactly that.
+  const existing = await prisma.staffReview.findFirst({ where: { id: req.params.id, ...mineAndSelfService(req) } });
+  if (!existing) return res.status(404).json({ error: "Review not found" });
   if (existing.status !== "draft") {
     return res.status(409).json({ error: "A submitted reflection can't be deleted. Ask an administrator if it was sent in error." });
   }
