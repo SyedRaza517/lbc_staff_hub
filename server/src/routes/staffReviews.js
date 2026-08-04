@@ -90,14 +90,16 @@ async function validate(body, { partial = false } = {}) {
 // Lift the fields the list view filters and sorts by out of the answers, so it never
 // has to parse the JSON. Falls back to the body for forms that don't ask for them.
 function denormalise(form, answers, body) {
-  const pick = (id, fallbackKey) => {
-    const v = answers[id];
-    return typeof v === "string" && v ? v : str(body?.[fallbackKey]);
+  const first = (...ids) => {
+    for (const id of ids) { const v = answers[id]; if (typeof v === "string" && v) return v; }
+    return "";
   };
   return {
-    term: pick("reviewTerm", "term").slice(0, 60),
-    academicYear: pick("academicYear", "academicYear").slice(0, 30),
-    dateCompleted: (answers.dateCompleted && String(answers.dateCompleted)) || str(body?.dateCompleted) || null,
+    // The strategic form calls it a term, the monthly one a month — the list column
+    // is the same either way, so take whichever the form actually asked for.
+    term: (first("reviewTerm", "reviewMonth") || str(body?.term)).slice(0, 60),
+    academicYear: (first("academicYear") || str(body?.academicYear)).slice(0, 30),
+    dateCompleted: first("dateCompleted", "reviewDate", "dateConducted") || str(body?.dateCompleted) || null,
   };
 }
 

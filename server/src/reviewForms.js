@@ -132,27 +132,170 @@ const STRATEGIC = {
   ],
 };
 
-// Placeholder until the Monthly Performance & Support Review questions arrive. It is
-// listed so the type exists end-to-end (storage, listing, filtering); the form itself
-// is just these sections once they are filled in.
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
 const MONTHLY = {
   type: "monthly",
   title: "Monthly Performance & Support Review",
-  blurb: "A shorter monthly check-in on performance and the support needed.",
-  pending: true,   // the UI explains that the questions are not set up yet
-  sections: [],
+  blurb: "Working together to recognise success, address challenges and support your continued growth and development.",
+  sections: [
+    {
+      title: "Section 1 — Review Information",
+      questions: [
+        { id: "lecturerName", label: "Lecturer Name", kind: "text", required: true },
+        { id: "courseTitle", label: "Course title", kind: "text", required: true },
+        { id: "reviewMonth", label: "Review Month", kind: "select", required: true, options: MONTHS },
+        { id: "reviewDate", label: "Review Date", kind: "date", required: true },
+        { id: "reviewerName", label: "Name of Reviewer", kind: "text", required: true },
+      ],
+    },
+    {
+      title: "Section 2 — Operational Performance Review",
+      questions: [
+        {
+          id: "operationalPerformance",
+          // The source form left this question's own label as the placeholder text
+          // "Question"; naming it makes the printed review and the export readable.
+          label: "How consistently has each of these been achieved this month?",
+          kind: "grid", required: true,
+          rows: [
+            { key: "lessonPlanning", label: "Lesson planning is completed in advance." },
+            { key: "sessionsDelivered", label: "Teaching sessions are delivered as scheduled." },
+            { key: "registers", label: "Attendance registers are completed accurately and on time." },
+            { key: "marking", label: "Assessment marking is completed within agreed timescales." },
+            { key: "studentCommunication", label: "Student communication is timely and professional." },
+            { key: "resources", label: "Moodle/Teams resources are kept up to date." },
+            { key: "adminCompliance", label: "Administrative and compliance tasks are completed promptly." },
+          ],
+          options: ["Consistently Achieved", "Mostly Achieved", "Partially Achieved", "Rarely Achieved", "Not evident"],
+        },
+      ],
+    },
+    {
+      title: "Section 3 — Student Cohort Review",
+      questions: [
+        {
+          id: "cohortIssues",
+          label: "Describe any current issues affecting:",
+          help: "Attendance · Engagement · Achievement · Student behaviour · Student welfare",
+          kind: "textarea", required: false,
+        },
+        { id: "studentsAtRisk", label: "Are any students currently considered to be at risk?", kind: "radio", required: false, options: ["Yes", "No"] },
+        {
+          id: "riskDetail", label: "Briefly describe the concern and any actions already taken.",
+          kind: "textarea", required: false,
+          // Only asked when there IS a concern — answering "No" skips it entirely.
+          showIf: { q: "studentsAtRisk", is: "Yes" },
+        },
+      ],
+    },
+    {
+      title: "Section 4 — Lecturer Wellbeing & Support",
+      questions: [
+        { id: "needsSupport", label: "Does the lecturer require additional support this month?", kind: "radio", required: true, options: ["Yes", "No"] },
+        {
+          id: "supportDetail", label: "Please describe the support required.",
+          kind: "textarea", required: true,
+          showIf: { q: "needsSupport", is: "Yes" },
+        },
+        {
+          id: "operationalBarriers",
+          label: "Are there any operational barriers preventing the lecturer from performing effectively?",
+          help: "Timetabling · Resources · IT systems · Workload · Training · Student issues",
+          kind: "textarea", required: true,
+          showIf: { q: "needsSupport", is: "Yes" },
+        },
+      ],
+    },
+    {
+      title: "Section 5 — Good Practice",
+      questions: [
+        { id: "doneWell", label: "What has the lecturer done particularly well this month?", kind: "textarea", required: true },
+        { id: "shareGoodPractice", label: "Should any good practice be shared with the wider teaching team?", kind: "textarea", required: true },
+      ],
+    },
+    {
+      title: "Section 6 — Monthly Actions",
+      questions: [
+        { id: "action1", label: "Action 1 — Action Required", kind: "textarea", required: true },
+        { id: "action1Measure", label: "Action 1 — Success Measure", kind: "text", required: true },
+        { id: "action1Due", label: "Action 1 — Target Completion Date", kind: "date", required: true },
+        { id: "action2", label: "Action 2 — Action Required", kind: "textarea", required: true },
+        { id: "action2Measure", label: "Action 2 — Success Measure", kind: "text", required: true },
+        { id: "action2Due", label: "Action 2 — Target Completion Date", kind: "date", required: true },
+        { id: "action3", label: "Action 3 — Action Required", kind: "textarea", required: true },
+        { id: "action3Measure", label: "Action 3 — Success Measure", kind: "text", required: true },
+        { id: "action3Due", label: "Action 3 — Target Completion Date", kind: "date", required: true },
+      ],
+    },
+    {
+      title: "Section 7 — Overall Operational Status",
+      questions: [
+        {
+          id: "operationalStatus", label: "Overall Operational Status", kind: "radio", required: true,
+          // The source form carried a stray "Option 2" left over from editing; it is
+          // not a real status and would have been selectable.
+          options: ["On Track", "Monitor", "Intervention Required"],
+          optionTone: { "On Track": "#059669", "Monitor": "#ea580c", "Intervention Required": "#e11d48" },
+        },
+        { id: "confidenceNextMonth", label: "Confidence for Next Month", kind: "radio", required: true, options: ["High", "Moderate", "Low"] },
+        { id: "escalateCOO", label: "Is escalation to the COO required?", kind: "radio", required: true, options: ["Yes", "No"] },
+        {
+          id: "cooMatters",
+          label: "List any matters that should be brought to the attention of the Chief Operating Officer during the next strategic review.",
+          kind: "textarea", required: true,
+          showIf: { q: "escalateCOO", is: "Yes" },
+        },
+      ],
+    },
+    {
+      title: "Section 8 — Review Summary",
+      questions: [
+        {
+          id: "reviewSummary",
+          label: "Summarise the key discussion points, recognise achievements, identify operational priorities and confirm the agreed actions for the coming month.",
+          kind: "textarea", required: true,
+        },
+      ],
+    },
+    {
+      title: "Section 9 — Review Authorisation",
+      questions: [
+        { id: "programmeLeader", label: "Programme Leader Name", kind: "text", required: true },
+        { id: "dateConducted", label: "Date Review Conducted", kind: "date", required: true },
+        { id: "additionalComments", label: "Additional Comments", kind: "textarea", required: true },
+      ],
+    },
+  ],
 };
 
 const FORMS = [STRATEGIC, MONTHLY];
 const byType = (type) => FORMS.find((f) => f.type === type) || null;
 const allQuestions = (form) => (form?.sections || []).flatMap((s) => s.questions);
 
+// Is this question asked, given the answers so far?
+//
+// `showIf: { q, is }` makes a question conditional — "describe the concern" is only
+// asked when a student IS at risk. A hidden question is never required and its answer
+// is never stored, so changing the trigger from Yes to No cannot leave an orphaned
+// answer behind to confuse the printed review.
+function isVisible(q, answers) {
+  if (!q?.showIf) return true;
+  const { q: dep, is } = q.showIf;
+  return String((answers || {})[dep] ?? "") === String(is);
+}
+// Only the questions actually being asked, in order.
+const visibleQuestions = (form, answers) => allQuestions(form).filter((q) => isVisible(q, answers));
+
 // Validate an `answers` object against a form. Returns { answers } or { error }.
 // `draft` skips the required checks so a part-finished review can be saved.
 function validateAnswers(form, raw, { draft = false } = {}) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error: "Answers must be an object" };
   const out = {};
+  // Only the questions actually being asked. A hidden one is neither required nor
+  // stored, so flipping its trigger cannot leave a stale answer behind.
   for (const q of allQuestions(form)) {
+    if (!isVisible(q, raw)) continue;
     const v = raw[q.id];
     const blank = v === undefined || v === null || v === "" || (q.kind === "grid" && (!v || typeof v !== "object" || !Object.keys(v).length));
     if (blank) {
@@ -200,4 +343,4 @@ function validateAnswers(form, raw, { draft = false } = {}) {
   return { answers: out };
 }
 
-module.exports = { FORMS, STRATEGIC, MONTHLY, byType, allQuestions, validateAnswers };
+module.exports = { FORMS, STRATEGIC, MONTHLY, byType, allQuestions, visibleQuestions, isVisible, validateAnswers };

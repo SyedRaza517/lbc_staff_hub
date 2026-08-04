@@ -4344,6 +4344,117 @@ function CourseMenu({ onEdit, onDelete, onCohorts, onSchedule, editLabel = "Edit
 }
 
 /* ----- Staff Reviews: Strategic Self-Reflection & Monthly Performance ----- */
+// --- Staff review helpers: conditional questions, and the two export formats -----
+
+// Mirrors the server's isVisible(). A question with `showIf` is only asked when its
+// trigger matches, so "describe the concern" appears only once a risk is flagged.
+const srVisible = (q, answers) => !q?.showIf || String((answers || {})[q.showIf.q] ?? "") === String(q.showIf.is);
+// A section is skipped entirely when nothing in it is currently being asked.
+const srVisibleSections = (form, answers) =>
+  (form?.sections || [])
+    .map(sec => ({ ...sec, questions: sec.questions.filter(q => srVisible(q, answers)) }))
+    .filter(sec => sec.questions.length > 0);
+
+// One answer as plain text, for both exports.
+function srAnswerText(q, v) {
+  if (v == null || v === "") return "";
+  if (q.kind === "grid") {
+    return (q.rows || []).filter(r => v[r.key]).map(r => `${r.label}: ${v[r.key]}`).join("\n");
+  }
+  return String(v);
+}
+
+// EXCEL — one row per question, which is what makes it useful in a spreadsheet:
+// filter by section, sort by question, paste a column into a report. Written as CSV
+// because that is the format Excel opens natively with no warning and no dependency.
+function srExportExcel(review, form) {
+  const rows = [];
+  (form?.sections || []).forEach(sec => {
+    sec.questions.forEach(q => {
+      if (!srVisible(q, review.answers)) return;
+      rows.push({
+        staff: review.staff?.name || "",
+        review: review.formTitle || "",
+        period: [review.term, review.academicYear].filter(Boolean).join(" "),
+        completed: review.dateCompleted || "",
+        status: review.status === "draft" ? "Draft" : "Submitted",
+        section: sec.title,
+        question: q.label,
+        answer: srAnswerText(q, review.answers?.[q.id]),
+      });
+    });
+  });
+  const safe = (review.staff?.name || "review").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  downloadCSV(`${safe}-${review.type}-review.csv`, [
+    { key: "staff", label: "Staff member" }, { key: "review", label: "Review" },
+    { key: "period", label: "Period" }, { key: "completed", label: "Date completed" },
+    { key: "status", label: "Status" }, { key: "section", label: "Section" },
+    { key: "question", label: "Question" }, { key: "answer", label: "Answer" },
+  ], rows);
+}
+
+// PDF — rendered as a clean printable document in a new window and handed to the
+// browser's print dialog, where "Save as PDF" is the default destination. No PDF
+// library is bundled, and this produces a properly paginated, selectable document
+// rather than a screenshot.
+function srExportPdf(review, form) {
+  const esc = (s) => String(s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const body = (form?.sections || []).map(sec => {
+    const qs = sec.questions.filter(q => srVisible(q, review.answers));
+    if (!qs.length) return "";
+    return `<section><h2>${esc(sec.title)}</h2>${qs.map(q => {
+      const v = review.answers?.[q.id];
+      const empty = v == null || v === "" || (q.kind === "grid" && !Object.keys(v || {}).length);
+      const ans = empty
+        ? `<p class="empty">Not answered</p>`
+        : q.kind === "grid"
+          ? `<table>${(q.rows || []).filter(r => v[r.key]).map(r => `<tr><th>${esc(r.label)}</th><td>${esc(v[r.key])}</td></tr>`).join("")}</table>`
+          : `<p class="a">${esc(String(v)).replace(/\n/g, "<br>")}</p>`;
+      return `<div class="q"><p class="l">${esc(q.label)}</p>${ans}</div>`;
+    }).join("")}</section>`;
+  }).join("");
+
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(review.formTitle)} — ${esc(review.staff?.name || "")}</title>
+<style>
+  @page { margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font: 11pt/1.5 "Segoe UI", system-ui, sans-serif; color: #1e293b; margin: 0; }
+  header { border-bottom: 3px solid #1a3a8f; padding-bottom: 10px; margin-bottom: 18px; }
+  h1 { font-size: 17pt; color: #1a3a8f; margin: 0 0 4px; }
+  .meta { font-size: 9.5pt; color: #64748b; }
+  .meta b { color: #1e293b; }
+  /* Keep a section together where it fits, so a heading never ends a page alone. */
+  section { break-inside: avoid; margin-bottom: 14px; }
+  h2 { font-size: 10pt; text-transform: uppercase; letter-spacing: .08em; color: #1a3a8f;
+       border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin: 0 0 8px; }
+  .q { break-inside: avoid; margin-bottom: 9px; }
+  .l { font-size: 9pt; color: #64748b; margin: 0 0 2px; }
+  .a { margin: 0; white-space: pre-wrap; }
+  .empty { margin: 0; color: #94a3b8; font-style: italic; }
+  table { border-collapse: collapse; width: 100%; margin-top: 3px; }
+  th, td { border: 1px solid #e2e8f0; padding: 4px 7px; text-align: left; font-size: 10pt; }
+  th { background: #f8fafc; font-weight: 600; width: 62%; }
+  footer { margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 7px; font-size: 8.5pt; color: #94a3b8; }
+</style></head><body>
+<header>
+  <h1>${esc(review.formTitle)}</h1>
+  <p class="meta"><b>${esc(review.staff?.name || "—")}</b>${review.staff?.role ? ` · ${esc(review.staff.role)}` : ""}${review.staff?.dept ? ` · ${esc(review.staff.dept)}` : ""}</p>
+  <p class="meta">${[review.term, review.academicYear].filter(Boolean).map(esc).join(" · ") || "—"}${review.dateCompleted ? ` · Completed ${esc(review.dateCompleted)}` : ""} · ${review.status === "draft" ? "DRAFT" : "Submitted"}</p>
+</header>
+${body}
+<footer>London Brookes College · ${esc(review.formTitle)}${review.completedBy ? ` · recorded by ${esc(review.completedBy)}` : ""} · generated ${new Date().toLocaleDateString("en-GB")}</footer>
+</body></html>`;
+
+  const w = window.open("", "_blank", "width=900,height=1000");
+  if (!w) return false;   // pop-up blocked — the caller tells the user
+  w.document.write(html);
+  w.document.close();
+  // Wait for layout before printing, or the dialog can open on a blank page.
+  w.onload = () => { w.focus(); w.print(); };
+  setTimeout(() => { try { w.focus(); w.print(); } catch (_) { /* already printed */ } }, 400);
+  return true;
+}
+
 // The questions are NOT written here. They come from GET /staff-reviews/forms, and
 // this renders whatever it is handed — so a new review type, or a reworded question,
 // is a server-side change with no front-end release.
@@ -4465,6 +4576,9 @@ function AdminStaffReviews({ store }) {
   const [busy, setBusy] = useState(false);
   const [viewing, setViewing] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  // Wizard paging: step 0 picks the staff member, then one page per visible section.
+  const [step, setStep] = useState(0);
+  const [pageErr, setPageErr] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -4479,11 +4593,36 @@ function AdminStaffReviews({ store }) {
   const formOf = (type) => forms.find(f => f.type === type) || null;
   const activeForm = formOf(pickedType);
 
-  const openAdd = () => { setEditing(null); setPickedType(""); setStaffId(""); setAnswers({}); setModal(true); };
+  // Pages recomputed from the CURRENT answers, so answering "No" to a trigger drops
+  // its follow-up page entirely rather than showing an empty one.
+  const pages = srVisibleSections(activeForm, answers);
+  // Clamp when a page disappears from under us — otherwise `step` can point past the
+  // end and the modal renders blank with no way forward.
+  useEffect(() => { setStep(s => Math.min(s, pages.length)); }, [pages.length]);
+
+  const openAdd = () => { setEditing(null); setPickedType(""); setStaffId(""); setAnswers({}); setStep(0); setPageErr(""); setModal(true); };
   const openEdit = (r) => {
     setEditing(r); setPickedType(r.type); setStaffId(r.staffId);
-    setAnswers(r.answers || {}); setModal(true);
+    setAnswers(r.answers || {}); setStep(0); setPageErr(""); setModal(true);
   };
+
+  // Check only THIS page before moving on, so a mistake is caught next to the field
+  // that caused it rather than after twelve pages of typing.
+  const next = () => {
+    if (step === 0) {
+      if (!staffId) { setPageErr("Choose the staff member this review is for."); return; }
+    } else {
+      const missing = (pages[step - 1]?.questions || []).filter(q => {
+        if (!q.required) return false;
+        const v = answers[q.id];
+        if (q.kind === "grid") return !v || q.rows.some(r => !v[r.key]);
+        return v == null || String(v).trim() === "";
+      });
+      if (missing.length) { setPageErr(`Please answer: ${missing.map(q => q.label).join(" · ")}`); return; }
+    }
+    setPageErr(""); setStep(s => Math.min(s + 1, pages.length));
+  };
+  const back = () => { setPageErr(""); setStep(s => Math.max(0, s - 1)); };
   const setAnswer = (id, v) => setAnswers(a => ({ ...a, [id]: v }));
 
   // Pre-fill the lecturer's name from the chosen staff member — it is the first
@@ -4515,6 +4654,32 @@ function AdminStaffReviews({ store }) {
     setBusy(false);
   };
 
+  // Every review currently in view, one row per question, so the whole set can be
+  // pivoted or filtered in a spreadsheet.
+  const exportAll = () => {
+    const out = [];
+    list.forEach(r => {
+      const form = formOf(r.type);
+      (form?.sections || []).forEach(sec => sec.questions.forEach(q => {
+        if (!srVisible(q, r.answers)) return;
+        out.push({
+          staff: r.staff?.name || "", review: r.formTitle || "",
+          period: [r.term, r.academicYear].filter(Boolean).join(" "),
+          completed: r.dateCompleted || "", status: r.status === "draft" ? "Draft" : "Submitted",
+          section: sec.title, question: q.label, answer: srAnswerText(q, r.answers?.[q.id]),
+        });
+      }));
+    });
+    if (!out.length) { store.notify("Nothing to export in the current view", "error"); return; }
+    downloadCSV("staff-reviews.csv", [
+      { key: "staff", label: "Staff member" }, { key: "review", label: "Review" },
+      { key: "period", label: "Period" }, { key: "completed", label: "Date completed" },
+      { key: "status", label: "Status" }, { key: "section", label: "Section" },
+      { key: "question", label: "Question" }, { key: "answer", label: "Answer" },
+    ], out);
+    store.notify(`Exported ${list.length} review${list.length === 1 ? "" : "s"}`);
+  };
+
   const ql = query.trim().toLowerCase();
   const list = rows
     .filter(r => typeFilter === "all" || r.type === typeFilter)
@@ -4529,7 +4694,7 @@ function AdminStaffReviews({ store }) {
     <>
       <AdminHeader title="Staff Reviews" subtitle="Strategic self-reflections and monthly performance reviews"
         Icon={ClipboardList}
-        action={<PrimaryBtn onClick={openAdd}><Plus size={16} /> Add review</PrimaryBtn>} />
+        action={<div className="flex flex-wrap items-center gap-2"><ExportBtn onClick={exportAll} label="Export all" /><PrimaryBtn onClick={openAdd}><Plus size={16} /> Add review</PrimaryBtn></div>} />
 
       {err && <div className="mb-4 flex items-start gap-2 rounded-xl bg-rose-50 px-3.5 py-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={16} className="mt-px shrink-0" />{err}</div>}
 
@@ -4572,6 +4737,7 @@ function AdminStaffReviews({ store }) {
                       <td className="px-5 py-3">
                         <div className="flex gap-1">
                           <button onClick={() => setViewing(r)} title="View" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><FileText size={15} /></button>
+                          <button onClick={() => srExportExcel(r, formOf(r.type))} title="Download as Excel" className="rounded-lg p-1.5 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"><Download size={15} /></button>
                           <button onClick={() => openEdit(r)} title="Edit" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button>
                           <button onClick={() => setDeleteTarget(r)} title="Delete" className="rounded-lg p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button>
                         </div>
@@ -4598,7 +4764,7 @@ function AdminStaffReviews({ store }) {
           <div className="space-y-3">
             <p className="text-sm text-slate-500">Which review are you recording?</p>
             {forms.map(f => (
-              <button key={f.type} onClick={() => setPickedType(f.type)} disabled={f.pending}
+              <button key={f.type} onClick={() => { setPickedType(f.type); setStep(0); setPageErr(""); }} disabled={f.pending}
                 className={`press w-full rounded-2xl p-4 text-left ring-1 transition ${f.pending ? "cursor-not-allowed bg-slate-50 opacity-70 ring-slate-200" : "bg-white ring-slate-200 hover:bg-blue-50/50 hover:ring-blue-300"}`}>
                 <div className="flex items-center gap-3">
                   <span className="flex h-10 w-10 items-center justify-center rounded-xl text-white" style={{ background: typeTone(f.type).colour }}><ClipboardList size={18} /></span>
@@ -4623,32 +4789,52 @@ function AdminStaffReviews({ store }) {
               {!editing && <button onClick={() => setPickedType("")} className="press text-[11px] font-bold text-slate-400 hover:text-slate-600">Change</button>}
             </div>
 
-            <Field label="Staff member *">
-              <select value={staffId} disabled={busy} onChange={e => chooseStaff(e.target.value)} className={inputCls}>
-                <option value="">Select a staff member</option>
-                {store.staff.map(s => <option key={s.id} value={s.id}>{s.name}{s.dept ? ` — ${s.dept}` : ""}</option>)}
-              </select>
-            </Field>
-
-            {activeForm?.sections.map(sec => (
-              <div key={sec.title} className="rounded-xl bg-slate-50 p-3">
-                <p className="mb-3 text-[11px] font-extrabold uppercase tracking-widest" style={{ color: NAVY }}>{sec.title}</p>
-                <div className="space-y-3.5">
-                  {sec.questions.map(q => <ReviewField key={q.id} q={q} value={answers[q.id]} onChange={setAnswer} disabled={busy} />)}
-                </div>
+            {/* One section per page, as the original form does. 31 questions on a
+                single scroll is unusable; this also means a conditional question can
+                appear on the very next page rather than jumping the reader around. */}
+            <div>
+              <div className="mb-1.5 flex items-center justify-between text-[11px] font-bold text-slate-400">
+                <span>{step === 0 ? "Who is this review for?" : pages[step - 1]?.title}</span>
+                <span>Page {step + 1} of {pages.length + 1}</span>
               </div>
-            ))}
-
-            <div className="flex gap-2">
-              <button onClick={() => save("draft")} disabled={busy || !staffId}
-                className="press flex-1 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-200 disabled:opacity-40">
-                Save as draft
-              </button>
-              <PrimaryBtn onClick={() => save("submitted")} disabled={busy || !staffId} className="flex-1">
-                {busy ? <Loader size={16} /> : <Save size={16} />} {editing ? "Save changes" : "Submit review"}
-              </PrimaryBtn>
+              <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                <div className="h-full rounded-full transition-all duration-300" style={{ width: `${((step + 1) / (pages.length + 1)) * 100}%`, background: `linear-gradient(90deg, ${NAVY}, ${NAVY_DARK})` }} />
+              </div>
             </div>
-            <p className="text-center text-[10px] text-slate-400">A draft skips the required-field checks so you can finish it later.</p>
+
+            <div className="min-h-[220px] space-y-3.5">
+              {step === 0 ? (
+                <Field label="Staff member *">
+                  <select value={staffId} disabled={busy} onChange={e => chooseStaff(e.target.value)} className={inputCls}>
+                    <option value="">Select a staff member</option>
+                    {store.staff.map(s => <option key={s.id} value={s.id}>{s.name}{s.dept ? ` — ${s.dept}` : ""}</option>)}
+                  </select>
+                  <p className="mt-2 text-[11px] text-slate-400">The review is filed against this person. Their name pre-fills the first question.</p>
+                </Field>
+              ) : (
+                pages[step - 1]?.questions.map(q => <ReviewField key={q.id} q={q} value={answers[q.id]} onChange={setAnswer} disabled={busy} />)
+              )}
+            </div>
+
+            {pageErr && <p className="flex items-start gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={13} className="mt-px shrink-0" />{pageErr}</p>}
+
+            <div className="flex items-center gap-2 border-t border-slate-100 pt-3">
+              <button onClick={back} disabled={busy || step === 0}
+                className="press rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:opacity-30">
+                Back
+              </button>
+              <button onClick={() => save("draft")} disabled={busy || !staffId}
+                className="press rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-200 disabled:opacity-40">
+                Save draft
+              </button>
+              <div className="flex-1" />
+              {step < pages.length
+                ? <PrimaryBtn onClick={next} disabled={busy}>Next <ArrowRight size={16} /></PrimaryBtn>
+                : <PrimaryBtn onClick={() => save("submitted")} disabled={busy || !staffId}>
+                    {busy ? <Loader size={16} /> : <Save size={16} />} {editing ? "Save changes" : "Submit review"}
+                  </PrimaryBtn>}
+            </div>
+            <p className="text-center text-[10px] text-slate-400">“Save draft” works from any page and skips the required-field checks, so you can finish later.</p>
           </div>
         )}
       </Modal>
@@ -4667,6 +4853,16 @@ function AdminStaffReviews({ store }) {
                 </p>
               </div>
               <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${viewing.status === "draft" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>{viewing.status === "draft" ? "Draft" : "Submitted"}</span>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => { if (!srExportPdf(viewing, formOf(viewing.type))) store.notify("Your browser blocked the print window — allow pop-ups for this site and try again.", "error"); }}
+                className="press flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-200">
+                <FileText size={16} /> Download PDF
+              </button>
+              <button onClick={() => srExportExcel(viewing, formOf(viewing.type))}
+                className="press flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-200">
+                <Download size={16} /> Download Excel
+              </button>
             </div>
             <ReviewAnswers form={formOf(viewing.type)} answers={viewing.answers || {}} />
           </div>
