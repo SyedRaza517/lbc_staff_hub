@@ -79,6 +79,7 @@ model Staff {
   devices        DeviceToken[]
   timesheetEntries TimesheetEntry[]
   staffReviews     StaffReview[]
+  studentReviews   StudentReview[]
 }
 
 // A phone (or browser) registered to receive push notifications.
@@ -346,6 +347,7 @@ model Unit {
   sessions    HndSession[]
   enrolments  Enrolment[]
   assessments Assessment[]
+  studentReviews StudentReview[]
 
   @@unique([courseId, code])
   @@index([courseId])
@@ -429,6 +431,7 @@ model Student {
   interactions Interaction[]
   grades       AssessmentGrade[]
   queries      StudentQuery[]
+  reviews      StudentReview[]
 
   @@index([cohortId])
 }
@@ -609,4 +612,41 @@ model StaffReview {
   @@index([staffId])
   @@index([type])
   @@index([status])
+}
+
+// A lecturer's review of one student on one unit — the "Student Review" a staff
+// member files from the app after a progress conversation.
+//
+// Visible to THREE audiences: the lecturer who wrote it, the student it is about,
+// and administrators. The student seeing it is deliberate — it is a record of a
+// conversation they took part in — so the wording of `summary` and `agreedActions`
+// should read as something you would say to their face.
+model StudentReview {
+  id            String   @id @default(cuid())
+  student       Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId     String
+  // The unit the conversation was about. Nullable and set-null on delete, so
+  // reorganising units never destroys a pastoral record.
+  unit          Unit?    @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  unitId        String?
+  // The lecturer who filed it. Kept even if they later leave, so the record still
+  // says who wrote it — hence the name is copied into staffName.
+  staff         Staff?   @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  staffId       String?
+  staffName     String   @default("")
+  date          String   // YYYY-MM-DD — when the conversation happened
+  progress      String   // On Track | Monitor | At Risk
+  // "Select all that apply", as a JSON array. Validated against a fixed list.
+  concerns      String   @default("[]")
+  summary       String   @default("")
+  agreedActions String   @default("")
+  followUp      Boolean  @default(false)
+  followUpDate  String?  // YYYY-MM-DD, only when followUp is true
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([staffId])
+  @@index([followUp])
+  @@index([date])
 }

@@ -233,6 +233,16 @@ export const api = {
   reviewForms: () => request("/staff-reviews/forms"),
   // A staff member's OWN reflections, from the staff app. staffId is never sent —
   // the server always uses the signed-in user, so there is no id to tamper with.
+  // Student reviews — a lecturer's record of a progress conversation. The scope is
+  // decided by the server from the token: staff see their own, students see the ones
+  // about them, admins see everything.
+  studentReviewOptions: () => request("/student-reviews/options"),
+  listStudentReviews: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/student-reviews${q ? `?${q}` : ""}`); },
+  myStudentReviews: () => request("/student-reviews?mine=true"),
+  studentReviewsAboutMe: () => request("/student-reviews/me"),
+  addStudentReview: (data) => request("/student-reviews", { method: "POST", body: data }),
+  updateStudentReview: (id, data) => request(, { method: "PUT", body: data }),
+  removeStudentReview: (id) => request(, { method: "DELETE" }),
   myReviewForms: () => request("/my-reviews/forms"),
   listMyReviews: () => request("/my-reviews"),
   addMyReview: (data) => request("/my-reviews", { method: "POST", body: data }),

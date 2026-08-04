@@ -13,6 +13,7 @@
 //   radio     one of `options`, shown as a list
 //   grid      one choice per row: `rows` × `options`, stored as { rowKey: option }
 //   confirm   a single-option declaration that must be ticked
+//   checkbox  ANY number of `options`, stored as an array ("select all that apply")
 
 const STRATEGIC = {
   type: "strategic",
@@ -273,7 +274,169 @@ const MONTHLY = {
   ],
 };
 
-const FORMS = [STRATEGIC, MONTHLY];
+// The five-point scale every Section 3 grid uses.
+const RATING = ["Outstanding", "Good", "Effective", "Requires Development", "Significant Improvement Required"];
+
+const EVALUATION = {
+  type: "evaluation",
+  title: "Strategic Lecturer Performance Evaluation",
+  blurb: "A strategic assessment of lecturer performance based on evidence gathered throughout the review period.",
+  sections: [
+    {
+      title: "Section 1 — Review Information",
+      questions: [
+        { id: "lecturerName", label: "Lecturer Name", kind: "text", required: true },
+        { id: "courseTitle", label: "Course title", kind: "text", required: true },
+        { id: "reviewTerm", label: "Review Term", kind: "radio", required: true, options: ["Term 1 - Autumn", "Term 2 - Spring", "Term 3 - Summer"] },
+      ],
+    },
+    {
+      title: "Section 2 — Evidence Reviewed",
+      questions: [
+        {
+          id: "evidenceReviewed",
+          label: "Which evidence has been reviewed as part of this evaluation?",
+          help: "Select all that apply",
+          kind: "checkbox", required: true,
+          options: [
+            "Lecturer Self-Reflection", "Programme Leader Review", "Lesson Observation(s)",
+            "Learning Walk(s)", "Work Scrutiny", "Student Voice", "Attendance Data",
+            "Assessment Performance", "CPD Record", "Compliance Record",
+          ],
+        },
+      ],
+    },
+    {
+      title: "Section 3 — Performance Evaluation Against Strategic Standards",
+      questions: [
+        {
+          id: "teachingExcellence", label: "Teaching Excellence", kind: "grid", required: true, options: RATING,
+          rows: [
+            { key: "teachingQuality", label: "Teaching Quality" },
+            { key: "lessonPlanning", label: "Lesson Planning" },
+            { key: "studentEngagement", label: "Student Engagement" },
+            { key: "assessmentPractice", label: "Assessment Practice" },
+          ],
+        },
+        {
+          id: "studentSuccess", label: "Student Success", kind: "grid", required: true, options: RATING,
+          rows: [
+            { key: "attendanceOutcomes", label: "Attendance Outcomes" },
+            { key: "studentAchievement", label: "Student Achievement" },
+            { key: "studentProgress", label: "Student Progress" },
+            { key: "studentSupport", label: "Student Support" },
+          ],
+        },
+        {
+          id: "professionalStandards", label: "Professional Standards", kind: "grid", required: true, options: RATING,
+          rows: [
+            { key: "professionalConduct", label: "Professional Conduct" },
+            { key: "compliance", label: "Compliance" },
+            { key: "recordKeeping", label: "Record Keeping" },
+            { key: "communication", label: "Communication" },
+          ],
+        },
+        {
+          id: "collegeContribution", label: "Contribution to College", kind: "grid", required: true, options: RATING,
+          rows: [
+            { key: "teamContribution", label: "Team Contribution" },
+            { key: "innovation", label: "Innovation" },
+            { key: "cpdEngagement", label: "CPD Engagement" },
+            { key: "collegeValues", label: "College Values" },
+          ],
+        },
+      ],
+    },
+    {
+      title: "Section 4 — Strengths",
+      questions: [
+        { id: "keyStrengths", label: "What are the lecturer's key strengths?", kind: "textarea", required: true },
+        { id: "greatestImpact", label: "What has had the greatest positive impact this term?", kind: "textarea", required: true },
+      ],
+    },
+    {
+      title: "Section 5 — Development Priorities",
+      questions: [
+        { id: "developmentAreas", label: "What are the priority development areas?", kind: "textarea", required: true },
+        { id: "supportProvided", label: "What support should be provided?", kind: "textarea", required: true },
+      ],
+    },
+    {
+      title: "Section 6 — Strategic Action Plan",
+      questions: [
+        { id: "action1", label: "Action 1 — Strategic Action", kind: "textarea", required: true },
+        { id: "action1Measure", label: "Action 1 — Success Measure", kind: "textarea", required: true },
+        { id: "action1Due", label: "Action 1 — Due Date", kind: "date", required: true },
+        { id: "action2", label: "Action 2 — Strategic Action", kind: "textarea", required: true },
+        { id: "action2Measure", label: "Action 2 — Success Measure", kind: "text", required: true },
+        { id: "action2Due", label: "Action 2 — Due Date", kind: "date", required: true },
+        { id: "action3", label: "Action 3 — Strategic Action", kind: "text", required: true },
+        // The source form labels this one "Action 2 - Success Measure", duplicating the
+        // question three above it. It sits in the Action 3 block, so it is Action 3's —
+        // left as-is it would collide with Action 2 in every export.
+        { id: "action3Measure", label: "Action 3 — Success Measure", kind: "text", required: true },
+        { id: "action3Due", label: "Action 3 — Due Date", kind: "date", required: true },
+      ],
+    },
+    {
+      title: "Section 7 — Overall Evaluation",
+      questions: [
+        { id: "overallRating", label: "Overall Performance Rating", kind: "radio", required: true, options: RATING },
+        {
+          id: "ragStatus", label: "Overall RAG Status", kind: "radio", required: true,
+          options: ["Green", "Amber", "Red"],
+          optionTone: { Green: "#059669", Amber: "#ea580c", Red: "#e11d48" },
+        },
+        { id: "needsStrategicSupport", label: "Does this lecturer require additional strategic support?", kind: "radio", required: true, options: ["Yes", "No"] },
+        {
+          id: "supportDetail", label: "Describe the support or intervention required.",
+          kind: "textarea", required: true,
+          // Only asked when support IS needed. Answering "No" goes straight on to the
+          // confidence question below, exactly as the paper form branches.
+          showIf: { q: "needsStrategicSupport", is: "Yes" },
+        },
+        {
+          id: "confidenceNextPeriod",
+          label: "To what extent are you confident that the lecturer will continue to perform effectively over the next review period?",
+          kind: "radio", required: true,
+          options: ["Very Confident", "Confident", "Moderately Confident", "Low Confidence", "Immediate Support Required"],
+        },
+      ],
+    },
+    {
+      title: "Section 8 — Evaluation Summary",
+      questions: [
+        {
+          id: "evaluationSummary",
+          label: "Summarise the lecturer's overall performance, recognising achievements, highlighting development priorities and confirming the agreed strategic direction for the next review period.",
+          kind: "textarea", required: true,
+        },
+      ],
+    },
+    {
+      title: "Section 9 — Acknowledgement",
+      questions: [
+        { id: "discussedWithLecturer", label: "Evaluation discussed with lecturer", kind: "confirm", required: true, options: ["Yes"] },
+      ],
+    },
+    {
+      title: "Section 10 — Review Authorisation",
+      questions: [
+        {
+          id: "reviewerPosition", label: "Position", kind: "select", required: true,
+          // The source form's dropdown was closed in the screenshot, so its options were
+          // not visible. These follow the roles the other review forms name — correct
+          // this list here if the real one differs.
+          options: ["Programme Leader", "Head of Department", "Quality Manager", "Chief Operating Officer", "Principal"],
+        },
+        { id: "dateReviewed", label: "Date Reviewed", kind: "date", required: false },
+        { id: "additionalComments", label: "Any Additional Comments or Observations?", kind: "textarea", required: false },
+      ],
+    },
+  ],
+};
+
+const FORMS = [STRATEGIC, MONTHLY, EVALUATION];
 const byType = (type) => FORMS.find((f) => f.type === type) || null;
 const allQuestions = (form) => (form?.sections || []).flatMap((s) => s.questions);
 
@@ -301,12 +464,26 @@ function validateAnswers(form, raw, { draft = false } = {}) {
   for (const q of allQuestions(form)) {
     if (!isVisible(q, raw)) continue;
     const v = raw[q.id];
-    const blank = v === undefined || v === null || v === "" || (q.kind === "grid" && (!v || typeof v !== "object" || !Object.keys(v).length));
+    const blank = v === undefined || v === null || v === ""
+      || (q.kind === "grid" && (!v || typeof v !== "object" || !Object.keys(v).length))
+      || (q.kind === "checkbox" && Array.isArray(v) && v.length === 0);
     if (blank) {
       if (q.required && !draft) return { error: `"${q.label}" is required` };
       continue;
     }
     switch (q.kind) {
+      case "checkbox": {
+        // "Select all that apply" — an array, so it is stored and exported as one.
+        const list = Array.isArray(v) ? v.map(String) : [String(v)];
+        const bad = list.find((x) => !q.options.includes(x));
+        if (bad) return { error: `"${q.label}": "${bad}" is not one of the listed options` };
+        // Keep the form's own order rather than the order they were ticked, so two
+        // answers to the same question always read the same way.
+        const chosen = q.options.filter((o) => list.includes(o));
+        if (!chosen.length) { if (q.required && !draft) return { error: `"${q.label}" is required` }; break; }
+        out[q.id] = chosen;
+        break;
+      }
       case "select":
       case "radio":
       case "confirm":
@@ -347,4 +524,4 @@ function validateAnswers(form, raw, { draft = false } = {}) {
   return { answers: out };
 }
 
-module.exports = { FORMS, STRATEGIC, MONTHLY, byType, allQuestions, visibleQuestions, isVisible, validateAnswers };
+module.exports = { FORMS, STRATEGIC, MONTHLY, EVALUATION, byType, allQuestions, visibleQuestions, isVisible, validateAnswers };

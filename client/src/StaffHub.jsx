@@ -4399,6 +4399,7 @@ function SelfReflectionScreen({ store, me }) {
       if (!q.required) return false;
       const v = answers[q.id];
       if (q.kind === "grid") return !v || q.rows.some(r => !v[r.key]);
+      if (q.kind === "checkbox") return !Array.isArray(v) || v.length === 0;
       return v == null || String(v).trim() === "";
     });
     if (missing.length) { setPageErr(`Please answer: ${missing.map(q => q.label).join(" · ")}`); return; }
@@ -4580,6 +4581,9 @@ function srAnswerText(q, v) {
   if (q.kind === "grid") {
     return (q.rows || []).filter(r => v[r.key]).map(r => `${r.label}: ${v[r.key]}`).join("\n");
   }
+  // "Select all that apply" — one line per choice, so a spreadsheet cell wraps
+  // readably rather than running into one comma-separated string.
+  if (q.kind === "checkbox") return (Array.isArray(v) ? v : [v]).join("\n");
   return String(v);
 }
 
@@ -4623,9 +4627,13 @@ function srExportPdf(review, form) {
     if (!qs.length) return "";
     return `<section><h2>${esc(sec.title)}</h2>${qs.map(q => {
       const v = review.answers?.[q.id];
-      const empty = v == null || v === "" || (q.kind === "grid" && !Object.keys(v || {}).length);
+      const empty = v == null || v === ""
+        || (q.kind === "grid" && !Object.keys(v || {}).length)
+        || (q.kind === "checkbox" && Array.isArray(v) && !v.length);
       const ans = empty
         ? `<p class="empty">Not answered</p>`
+        : q.kind === "checkbox"
+          ? `<ul>${(Array.isArray(v) ? v : [v]).map(x => `<li>${esc(x)}</li>`).join("")}</ul>`
         : q.kind === "grid"
           ? `<table>${(q.rows || []).filter(r => v[r.key]).map(r => `<tr><th>${esc(r.label)}</th><td>${esc(v[r.key])}</td></tr>`).join("")}</table>`
           : `<p class="a">${esc(String(v)).replace(/\n/g, "<br>")}</p>`;
@@ -4700,6 +4708,26 @@ function ReviewField({ q, value, onChange, disabled }) {
       </select>
     </div>
   );
+  if (q.kind === "checkbox") {
+    const chosen = Array.isArray(value) ? value : [];
+    const toggle = (o) => set(chosen.includes(o) ? chosen.filter(x => x !== o) : [...chosen, o]);
+    return (
+      <div>{label}
+        <div className="space-y-1.5">
+          {q.options.map(o => {
+            const on = chosen.includes(o);
+            return (
+              <label key={o} className={`flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 text-sm ring-1 transition ${on ? "bg-blue-50 font-semibold text-slate-800 ring-blue-300" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"} ${disabled ? "pointer-events-none opacity-60" : ""}`}>
+                <input type="checkbox" checked={on} disabled={disabled} onChange={() => toggle(o)} className="h-4 w-4 rounded accent-blue-700" />
+                {o}
+              </label>
+            );
+          })}
+        </div>
+        {chosen.length > 0 && <p className="mt-1.5 text-[11px] font-semibold text-slate-400">{chosen.length} selected</p>}
+      </div>
+    );
+  }
   if (q.kind === "radio" || q.kind === "confirm") return (
     <div>{label}
       <div className="space-y-1.5">
@@ -4758,12 +4786,16 @@ function ReviewAnswers({ form, answers }) {
           <div className="space-y-2.5">
             {sec.questions.map(q => {
               const v = answers[q.id];
-              const empty = v == null || v === "" || (q.kind === "grid" && !Object.keys(v || {}).length);
+              const empty = v == null || v === ""
+                || (q.kind === "grid" && !Object.keys(v || {}).length)
+                || (q.kind === "checkbox" && Array.isArray(v) && !v.length);
               return (
                 <div key={q.id}>
                   <p className="text-[11px] font-semibold text-slate-400">{q.label}</p>
                   {empty
                     ? <p className="text-sm text-slate-300">— not answered</p>
+                    : q.kind === "checkbox"
+                      ? <ul className="mt-0.5 space-y-0.5">{(Array.isArray(v) ? v : [v]).map(x => <li key={x} className="text-sm text-slate-700">· {x}</li>)}</ul>
                     : q.kind === "grid"
                       ? <ul className="mt-0.5 space-y-0.5">
                           {q.rows.map(r => v[r.key] ? <li key={r.key} className="text-sm text-slate-700"><span className="text-slate-400">{r.label}:</span> <b>{v[r.key]}</b></li> : null)}
@@ -4835,6 +4867,7 @@ function AdminStaffReviews({ store }) {
         if (!q.required) return false;
         const v = answers[q.id];
         if (q.kind === "grid") return !v || q.rows.some(r => !v[r.key]);
+      if (q.kind === "checkbox") return !Array.isArray(v) || v.length === 0;
         return v == null || String(v).trim() === "";
       });
       if (missing.length) { setPageErr(`Please answer: ${missing.map(q => q.label).join(" · ")}`); return; }
