@@ -227,6 +227,15 @@ export const api = {
   // name the later one silently won and broke the student "My Results" screen.
   adminStudentAssessments: (studentId) => request(`/assessments/student/${studentId}`),
   execSummary: () => request("/assessments/exec-summary"),
+  // staff reviews (Strategic Self-Reflection, Monthly Performance & Support)
+  // The question definitions come FROM the server, so a new form or a reworded
+  // question needs no client release.
+  reviewForms: () => request("/staff-reviews/forms"),
+  listStaffReviews: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/staff-reviews${q ? `?${q}` : ""}`); },
+  getStaffReview: (id) => request(`/staff-reviews/${id}`),
+  addStaffReview: (data) => request("/staff-reviews", { method: "POST", body: data }),
+  updateStaffReview: (id, data) => request(`/staff-reviews/${id}`, { method: "PUT", body: data }),
+  removeStaffReview: (id) => request(`/staff-reviews/${id}`, { method: "DELETE" }),
   // timesheets
   listTimesheets: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/timesheets${q ? `?${q}` : ""}`); },
   timesheetPendingCount: () => request("/timesheets/pending-count"),

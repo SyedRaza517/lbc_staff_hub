@@ -1505,8 +1505,8 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
 /* ============================================================ ADMIN DASHBOARD ============================================================ */
 // The assignable admin pages, in nav order. "access" is intentionally excluded —
 // it is Super-Admin-only and never granted. Keep in sync with server validate.js.
-const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "studentqueries", "staff", "timesheets", "settings"];
-const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", settings: "Settings" };
+const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staffreviews", "studentqueries", "staff", "timesheets", "settings"];
+const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", settings: "Settings" };
 
 // Can this user see/use a given admin page? The Super Admin gets everything,
 // including the Super-Admin-only Access tab. A page-scoped admin gets only their
@@ -1800,6 +1800,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
     { key: "students", label: "Students", I: GraduationCap },
     { key: "assessments", label: "Assessments", I: Award },
     { key: "pat", label: "PAT", I: MessageSquare },
+    { key: "staffreviews", label: "Staff Reviews", I: ClipboardList },
     { key: "studentqueries", label: "Student Queries", I: Inbox },
     { key: "staff", label: "Staff", I: Users },
     { key: "timesheets", label: "Timesheets", I: Timer },
@@ -1867,6 +1868,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
         {activeKey === "students" && <AdminStudents store={store} />}
         {activeKey === "assessments" && <AdminAssessments store={store} />}
         {activeKey === "pat" && <AdminPAT store={store} />}
+        {activeKey === "staffreviews" && <AdminStaffReviews store={store} />}
         {activeKey === "studentqueries" && <AdminStudentQueries store={store} />}
         {activeKey === "staff" && <AdminStaff store={store} />}
         {activeKey === "timesheets" && <AdminTimesheets store={store} />}
@@ -4338,6 +4340,357 @@ function CourseMenu({ onEdit, onDelete, onCohorts, onSchedule, editLabel = "Edit
         </>
       )}
     </div>
+  );
+}
+
+/* ----- Staff Reviews: Strategic Self-Reflection & Monthly Performance ----- */
+// The questions are NOT written here. They come from GET /staff-reviews/forms, and
+// this renders whatever it is handed — so a new review type, or a reworded question,
+// is a server-side change with no front-end release.
+
+// One question, rendered according to its `kind`.
+function ReviewField({ q, value, onChange, disabled }) {
+  const set = (v) => onChange(q.id, v);
+  const label = (
+    <p className="mb-1.5 text-sm font-semibold text-slate-700">
+      {q.label}{q.required && <span className="ml-1 text-rose-500">*</span>}
+    </p>
+  );
+  if (q.kind === "textarea") return (
+    <div>{label}<textarea rows={3} value={value || ""} disabled={disabled} onChange={e => set(e.target.value)} placeholder="Enter your answer" className={`${inputCls} resize-y`} /></div>
+  );
+  if (q.kind === "date") return (
+    <div>{label}<input type="date" value={value || ""} disabled={disabled} onChange={e => set(e.target.value)} className={inputCls} /></div>
+  );
+  if (q.kind === "select") return (
+    <div>{label}
+      <select value={value || ""} disabled={disabled} onChange={e => set(e.target.value)} className={inputCls}>
+        <option value="">Select your answer</option>
+        {q.options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+  if (q.kind === "radio" || q.kind === "confirm") return (
+    <div>{label}
+      <div className="space-y-1.5">
+        {q.options.map(o => (
+          <label key={o} className={`flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 text-sm ring-1 transition ${value === o ? "bg-blue-50 font-semibold text-slate-800 ring-blue-300" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"} ${disabled ? "pointer-events-none opacity-60" : ""}`}>
+            <input type="radio" name={q.id} checked={value === o} disabled={disabled} onChange={() => set(o)} className="h-4 w-4 accent-blue-700" />
+            {o}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+  if (q.kind === "grid") {
+    const cell = value || {};
+    return (
+      <div>{label}
+        {/* Scrolls inside its own container so a wide matrix never makes the page
+            scroll sideways on a laptop. */}
+        <div className="overflow-x-auto rounded-xl ring-1 ring-slate-200">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="px-3 py-2.5 text-left">&nbsp;</th>
+                {q.options.map(o => <th key={o} className="px-2 py-2.5 text-center font-bold normal-case leading-tight">{o}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {q.rows.map((r, i) => (
+                <tr key={r.key} className={i % 2 ? "bg-slate-50/60" : ""}>
+                  <td className="px-3 py-2.5 font-medium text-slate-600">{r.label}</td>
+                  {q.options.map(o => (
+                    <td key={o} className="px-2 py-2.5 text-center">
+                      <input type="radio" name={`${q.id}.${r.key}`} checked={cell[r.key] === o} disabled={disabled}
+                        onChange={() => set({ ...cell, [r.key]: o })} className="h-4 w-4 accent-blue-700" />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+  return <div>{label}<input value={value || ""} disabled={disabled} onChange={e => set(e.target.value)} placeholder={q.placeholder || "Enter your answer"} className={inputCls} /></div>;
+}
+
+// Read-only rendering of a saved review.
+function ReviewAnswers({ form, answers }) {
+  if (!form) return null;
+  return (
+    <div className="space-y-4">
+      {form.sections.map(sec => (
+        <div key={sec.title}>
+          <p className="mb-2 border-b border-slate-100 pb-1 text-[11px] font-extrabold uppercase tracking-widest" style={{ color: NAVY }}>{sec.title}</p>
+          <div className="space-y-2.5">
+            {sec.questions.map(q => {
+              const v = answers[q.id];
+              const empty = v == null || v === "" || (q.kind === "grid" && !Object.keys(v || {}).length);
+              return (
+                <div key={q.id}>
+                  <p className="text-[11px] font-semibold text-slate-400">{q.label}</p>
+                  {empty
+                    ? <p className="text-sm text-slate-300">— not answered</p>
+                    : q.kind === "grid"
+                      ? <ul className="mt-0.5 space-y-0.5">
+                          {q.rows.map(r => v[r.key] ? <li key={r.key} className="text-sm text-slate-700"><span className="text-slate-400">{r.label}:</span> <b>{v[r.key]}</b></li> : null)}
+                        </ul>
+                      : <p className="whitespace-pre-wrap text-sm text-slate-700">{String(v)}</p>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AdminStaffReviews({ store }) {
+  const [forms, setForms] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  // Wizard state: pick a type → fill it in.
+  const [modal, setModal] = useState(false);
+  const [pickedType, setPickedType] = useState("");
+  const [staffId, setStaffId] = useState("");
+  const [answers, setAnswers] = useState({});
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [viewing, setViewing] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr("");
+    try {
+      const [f, r] = await Promise.all([api.reviewForms(), api.listStaffReviews()]);
+      setForms(f); setRows(r);
+    } catch (e) { setErr(e.message || "Could not load staff reviews"); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const formOf = (type) => forms.find(f => f.type === type) || null;
+  const activeForm = formOf(pickedType);
+
+  const openAdd = () => { setEditing(null); setPickedType(""); setStaffId(""); setAnswers({}); setModal(true); };
+  const openEdit = (r) => {
+    setEditing(r); setPickedType(r.type); setStaffId(r.staffId);
+    setAnswers(r.answers || {}); setModal(true);
+  };
+  const setAnswer = (id, v) => setAnswers(a => ({ ...a, [id]: v }));
+
+  // Pre-fill the lecturer's name from the chosen staff member — it is the first
+  // question on the form and the admin has just picked it from the dropdown.
+  const chooseStaff = (id) => {
+    setStaffId(id);
+    const person = store.staff.find(s => s.id === id);
+    if (person && activeForm?.sections?.[0]?.questions?.some(q => q.id === "fullName") && !answers.fullName) {
+      setAnswers(a => ({ ...a, fullName: person.name }));
+    }
+  };
+
+  const save = async (status) => {
+    setBusy(true);
+    try {
+      const body = { type: pickedType, staffId, answers, status };
+      if (editing) await store.updateStaffReview(editing.id, body);
+      else await store.addStaffReview(body);
+      setModal(false);
+      await load();
+    } catch (_e) { /* the store toasts the error and keeps the modal open */ }
+    setBusy(false);
+  };
+
+  const confirmRemove = async () => {
+    setBusy(true);
+    try { await store.removeStaffReview(deleteTarget.id); setDeleteTarget(null); await load(); }
+    catch (_e) { /* toasted by the store */ }
+    setBusy(false);
+  };
+
+  const ql = query.trim().toLowerCase();
+  const list = rows
+    .filter(r => typeFilter === "all" || r.type === typeFilter)
+    .filter(r => !ql || (r.staff?.name || "").toLowerCase().includes(ql) || (r.formTitle || "").toLowerCase().includes(ql) || (r.term || "").toLowerCase().includes(ql));
+  const paged = usePaged(list, 10, `${typeFilter}|${ql}`);
+
+  const typeTone = (t) => t === "strategic"
+    ? { bg: "bg-indigo-50", text: "text-indigo-700", colour: "#4f46e5" }
+    : { bg: "bg-cyan-50", text: "text-cyan-700", colour: "#0891b2" };
+
+  return (
+    <>
+      <AdminHeader title="Staff Reviews" subtitle="Strategic self-reflections and monthly performance reviews"
+        Icon={ClipboardList}
+        action={<PrimaryBtn onClick={openAdd}><Plus size={16} /> Add review</PrimaryBtn>} />
+
+      {err && <div className="mb-4 flex items-start gap-2 rounded-xl bg-rose-50 px-3.5 py-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={16} className="mt-px shrink-0" />{err}</div>}
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {[{ v: "all", l: "All types" }, ...forms.map(f => ({ v: f.type, l: f.title }))].map(o => (
+          <button key={o.v} onClick={() => setTypeFilter(o.v)}
+            className={`press rounded-full px-3 py-1.5 text-xs font-bold shadow-sm ring-1 transition ${typeFilter === o.v ? "text-white ring-transparent" : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50"}`}
+            style={typeFilter === o.v ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}>{o.l}</button>
+        ))}
+        <div className="ml-auto flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+          <Search size={15} className="text-slate-400" />
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, form or term…" className="w-56 bg-transparent text-sm outline-none" />
+        </div>
+      </div>
+
+      {loading ? <div className="skeleton h-64 rounded-2xl" /> : (
+        <>
+          <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 fade-up">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
+                <tr><th className="px-5 py-3">Staff member</th><th className="px-5 py-3">Review</th><th className="px-5 py-3">Term</th><th className="px-5 py-3">Completed</th><th className="px-5 py-3">Status</th><th className="px-5 py-3"></th></tr>
+              </thead>
+              <tbody>
+                {paged.slice.map(r => {
+                  const t = typeTone(r.type);
+                  return (
+                    <tr key={r.id} className="border-t border-slate-100 transition-colors hover:bg-blue-50/40">
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-sm" style={{ background: r.staff?.colour || NAVY }}>{r.staff?.initials || "?"}</span>
+                          <div><p className="font-semibold text-slate-700">{r.staff?.name || "—"}</p><p className="text-[11px] text-slate-400">{r.staff?.role}</p></div>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${t.bg} ${t.text}`}>{r.formTitle}</span></td>
+                      <td className="px-5 py-3 text-slate-500">{r.term || "—"}{r.academicYear ? <span className="text-slate-300"> · {r.academicYear}</span> : null}</td>
+                      <td className="px-5 py-3 text-slate-500">{r.dateCompleted ? fmtDate(r.dateCompleted) : "—"}</td>
+                      <td className="px-5 py-3">
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${r.status === "draft" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>{r.status === "draft" ? "Draft" : "Submitted"}</span>
+                      </td>
+                      <td className="px-5 py-3">
+                        <div className="flex gap-1">
+                          <button onClick={() => setViewing(r)} title="View" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><FileText size={15} /></button>
+                          <button onClick={() => openEdit(r)} title="Edit" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button>
+                          <button onClick={() => setDeleteTarget(r)} title="Delete" className="rounded-lg p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {paged.slice.length === 0 && (
+                  <tr><td colSpan={6} className="px-5 py-12">
+                    <EmptyState Icon={ClipboardList} title={rows.length ? "No reviews match" : "No reviews yet"}
+                      msg={rows.length ? "Try a different search or type filter." : "Use “Add review” to record a Strategic Self-Reflection or a Monthly Performance & Support Review."} />
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
+        </>
+      )}
+
+      {/* Add / edit */}
+      <Modal open={modal} onClose={() => !busy && setModal(false)} title={editing ? "Edit review" : "Add review"} width={720}>
+        {!pickedType ? (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-500">Which review are you recording?</p>
+            {forms.map(f => (
+              <button key={f.type} onClick={() => setPickedType(f.type)} disabled={f.pending}
+                className={`press w-full rounded-2xl p-4 text-left ring-1 transition ${f.pending ? "cursor-not-allowed bg-slate-50 opacity-70 ring-slate-200" : "bg-white ring-slate-200 hover:bg-blue-50/50 hover:ring-blue-300"}`}>
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl text-white" style={{ background: typeTone(f.type).colour }}><ClipboardList size={18} /></span>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-slate-700">{f.title}</p>
+                    <p className="text-[11px] text-slate-400">
+                      {f.pending ? "Questions not set up yet" : `${f.sections.reduce((n, s) => n + s.questions.length, 0)} questions · ${f.sections.length} sections`}
+                    </p>
+                  </div>
+                  {!f.pending && <ChevronRight size={16} className="text-slate-300" />}
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-200">
+              <div>
+                <p className="text-sm font-bold text-slate-700">{activeForm?.title}</p>
+                <p className="text-[11px] text-slate-400">{activeForm?.blurb}</p>
+              </div>
+              {!editing && <button onClick={() => setPickedType("")} className="press text-[11px] font-bold text-slate-400 hover:text-slate-600">Change</button>}
+            </div>
+
+            <Field label="Staff member *">
+              <select value={staffId} disabled={busy} onChange={e => chooseStaff(e.target.value)} className={inputCls}>
+                <option value="">Select a staff member</option>
+                {store.staff.map(s => <option key={s.id} value={s.id}>{s.name}{s.dept ? ` — ${s.dept}` : ""}</option>)}
+              </select>
+            </Field>
+
+            {activeForm?.sections.map(sec => (
+              <div key={sec.title} className="rounded-xl bg-slate-50 p-3">
+                <p className="mb-3 text-[11px] font-extrabold uppercase tracking-widest" style={{ color: NAVY }}>{sec.title}</p>
+                <div className="space-y-3.5">
+                  {sec.questions.map(q => <ReviewField key={q.id} q={q} value={answers[q.id]} onChange={setAnswer} disabled={busy} />)}
+                </div>
+              </div>
+            ))}
+
+            <div className="flex gap-2">
+              <button onClick={() => save("draft")} disabled={busy || !staffId}
+                className="press flex-1 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-200 disabled:opacity-40">
+                Save as draft
+              </button>
+              <PrimaryBtn onClick={() => save("submitted")} disabled={busy || !staffId} className="flex-1">
+                {busy ? <Loader size={16} /> : <Save size={16} />} {editing ? "Save changes" : "Submit review"}
+              </PrimaryBtn>
+            </div>
+            <p className="text-center text-[10px] text-slate-400">A draft skips the required-field checks so you can finish it later.</p>
+          </div>
+        )}
+      </Modal>
+
+      {/* View */}
+      <Modal open={!!viewing} onClose={() => setViewing(null)} title={viewing?.formTitle || "Review"} width={720}>
+        {viewing && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-200">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: viewing.staff?.colour || NAVY }}>{viewing.staff?.initials}</span>
+              <div className="flex-1">
+                <p className="text-sm font-bold text-slate-700">{viewing.staff?.name}</p>
+                <p className="text-[11px] text-slate-400">
+                  {viewing.term || "—"}{viewing.academicYear ? ` · ${viewing.academicYear}` : ""}
+                  {viewing.completedBy ? ` · recorded by ${viewing.completedBy}` : ""}
+                </p>
+              </div>
+              <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${viewing.status === "draft" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>{viewing.status === "draft" ? "Draft" : "Submitted"}</span>
+            </div>
+            <ReviewAnswers form={formOf(viewing.type)} answers={viewing.answers || {}} />
+          </div>
+        )}
+      </Modal>
+
+      {/* Delete confirmation — every destructive action in this console asks first. */}
+      <Modal open={!!deleteTarget} onClose={() => !busy && setDeleteTarget(null)} title="Delete review">
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">
+            Delete the <b>{deleteTarget?.formTitle}</b> for <b>{deleteTarget?.staff?.name}</b>
+            {deleteTarget?.term ? <> ({deleteTarget.term})</> : null}?
+          </p>
+          <p className="flex items-start gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-[11px] leading-relaxed text-rose-700 ring-1 ring-rose-200">
+            <AlertCircle size={13} className="mt-px shrink-0" />
+            Every answer is removed permanently. This cannot be undone.
+          </p>
+          <PrimaryBtn colour={MAROON} onClick={confirmRemove} disabled={busy} className="w-full">
+            <Trash2 size={16} /> {busy ? "Deleting…" : "Delete review"}
+          </PrimaryBtn>
+          <button onClick={() => setDeleteTarget(null)} disabled={busy} className="press w-full text-center text-xs font-semibold text-slate-400 transition hover:text-slate-600">Cancel</button>
+        </div>
+      </Modal>
+    </>
   );
 }
 

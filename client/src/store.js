@@ -395,6 +395,21 @@ export function useApiStore(notify, user) {
     addInteraction: runPat((data) => api.addInteraction(data), "Interaction logged"),
     updateInteraction: runPat((id, data) => api.updateInteraction(id, data), "Interaction updated"),
     removeInteraction: runPat((id) => api.removeInteraction(id), "Interaction deleted", "error"),
+    // Staff reviews. The page owns its own list (it fetches on mount), so these
+    // only need to surface success/failure — there is no shared collection to
+    // refetch the way refresh()/refreshHnd() do.
+    addStaffReview: async (data) => {
+      try { const r = await api.addStaffReview(data); notify?.(data.status === "draft" ? "Review saved as a draft" : "Review submitted"); return r; }
+      catch (e) { notify?.(e.message || "Could not save the review", "error"); throw e; }
+    },
+    updateStaffReview: async (id, data) => {
+      try { const r = await api.updateStaffReview(id, data); notify?.("Review updated"); return r; }
+      catch (e) { notify?.(e.message || "Could not update the review", "error"); throw e; }
+    },
+    removeStaffReview: async (id) => {
+      try { const r = await api.removeStaffReview(id); notify?.("Review deleted", "error"); return r; }
+      catch (e) { notify?.(e.message || "Could not delete the review", "error"); throw e; }
+    },
     // assessments (gradebook)
     refreshAssessments,
     addAssessment: runAssess((data) => api.addAssessment(data), (d) => `Added "${d.title}"`),
