@@ -436,7 +436,172 @@ const EVALUATION = {
   ],
 };
 
-const FORMS = [STRATEGIC, MONTHLY, EVALUATION];
+// The five-point observation scale every Section 2–6 grid uses. The source form
+// spells two of these "Outstabnding" and "Exppectations"; they are corrected here
+// because these strings are stored as data and appear in every export and PDF.
+const OBSERVED = ["Outstanding Practice", "Effective Practice", "Meets Expectations", "Requires Development", "Not Observed"];
+// Every observation section asks the same evidence question after its grid.
+const evidence = (id) => ({ id, label: "What evidence supports your observations?", kind: "textarea", required: true });
+
+const TEACHING_QUALITY = {
+  type: "teaching-quality",
+  title: "Teaching Quality Review",
+  blurb: "Evaluating teaching excellence, enhancing learning experiences and inspiring student success.",
+  intro: "The Teaching Quality Review supports continuous improvement in teaching, learning and the student experience. The review is developmental in nature and aims to recognise effective practice while identifying opportunities for professional growth.",
+  sections: [
+    {
+      title: "Section 1 — Review Information",
+      questions: [
+        { id: "lecturerName", label: "Lecturer Name", kind: "text", required: true },
+        { id: "reviewerName", label: "Reviewer Name", kind: "text", required: true },
+        { id: "courseTitle", label: "Course title", kind: "text", required: true },
+        { id: "unitTitle", label: "Unit Title", kind: "text", required: true },
+        { id: "reviewDate", label: "Date of review", kind: "date", required: true },
+        { id: "deliveryMethod", label: "Delivery Method", kind: "radio", required: true, options: ["Classroom", "MS Teams"] },
+        { id: "reviewType", label: "Review Type", kind: "radio", required: true, options: ["Classroom Visit", "Teaching Observation", "Joint Quality Review"] },
+      ],
+    },
+    {
+      title: "Section 2 — Teaching & Learning",
+      questions: [
+        {
+          id: "teachingLearning", label: "Review the following", kind: "grid", required: true, options: OBSERVED,
+          rows: [
+            { key: "objectivesClear", label: "Learning objectives are clear." },
+            { key: "wellPlanned", label: "Session is well planned and structured." },
+            { key: "methodsSupport", label: "Teaching methods support effective learning." },
+            { key: "subjectKnowledge", label: "Subject knowledge is secure and current." },
+            { key: "activitiesParticipation", label: "Learning activities promote participation." },
+            { key: "paceAppropriate", label: "Pace of learning is appropriate." },
+          ],
+        },
+        evidence("teachingLearningEvidence"),
+      ],
+    },
+    {
+      title: "Section 3 — Student Engagement",
+      questions: [
+        {
+          id: "studentEngagement", label: "Review the following", kind: "grid", required: true, options: OBSERVED,
+          rows: [
+            { key: "activelyEngaged", label: "Students are actively engaged." },
+            { key: "contributeConfidently", label: "Students contribute confidently." },
+            { key: "demonstrateUnderstanding", label: "Students demonstrate understanding." },
+            { key: "workCollaboratively", label: "Students work collaboratively where appropriate." },
+            { key: "focusedMotivated", label: "Students remain focused and motivated." },
+          ],
+        },
+        evidence("studentEngagementEvidence"),
+      ],
+    },
+    {
+      title: "Section 4 — Learning Environment",
+      questions: [
+        {
+          id: "learningEnvironment", label: "Review the following", kind: "grid", required: true, options: OBSERVED,
+          rows: [
+            { key: "inclusive", label: "Learning environment is inclusive." },
+            { key: "resourcesSupport", label: "Resources effectively support learning." },
+            { key: "technologyAppropriate", label: "Technology is used appropriately." },
+            { key: "ediPromoted", label: "Equality, diversity and inclusion are promoted." },
+            { key: "classroomCulture", label: "Classroom culture supports learning." },
+          ],
+        },
+        evidence("learningEnvironmentEvidence"),
+      ],
+    },
+    {
+      title: "Section 5 — Assessment for Learning",
+      questions: [
+        {
+          id: "assessmentForLearning", label: "Review the following", kind: "grid", required: true, options: OBSERVED,
+          rows: [
+            { key: "understandingChecked", label: "Understanding is regularly checked." },
+            { key: "feedbackSupports", label: "Feedback supports student progress." },
+            { key: "appropriatelyChallenged", label: "Students are appropriately challenged." },
+            { key: "outcomesReviewed", label: "Learning outcomes are reviewed." },
+            { key: "misunderstandingsAddressed", label: "Misunderstandings are addressed effectively." },
+          ],
+        },
+        evidence("assessmentForLearningEvidence"),
+      ],
+    },
+    {
+      title: "Section 6 — Professional Practice",
+      questions: [
+        {
+          id: "professionalPractice", label: "Review the following", kind: "grid", required: true, options: OBSERVED,
+          rows: [
+            { key: "wellOrganised", label: "Session is well organised." },
+            { key: "professionalStandards", label: "Professional standards are maintained." },
+            { key: "attendanceProcedures", label: "Attendance procedures are completed." },
+            { key: "safeguarding", label: "Safeguarding responsibilities are evident." },
+            { key: "collegePolicies", label: "College policies are followed." },
+          ],
+        },
+        evidence("professionalPracticeEvidence"),
+      ],
+    },
+    {
+      title: "Section 7 — Examples of Good Practice",
+      questions: [
+        { id: "impressed", label: "What particularly impressed you during this session?", kind: "textarea", required: false },
+        { id: "shareAcrossCollege", label: "Are there any examples of innovative or outstanding practice that should be shared across the college?", kind: "textarea", required: false },
+      ],
+    },
+    {
+      title: "Section 8 — Development Opportunities",
+      questions: [
+        { id: "improvements", label: "What improvements would further enhance teaching and learning?", kind: "textarea", required: false },
+        { id: "cpdRecommendations", label: "Are there any CPD recommendations?", kind: "textarea", required: false },
+      ],
+    },
+    {
+      title: "Section 9 — Agreed Actions",
+      questions: [
+        {
+          id: "followUpRequired", label: "Is follow-up required?", kind: "radio", required: false,
+          options: [
+            "No further action",
+            "Review during next Monthly Performance Review",
+            "Follow-up Teaching Quality Review",
+            "Escalate to COO",
+          ],
+        },
+        {
+          id: "escalationReason", label: "Reason for escalation", kind: "textarea", required: true,
+          // Only asked when the outcome is an escalation — the other three follow-up
+          // options need no justification.
+          showIf: { q: "followUpRequired", is: "Escalate to COO" },
+        },
+      ],
+    },
+    {
+      title: "Section 10 — Overall Professional Judgement",
+      questions: [
+        {
+          id: "overallJudgement", label: "Overall judgement", kind: "radio", required: false,
+          options: ["Outstanding", "Good", "Effective", "Requires Development", "Significant Improvement Required"],
+        },
+        { id: "judgementRationale", label: "Please explain the rationale for your overall judgement, referencing the evidence observed during the review.", kind: "textarea", required: false },
+        { id: "verbalFeedbackGiven", label: "Has verbal feedback been provided to the lecturer?", kind: "radio", required: false, options: ["Yes", "No"] },
+        { id: "lecturerDiscussed", label: "Has the lecturer had the opportunity to discuss the review?", kind: "radio", required: false, options: ["Yes", "No"] },
+      ],
+    },
+    {
+      title: "Section 11 — Completion",
+      questions: [
+        // The source form labels this "Reviewer name" again, identical to question 2.
+        // Two questions sharing a label collide in every export column, so this one
+        // names what it actually is: the sign-off at the end of the review.
+        { id: "signedOffBy", label: "Reviewer name (sign-off)", kind: "text", required: false },
+        { id: "dateCompleted", label: "Date Completed", kind: "date", required: false },
+      ],
+    },
+  ],
+};
+
+const FORMS = [STRATEGIC, MONTHLY, EVALUATION, TEACHING_QUALITY];
 const byType = (type) => FORMS.find((f) => f.type === type) || null;
 const allQuestions = (form) => (form?.sections || []).flatMap((s) => s.questions);
 
@@ -524,4 +689,4 @@ function validateAnswers(form, raw, { draft = false } = {}) {
   return { answers: out };
 }
 
-module.exports = { FORMS, STRATEGIC, MONTHLY, EVALUATION, byType, allQuestions, visibleQuestions, isVisible, validateAnswers };
+module.exports = { FORMS, STRATEGIC, MONTHLY, EVALUATION, TEACHING_QUALITY, byType, allQuestions, visibleQuestions, isVisible, validateAnswers };

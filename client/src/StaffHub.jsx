@@ -440,7 +440,7 @@ export function StaffApp({ store, currentStaffId, setCurrentStaffId, logout, onC
   // Tapping a push notification opens the screen it refers to — the `link` the
   // server attached (e.g. "balance" for a leave decision, "approvals" for admins).
   useEffect(() => {
-    const KNOWN = ["home", "checkin", "balance", "calendar", "request", "documents", "approval", "summary", "timesheet", "reflection", "more"];
+    const KNOWN = ["home", "checkin", "balance", "calendar", "request", "documents", "approval", "summary", "timesheet", "reflection", "studentreview", "more"];
     const onOpen = (e) => {
       const link = e.detail === "approvals" ? "approval" : e.detail;
       setScreen(KNOWN.includes(link) ? link : "home");
@@ -470,6 +470,7 @@ export function StaffApp({ store, currentStaffId, setCurrentStaffId, logout, onC
       {screen === "summary" && <SummaryScreen store={store} me={me} />}
       {screen === "timesheet" && <TimesheetScreen store={store} me={me} />}
       {screen === "reflection" && <SelfReflectionScreen store={store} me={me} />}
+      {screen === "studentreview" && <StudentReviewScreen store={store} me={me} />}
       {screen === "more" && <MoreScreen store={store} me={me} logout={logout} onChangePassword={onChangePassword} onSwitchToAdmin={onSwitchToAdmin} />}
 
       {showNotes && <NotePanel store={store} onClose={() => setShowNotes(false)} />}
@@ -494,7 +495,7 @@ function StatusBar() {
 }
 
 function AppHeader({ me, staff, setCurrentStaffId, screen, setScreen, store, showNotes, setShowNotes }) {
-  const title = { home: "Staff Hub", checkin: "Daily Check-In", balance: "Holiday Balance", calendar: "Holiday Calendar", request: "Request Leave", documents: "Documents", approval: "Manager Approval", summary: "Daily Summary", timesheet: "My Timesheet", reflection: "Self-Reflection", more: "More" }[screen];
+  const title = { home: "Staff Hub", checkin: "Daily Check-In", balance: "Holiday Balance", calendar: "Holiday Calendar", request: "Request Leave", documents: "Documents", approval: "Manager Approval", summary: "Daily Summary", timesheet: "My Timesheet", reflection: "Self-Reflection", studentreview: "Student Review", more: "More" }[screen];
   const unread = store.notes.length;
   const greet = greetingFor();
   const Greet = greet.Icon;
@@ -579,6 +580,7 @@ const TILES = [
   { key: "summary", label: "Staff Daily Summary", Icon: UserPlus, sub: "Log your day" },
   { key: "timesheet", label: "Send Timesheet", Icon: ClipboardList, sub: "Log hours & submit" },
   { key: "reflection", label: "Self-Reflection", Icon: Award, sub: "Strategic lecturer review" },
+  { key: "studentreview", label: "Student Review", Icon: MessageSquare, sub: "Review a student's progress" },
   { key: "more", label: "More", Icon: ArrowRight, sub: "Profile & settings" },
 ];
 const STAFF_TIPS = [
@@ -1507,8 +1509,8 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
 /* ============================================================ ADMIN DASHBOARD ============================================================ */
 // The assignable admin pages, in nav order. "access" is intentionally excluded —
 // it is Super-Admin-only and never granted. Keep in sync with server validate.js.
-const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staffreviews", "studentqueries", "staff", "timesheets", "settings"];
-const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", settings: "Settings" };
+const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "settings"];
+const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentreviews: "Student Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", settings: "Settings" };
 
 // Can this user see/use a given admin page? The Super Admin gets everything,
 // including the Super-Admin-only Access tab. A page-scoped admin gets only their
@@ -1803,6 +1805,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
     { key: "assessments", label: "Assessments", I: Award },
     { key: "pat", label: "PAT", I: MessageSquare },
     { key: "staffreviews", label: "Staff Reviews", I: ClipboardList },
+    { key: "studentreviews", label: "Student Reviews", I: MessageSquare },
     { key: "studentqueries", label: "Student Queries", I: Inbox },
     { key: "staff", label: "Staff", I: Users },
     { key: "timesheets", label: "Timesheets", I: Timer },
@@ -1871,6 +1874,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
         {activeKey === "assessments" && <AdminAssessments store={store} />}
         {activeKey === "pat" && <AdminPAT store={store} />}
         {activeKey === "staffreviews" && <AdminStaffReviews store={store} />}
+        {activeKey === "studentreviews" && <AdminStudentReviews store={store} />}
         {activeKey === "studentqueries" && <AdminStudentQueries store={store} />}
         {activeKey === "staff" && <AdminStaff store={store} />}
         {activeKey === "timesheets" && <AdminTimesheets store={store} />}
@@ -5138,6 +5142,653 @@ function AdminStaffReviews({ store }) {
           <button onClick={() => setDeleteTarget(null)} disabled={busy} className="press w-full text-center text-xs font-semibold text-slate-400 transition hover:text-slate-600">Cancel</button>
         </div>
       </Modal>
+    </>
+  );
+}
+
+/* ============================================================
+   Student Reviews — a lecturer's record of a progress conversation.
+   One dataset, two views: the lecturer's own on the app, and every
+   review (with the name of whoever filed it) in the console.
+   ============================================================ */
+
+// The three progress bands, coloured identically in the app and the console so one
+// word never reads differently in two places.
+const PROGRESS_TONE = {
+  "On Track": { bg: "bg-emerald-100", text: "text-emerald-700", colour: "#059669" },
+  "Monitor":  { bg: "bg-amber-100",   text: "text-amber-700",   colour: "#b45309" },
+  "At Risk":  { bg: "bg-rose-100",    text: "text-rose-700",    colour: MAROON },
+};
+const progressTone = (p) => PROGRESS_TONE[p] || { bg: "bg-slate-100", text: "text-slate-500", colour: "#64748b" };
+
+// "No Concerns" states that there are none, so it cannot sit beside a specific
+// concern — the server rejects that combination with a 400. Both clients toggle
+// through here so neither can build a body the server will refuse.
+const toggleConcern = (list, c) => {
+  const has = (list || []).includes(c);
+  if (c === "No Concerns") return has ? [] : ["No Concerns"];
+  const next = has ? list.filter(x => x !== c) : [...list, c];
+  return next.filter(x => x !== "No Concerns");
+};
+
+const blankStudentReview = () => ({ studentId: "", unitId: "", date: todayISO(), progress: "On Track", concerns: [], summary: "", agreedActions: "", followUp: false, followUpDate: "" });
+// A saved review back onto the form shape — nulls become the empty strings the
+// controlled inputs need, or React switches them to uncontrolled mid-edit.
+const studentReviewForm = (r) => ({
+  studentId: r.studentId, unitId: r.unitId || "", date: r.date, progress: r.progress,
+  concerns: r.concerns || [], summary: r.summary || "", agreedActions: r.agreedActions || "",
+  followUp: !!r.followUp, followUpDate: r.followUpDate || "",
+});
+// Mirrors the server's required fields, so a mistake is shown beside the field that
+// caused it instead of coming back as a 400 after a round trip.
+const studentReviewError = (f) => {
+  if (!f.studentId) return "Choose the student this review is about.";
+  if (!f.date) return "Enter the date of the conversation.";
+  if (!f.progress) return "Choose how the student is progressing.";
+  if (f.followUp && !f.followUpDate) return "Enter the date the follow-up is due.";
+  return "";
+};
+// followUpDate only means anything alongside a follow-up; clearing it on "No" stops
+// a stale date being sent back after someone changes their mind.
+const studentReviewBody = (f) => ({ ...f, followUpDate: f.followUp ? f.followUpDate : "" });
+
+/* ----- Student Review (in app) — the lecturer's own reviews ----- */
+function StudentReviewScreen({ store, me }) {
+  const [rows, setRows] = useState([]);
+  const [options, setOptions] = useState({ progress: [], concerns: [] });
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [mode, setMode] = useState("list");      // list | form | view
+  const [editing, setEditing] = useState(null);  // the review being corrected; null = new
+  const [current, setCurrent] = useState(null);  // the review being read
+  const [form, setForm] = useState(blankStudentReview);
+  const [formErr, setFormErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null);
+  // The pickers' source data. store.students/units are only filled by the admin
+  // registers pages, so on this screen they are normally empty.
+  const [roster, setRoster] = useState({ students: [], units: [] });
+  const [rosterErr, setRosterErr] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr("");
+    try {
+      const [opts, mine] = await Promise.all([api.studentReviewOptions(), api.myStudentReviews()]);
+      setOptions(opts); setRows(mine);
+    } catch (e) { setErr(e.message || "Could not load your student reviews"); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const haveStore = store.students.length > 0;
+  useEffect(() => {
+    if (haveStore) return;
+    let alive = true;
+    (async () => {
+      try {
+        const [st, un] = await Promise.all([api.listStudents(), api.listUnits()]);
+        if (alive) setRoster({ students: st, units: un });
+      } catch (e) {
+        if (!alive) return;
+        // Student records are page-gated, so a lecturer without that grant gets a
+        // 403 here. They can still read, correct and delete the reviews they have
+        // already written — only the pickers are withdrawn, never the whole screen.
+        setRosterErr(e?.status === 403
+          ? "Your account can't see the student list, so a new review can't be started here. Ask an administrator for access to student records."
+          : (e.message || "Could not load the student list. Check your connection and try again."));
+      }
+    })();
+    return () => { alive = false; };
+  }, [haveStore]);
+
+  // Android back: leave the form or the detail rather than the whole screen.
+  useBackHandler(mode !== "list", () => { setMode("list"); return true; });
+
+  const students = haveStore ? store.students : roster.students;
+  const units = haveStore ? store.units : roster.units;
+
+  // The review being edited keeps its own student and unit in the lists even when
+  // the roster is unavailable, so an existing review can always be corrected.
+  const studentOptions = useMemo(() => {
+    const list = students.map(s => ({ id: s.id, label: `${s.name} — ${s.studentRef}` }));
+    if (editing?.student && !list.some(o => o.id === editing.student.id)) list.unshift({ id: editing.student.id, label: `${editing.student.name} — ${editing.student.studentRef}` });
+    return list;
+  }, [students, editing]);
+  const unitOptions = useMemo(() => {
+    const list = units.map(u => ({ id: u.id, label: `${u.code} — ${u.name}` }));
+    if (editing?.unit && !list.some(o => o.id === editing.unit.id)) list.unshift({ id: editing.unit.id, label: `${editing.unit.code} — ${editing.unit.name}` });
+    return list;
+  }, [units, editing]);
+
+  // The server owns both lists; fall back to the known bands only so the radios are
+  // never empty if /options is slow or fails.
+  const progressChoices = options.progress?.length ? options.progress : Object.keys(PROGRESS_TONE);
+  const concernChoices = options.concerns || [];
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const startNew = () => { setEditing(null); setForm(blankStudentReview()); setFormErr(""); setMode("form"); };
+  const openEdit = (r) => { setEditing(r); setForm(studentReviewForm(r)); setFormErr(""); setMode("form"); };
+  const openView = (r) => { setCurrent(r); setMode("view"); };
+
+  const save = async () => {
+    const problem = studentReviewError(form);
+    if (problem) { setFormErr(problem); return; }
+    setBusy(true); setFormErr("");
+    try {
+      if (editing) await api.updateStudentReview(editing.id, studentReviewBody(form));
+      else await api.addStudentReview(studentReviewBody(form));
+      store.notify(editing ? "Review updated" : "Review saved");
+      setMode("list");
+      await load();
+    } catch (e) { setFormErr(e.message || "Could not save the review"); }
+    setBusy(false);
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    try { await api.removeStudentReview(confirmDel.id); setConfirmDel(null); store.notify("Review deleted", "error"); await load(); }
+    catch (e) { store.notify(e.message || "Could not delete the review", "error"); }
+    setBusy(false);
+  };
+
+  /* ---------------------------------------------------------------- list ---- */
+  if (mode === "list") {
+    return (
+      <Screen>
+        <div className="space-y-3">
+          {err && <Card className="!bg-rose-50 !ring-rose-200 text-sm font-semibold text-rose-600">{err}</Card>}
+          {loading ? <><div className="skeleton h-24 rounded-2xl" /><div className="skeleton h-20 rounded-2xl" /></> : (
+            <>
+              <div className="animated-gradient relative overflow-hidden rounded-2xl p-4 text-white shadow-md fade-up" style={{ background: `linear-gradient(135deg, ${NAVY} 0%, ${NAVY_DARK} 55%, ${MAROON} 140%)`, backgroundSize: "200% 200%" }}>
+                <MessageSquare size={56} className="float-slow absolute -right-2 -top-2 text-white/10" />
+                <p className="relative text-base font-extrabold">Student Review</p>
+                <p className="relative mt-1 text-[12px] text-white/75">Record a progress conversation — how the student is doing, what you agreed, and whether you need to see them again.</p>
+              </div>
+
+              {rosterErr && (
+                <Card className="!bg-amber-50 !ring-amber-200">
+                  <p className="flex items-start gap-1.5 text-[12px] font-semibold leading-relaxed text-amber-800"><AlertCircle size={14} className="mt-px shrink-0" />{rosterErr}</p>
+                </Card>
+              )}
+
+              <button onClick={startNew} disabled={students.length === 0}
+                className="press flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3.5 text-sm font-bold text-white shadow-md disabled:opacity-40"
+                style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>
+                <Plus size={17} /> New review
+              </button>
+
+              <p className="px-1 pt-1 text-[11px] font-extrabold uppercase tracking-widest text-slate-400">My reviews</p>
+              {rows.length === 0 && <Card className="text-sm text-slate-400">You haven't recorded a student review yet. Tap “New review” above.</Card>}
+              {rows.map((r, i) => {
+                const t = progressTone(r.progress);
+                return (
+                  <Card key={r.id} className="!p-3.5 fade-up" style={{ animationDelay: `${i * 55}ms` }}>
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-sm" style={{ background: r.student?.colour || NAVY }}>{r.student?.initials || "?"}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-bold text-slate-700">{r.student?.name || "—"}</p>
+                        <p className="truncate text-[11px] text-slate-400">{fmtDate(r.date)}{r.unit ? ` · ${r.unit.code}` : ""}{r.student?.studentRef ? ` · ${r.student.studentRef}` : ""}</p>
+                      </div>
+                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${t.bg} ${t.text}`}>{r.progress}</span>
+                    </div>
+                    {((r.concerns || []).length > 0 || r.followUp) && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {(r.concerns || []).map(c => <span key={c} className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">{c}</span>)}
+                        {r.followUp && <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700"><CalendarCheck size={10} /> Follow-up{r.followUpDate ? ` ${fmtDate(r.followUpDate)}` : ""}</span>}
+                      </div>
+                    )}
+                    <div className="mt-2.5 flex gap-2">
+                      <button onClick={() => openView(r)} className="press flex-1 rounded-xl bg-slate-100 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-200">View</button>
+                      <button onClick={() => openEdit(r)} className="press flex-1 rounded-xl py-2 text-xs font-bold text-white" style={{ background: NAVY }}>Edit</button>
+                      <button onClick={() => setConfirmDel(r)} title="Delete review" className="press rounded-xl bg-rose-50 px-3 py-2 text-rose-500 transition hover:bg-rose-100"><Trash2 size={15} /></button>
+                    </div>
+                  </Card>
+                );
+              })}
+              <p className="px-1 pb-2 text-center text-[10px] leading-relaxed text-slate-400">
+                Reviews you file are visible to the student they are about and to the college.
+              </p>
+            </>
+          )}
+        </div>
+
+        <ConfirmDialog
+          open={!!confirmDel}
+          title="Delete this review?"
+          message={`The review for ${confirmDel?.student?.name || "this student"}${confirmDel ? ` on ${fmtDate(confirmDel.date)}` : ""} will be removed permanently. This cannot be undone.`}
+          confirmLabel={busy ? "Deleting…" : "Delete review"}
+          danger
+          onConfirm={remove}
+          onCancel={() => !busy && setConfirmDel(null)}
+        />
+      </Screen>
+    );
+  }
+
+  /* ---------------------------------------------------------------- form ---- */
+  if (mode === "form") {
+    return (
+      <Screen>
+        <div className="space-y-3">
+          <button onClick={() => setMode("list")} className="press flex items-center gap-1.5 text-sm font-bold text-slate-500"><ChevronLeft size={16} /> Back to my reviews</button>
+
+          <Card>
+            <div className="space-y-3.5">
+              <Field label="Student *">
+                <select value={form.studentId} disabled={busy} onChange={e => set("studentId", e.target.value)} className={inputCls}>
+                  <option value="">Choose a student…</option>
+                  {studentOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+              </Field>
+
+              <Field label="Unit">
+                <select value={form.unitId} disabled={busy} onChange={e => set("unitId", e.target.value)} className={inputCls}>
+                  <option value="">— not about a particular unit —</option>
+                  {unitOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+              </Field>
+
+              <Field label="Date of conversation">
+                <input type="date" value={form.date} disabled={busy} onChange={e => set("date", e.target.value)} className={inputCls} />
+              </Field>
+
+              <Field label="Progress">
+                <div className="space-y-1.5">
+                  {progressChoices.map(p => {
+                    const t = progressTone(p); const on = form.progress === p;
+                    return (
+                      <button key={p} type="button" onClick={() => set("progress", p)} disabled={busy}
+                        className={`press flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-bold ring-1 transition ${on ? `${t.bg} ${t.text} ring-transparent` : "bg-white text-slate-500 ring-slate-200"}`}>
+                        <span className={`h-4 w-4 shrink-0 rounded-full ring-2 ${on ? "ring-transparent" : "ring-slate-300"}`} style={{ background: on ? t.colour : "transparent" }} />
+                        {p}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+
+              <Field label="Concerns">
+                <div className="space-y-1.5">
+                  {concernChoices.map(c => {
+                    const on = form.concerns.includes(c);
+                    return (
+                      <button key={c} type="button" onClick={() => set("concerns", toggleConcern(form.concerns, c))} disabled={busy}
+                        className={`press flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-semibold ring-1 transition ${on ? "bg-blue-50 text-blue-800 ring-blue-200" : "bg-white text-slate-500 ring-slate-200"}`}>
+                        <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-md ring-2 ${on ? "text-white ring-transparent" : "ring-slate-300"}`} style={on ? { background: NAVY } : {}}>{on && <Check size={11} />}</span>
+                        {c}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-400">“No Concerns” can't be combined with a specific concern.</p>
+              </Field>
+
+              <Field label="Summary of discussion">
+                <textarea rows={4} value={form.summary} disabled={busy} onChange={e => set("summary", e.target.value)} placeholder="What was discussed…" className={`${inputCls} resize-y`} />
+              </Field>
+
+              <Field label="Agreed actions">
+                <textarea rows={3} value={form.agreedActions} disabled={busy} onChange={e => set("agreedActions", e.target.value)} placeholder="What the student and you agreed to do…" className={`${inputCls} resize-y`} />
+              </Field>
+
+              <Field label="Follow-up required?">
+                <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
+                  {[{ v: false, l: "No" }, { v: true, l: "Yes" }].map(o => (
+                    <button key={String(o.v)} type="button" disabled={busy}
+                      onClick={() => setForm(f => ({ ...f, followUp: o.v, followUpDate: o.v ? f.followUpDate : "" }))}
+                      className={`press flex-1 rounded-lg py-2 text-xs font-bold transition ${form.followUp === o.v ? (o.v ? "bg-amber-500 text-white shadow-sm" : "bg-white text-slate-700 shadow-sm") : "text-slate-400"}`}>{o.l}</button>
+                  ))}
+                </div>
+              </Field>
+
+              {form.followUp && (
+                <Field label="Follow-up date *">
+                  <input type="date" value={form.followUpDate} disabled={busy} min={form.date} onChange={e => set("followUpDate", e.target.value)} className={inputCls} />
+                </Field>
+              )}
+            </div>
+          </Card>
+
+          {formErr && <Card className="!bg-rose-50 !ring-rose-200 text-[12px] font-semibold text-rose-600">{formErr}</Card>}
+
+          <div className="flex items-center gap-2">
+            <button onClick={() => setMode("list")} disabled={busy}
+              className="press rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:opacity-40">Cancel</button>
+            <div className="flex-1" />
+            <button onClick={save} disabled={busy}
+              className="press flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white shadow-md disabled:opacity-40" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>
+              {busy ? <Loader size={16} /> : <Save size={16} />} {editing ? "Save changes" : "Save review"}
+            </button>
+          </div>
+          <p className="pb-2 text-center text-[10px] text-slate-400">Filed as {me.name}.</p>
+        </div>
+      </Screen>
+    );
+  }
+
+  /* ---------------------------------------------------------------- view ---- */
+  const t = progressTone(current?.progress);
+  return (
+    <Screen>
+      <div className="space-y-3">
+        <button onClick={() => setMode("list")} className="press flex items-center gap-1.5 text-sm font-bold text-slate-500"><ChevronLeft size={16} /> Back to my reviews</button>
+        <Card>
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-sm" style={{ background: current?.student?.colour || NAVY }}>{current?.student?.initials || "?"}</span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-extrabold text-slate-700">{current?.student?.name || "—"}</p>
+              <p className="truncate text-[11px] text-slate-400">{current?.student?.studentRef}{current?.unit ? ` · ${current.unit.code} — ${current.unit.name}` : ""}</p>
+            </div>
+            <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${t.bg} ${t.text}`}>{current?.progress}</span>
+          </div>
+        </Card>
+        <Card>
+          <StudentReviewDetail r={current} />
+        </Card>
+        <button onClick={() => openEdit(current)} className="press w-full rounded-xl py-2.5 text-sm font-bold text-white" style={{ background: NAVY }}>Edit this review</button>
+      </div>
+    </Screen>
+  );
+}
+
+function DetailRow({ label, children }) {
+  return (
+    <div>
+      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+      <div className="mt-0.5 text-sm text-slate-600">{children}</div>
+    </div>
+  );
+}
+// Every field of one review, in full — shared by the app's detail view and the
+// console's View modal so the two can never drift apart.
+function StudentReviewDetail({ r }) {
+  if (!r) return null;
+  const t = progressTone(r.progress);
+  return (
+    <div className="space-y-3.5">
+      <div className="grid grid-cols-2 gap-3.5">
+        <DetailRow label="Student">{r.student?.name || "—"}<span className="block text-[11px] text-slate-400">{r.student?.studentRef}</span></DetailRow>
+        <DetailRow label="Unit">{r.unit ? <>{r.unit.code}<span className="block text-[11px] text-slate-400">{r.unit.name}</span></> : <span className="text-slate-300">Not unit specific</span>}</DetailRow>
+        <DetailRow label="Date">{fmtDate(r.date)}</DetailRow>
+        <DetailRow label="Progress"><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${t.bg} ${t.text}`}>{r.progress}</span></DetailRow>
+      </div>
+      <DetailRow label="Concerns">
+        {(r.concerns || []).length === 0
+          ? <span className="text-slate-300">None recorded</span>
+          : <span className="flex flex-wrap gap-1.5">{r.concerns.map(c => <span key={c} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">{c}</span>)}</span>}
+      </DetailRow>
+      <DetailRow label="Summary of discussion"><p className="whitespace-pre-wrap leading-relaxed">{r.summary || <span className="text-slate-300">—</span>}</p></DetailRow>
+      <DetailRow label="Agreed actions"><p className="whitespace-pre-wrap leading-relaxed">{r.agreedActions || <span className="text-slate-300">—</span>}</p></DetailRow>
+      <div className="grid grid-cols-2 gap-3.5">
+        <DetailRow label="Follow-up required">
+          {r.followUp
+            ? <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700">Yes</span>
+            : <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-400">No</span>}
+        </DetailRow>
+        <DetailRow label="Follow-up date">{r.followUpDate ? fmtDate(r.followUpDate) : <span className="text-slate-300">—</span>}</DetailRow>
+      </div>
+      <DetailRow label="Submitted by">{r.staffName || <span className="text-slate-300">—</span>}</DetailRow>
+    </div>
+  );
+}
+
+/* ----- Dashboard: Student Reviews — every review, whoever filed it ----- */
+function AdminStudentReviews({ store }) {
+  const { refreshHnd } = store;
+  const [rows, setRows] = useState([]);
+  const [options, setOptions] = useState({ progress: [], concerns: [] });
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [query, setQuery] = useState("");
+  const [progressFilter, setProgressFilter] = useState("all");
+  const [followFilter, setFollowFilter] = useState("all");   // all | required
+  const [modal, setModal] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(blankStudentReview);
+  const [formErr, setFormErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [viewing, setViewing] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr("");
+    try {
+      const [opts, list] = await Promise.all([api.studentReviewOptions(), api.listStudentReviews()]);
+      setOptions(opts); setRows(list);
+    } catch (e) { setErr(e.message || "Could not load student reviews"); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  // The student and unit pickers come from the HND collections, which only load on
+  // the pages that ask for them.
+  useEffect(() => { refreshHnd(); }, [refreshHnd]);
+
+  // A review's own student stays in the picker even if the HND list hasn't arrived,
+  // so an existing review can always be corrected.
+  const pickerStudents = useMemo(() => {
+    const list = store.students;
+    if (editing?.student && !list.some(s => s.id === editing.student.id)) {
+      return [{ ...editing.student, email: "" }, ...list];
+    }
+    return list;
+  }, [store.students, editing]);
+
+  const progressChoices = options.progress?.length ? options.progress : Object.keys(PROGRESS_TONE);
+  const concernChoices = options.concerns || [];
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const openAdd = () => { setEditing(null); setForm(blankStudentReview()); setFormErr(""); setModal(true); };
+  const openEdit = (r) => { setEditing(r); setForm(studentReviewForm(r)); setFormErr(""); setModal(true); };
+
+  const save = async () => {
+    const problem = studentReviewError(form);
+    if (problem) { setFormErr(problem); return; }
+    setBusy(true); setFormErr("");
+    try {
+      if (editing) await api.updateStudentReview(editing.id, studentReviewBody(form));
+      else await api.addStudentReview(studentReviewBody(form));
+      store.notify(editing ? "Review updated" : "Review added");
+      setModal(false);
+      await load();
+    } catch (e) { setFormErr(e.message || "Could not save the review"); }
+    setBusy(false);
+  };
+
+  const confirmRemove = async () => {
+    setBusy(true);
+    try { await api.removeStudentReview(deleteTarget.id); setDeleteTarget(null); store.notify("Review deleted", "error"); await load(); }
+    catch (e) { store.notify(e.message || "Could not delete the review", "error"); }
+    setBusy(false);
+  };
+
+  const ql = query.trim().toLowerCase();
+  const list = rows.filter(r => {
+    if (progressFilter !== "all" && r.progress !== progressFilter) return false;
+    if (followFilter === "required" && !r.followUp) return false;
+    if (!ql) return true;
+    return (r.student?.name || "").toLowerCase().includes(ql)
+      || (r.student?.studentRef || "").toLowerCase().includes(ql)
+      || (r.staffName || "").toLowerCase().includes(ql)
+      || (r.unit?.code || "").toLowerCase().includes(ql)
+      || (r.summary || "").toLowerCase().includes(ql);
+  });
+  const paged = usePaged(list, 10, `${ql}|${progressFilter}|${followFilter}`);
+
+  const exportCsv = () => {
+    if (!list.length) { store.notify("Nothing to export in the current view", "error"); return; }
+    downloadCSV("student-reviews.csv", [
+      { key: "ref", label: "Student reference" }, { key: "student", label: "Student" },
+      { key: "unit", label: "Unit" }, { key: "date", label: "Date" }, { key: "progress", label: "Progress" },
+      { key: "concerns", label: "Concerns" }, { key: "summary", label: "Summary of discussion" },
+      { key: "actions", label: "Agreed actions" }, { key: "followUp", label: "Follow-up required" },
+      { key: "followUpDate", label: "Follow-up date" }, { key: "staff", label: "Submitted by" },
+    ], list.map(r => ({
+      ref: r.student?.studentRef || "", student: r.student?.name || "",
+      unit: r.unit ? `${r.unit.code} — ${r.unit.name}` : "", date: r.date, progress: r.progress,
+      concerns: (r.concerns || []).join("; "), summary: r.summary || "", actions: r.agreedActions || "",
+      followUp: r.followUp ? "Yes" : "No", followUpDate: r.followUpDate || "", staff: r.staffName || "",
+    })));
+    store.notify(`Exported ${list.length} review${list.length === 1 ? "" : "s"}`);
+  };
+
+  return (
+    <>
+      <AdminHeader title="Student Reviews" subtitle="Progress conversations recorded by lecturers, and the follow-ups they agreed"
+        Icon={MessageSquare}
+        action={<div className="flex flex-wrap items-center gap-2"><ExportBtn onClick={exportCsv} /><PrimaryBtn onClick={openAdd}><Plus size={16} /> Add review</PrimaryBtn></div>} />
+
+      {err && <div className="mb-4 flex items-start gap-2 rounded-xl bg-rose-50 px-3.5 py-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={16} className="mt-px shrink-0" />{err}</div>}
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {[{ v: "all", l: "All progress" }, ...progressChoices.map(p => ({ v: p, l: p }))].map(o => (
+          <button key={o.v} onClick={() => setProgressFilter(o.v)}
+            className={`press rounded-full px-3 py-1.5 text-xs font-bold shadow-sm ring-1 transition ${progressFilter === o.v ? "text-white ring-transparent" : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50"}`}
+            style={progressFilter === o.v ? { background: o.v === "all" ? `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` : progressTone(o.v).colour } : {}}>{o.l}</button>
+        ))}
+        <div className="flex gap-1 rounded-xl bg-white p-1 ring-1 ring-slate-200">
+          {[{ k: "all", l: "All" }, { k: "required", l: "Follow-up required" }].map(f => (
+            <button key={f.k} onClick={() => setFollowFilter(f.k)} className={`press rounded-lg px-2.5 py-1.5 text-xs font-bold transition ${followFilter === f.k ? "text-white" : "text-slate-500 hover:bg-slate-100"}`} style={followFilter === f.k ? { background: NAVY } : {}}>{f.l}</button>
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+          <Search size={15} className="text-slate-400" />
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search student, lecturer, unit or summary…" className="w-56 bg-transparent text-sm outline-none" />
+        </div>
+      </div>
+
+      {loading ? <div className="skeleton h-64 rounded-2xl" /> : (
+        <>
+          <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 fade-up">
+            <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
+                  <tr>
+                    <th className="px-5 py-3">Student</th><th className="px-5 py-3">Unit</th><th className="px-5 py-3 whitespace-nowrap">Date</th>
+                    <th className="px-5 py-3">Progress</th><th className="px-5 py-3 text-center">Concerns</th><th className="px-5 py-3">Submitted by</th>
+                    <th className="px-5 py-3 text-center whitespace-nowrap">Follow-up?</th><th className="px-5 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paged.slice.map(r => {
+                    const t = progressTone(r.progress);
+                    const n = (r.concerns || []).length;
+                    return (
+                      <tr key={r.id} onClick={() => setViewing(r)} className="cursor-pointer border-t border-slate-100 transition-colors duration-150 hover:bg-blue-50/40">
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-sm" style={{ background: r.student?.colour || "#94a3b8" }}>{r.student?.initials || "?"}</span>
+                            <div className="min-w-0"><p className="font-semibold text-slate-700">{r.student?.name || "—"}</p><p className="text-[11px] tabular-nums text-slate-400">{r.student?.studentRef || ""}</p></div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3">{r.unit ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">{r.unit.code}</span> : <span className="text-slate-300">—</span>}</td>
+                        <td className="px-5 py-3 whitespace-nowrap text-slate-500">{fmtDate(r.date)}</td>
+                        <td className="px-5 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${t.bg} ${t.text}`}>{r.progress}</span></td>
+                        <td className="px-5 py-3 text-center">
+                          {n === 0
+                            ? <span className="text-slate-300">—</span>
+                            : <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold tabular-nums ${r.concerns[0] === "No Concerns" ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-600"}`}>{r.concerns[0] === "No Concerns" ? "None" : n}</span>}
+                        </td>
+                        <td className="px-5 py-3 text-slate-500">{r.staffName || <span className="text-slate-300">—</span>}</td>
+                        <td className="px-5 py-3 text-center">
+                          {r.followUp
+                            ? <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700">{r.followUpDate ? fmtDate(r.followUpDate) : "Yes"}</span>
+                            : <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-400">No</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-1 whitespace-nowrap">
+                            <button onClick={(e) => { e.stopPropagation(); setViewing(r); }} title="View" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><FileText size={15} /></button>
+                            <button onClick={(e) => { e.stopPropagation(); openEdit(r); }} title="Edit" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button>
+                            <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }} title="Delete" className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {paged.slice.length === 0 && (
+                    <tr><td colSpan={8} className="px-5 py-12">
+                      <EmptyState Icon={MessageSquare} title={rows.length ? "No reviews match" : "No student reviews yet"}
+                        msg={rows.length ? "Try a different search or filter." : "Lecturers record these from the Student Review screen in the app."} />
+                    </td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
+        </>
+      )}
+
+      {/* Add / edit */}
+      <Modal open={modal} onClose={() => !busy && setModal(false)} title={editing ? "Edit student review" : "Add student review"} width={640}>
+        <div className="space-y-3">
+          <Field label="Student"><StudentCombo students={pickerStudents} value={form.studentId} onChange={id => set("studentId", id)} /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Unit (optional)">
+              <select value={form.unitId} onChange={e => set("unitId", e.target.value)} className={inputCls}>
+                <option value="">— not unit specific —</option>
+                {store.units.map(u => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Date of conversation"><input type="date" value={form.date} onChange={e => set("date", e.target.value)} className={inputCls} /></Field>
+          </div>
+          <Field label="Progress">
+            <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
+              {progressChoices.map(p => (
+                <button key={p} type="button" onClick={() => set("progress", p)}
+                  className={`press flex-1 rounded-lg py-2 text-xs font-bold transition ${form.progress === p ? "text-white shadow-sm" : "text-slate-400 hover:text-slate-600"}`}
+                  style={form.progress === p ? { background: progressTone(p).colour } : {}}>{p}</button>
+              ))}
+            </div>
+          </Field>
+          <Field label="Concerns">
+            <div className="grid grid-cols-2 gap-1.5">
+              {concernChoices.map(c => {
+                const on = form.concerns.includes(c);
+                return (
+                  <button key={c} type="button" onClick={() => set("concerns", toggleConcern(form.concerns, c))}
+                    className={`press flex items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold ring-1 transition ${on ? "bg-blue-50 text-blue-800 ring-blue-200" : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50"}`}>
+                    <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-md ring-2 ${on ? "text-white ring-transparent" : "ring-slate-300"}`} style={on ? { background: NAVY } : {}}>{on && <Check size={11} />}</span>
+                    {c}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[11px] text-slate-400">“No Concerns” can't be combined with a specific concern.</p>
+          </Field>
+          <Field label="Summary of discussion"><textarea rows={4} value={form.summary} onChange={e => set("summary", e.target.value)} placeholder="What was discussed…" className={`${inputCls} resize-y`} /></Field>
+          <Field label="Agreed actions"><textarea rows={3} value={form.agreedActions} onChange={e => set("agreedActions", e.target.value)} placeholder="Actions agreed with the student…" className={`${inputCls} resize-y`} /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Follow-up required?">
+              <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
+                {[{ v: false, l: "No" }, { v: true, l: "Yes" }].map(o => (
+                  <button key={String(o.v)} type="button" onClick={() => setForm(f => ({ ...f, followUp: o.v, followUpDate: o.v ? f.followUpDate : "" }))}
+                    className={`press flex-1 rounded-lg py-2 text-xs font-bold transition ${form.followUp === o.v ? (o.v ? "bg-amber-500 text-white shadow-sm" : "bg-white text-slate-700 shadow-sm") : "text-slate-400"}`}>{o.l}</button>
+                ))}
+              </div>
+            </Field>
+            {form.followUp && <Field label="Follow-up date"><input type="date" value={form.followUpDate} min={form.date} onChange={e => set("followUpDate", e.target.value)} className={inputCls} /></Field>}
+          </div>
+          {formErr && <p className="flex items-start gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={13} className="mt-px shrink-0" />{formErr}</p>}
+          {editing?.staffName && <p className="text-[11px] text-slate-400">Originally submitted by {editing.staffName}.</p>}
+          <PrimaryBtn onClick={save} disabled={busy} className="w-full">{busy ? <><Loader size={16} /> Saving…</> : <><Save size={16} /> {editing ? "Save changes" : "Add review"}</>}</PrimaryBtn>
+        </div>
+      </Modal>
+
+      {/* View */}
+      <Modal open={!!viewing} onClose={() => setViewing(null)} title="Student review" width={640}>
+        {viewing && <StudentReviewDetail r={viewing} />}
+      </Modal>
+
+      {/* Delete confirmation — every destructive action in this console asks first. */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete this review?"
+        message={`The review for ${deleteTarget?.student?.name || "this student"}${deleteTarget ? ` on ${fmtDate(deleteTarget.date)}` : ""}, submitted by ${deleteTarget?.staffName || "a colleague"}, will be removed permanently. This cannot be undone.`}
+        confirmLabel={busy ? "Deleting…" : "Delete review"}
+        danger
+        onConfirm={confirmRemove}
+        onCancel={() => !busy && setDeleteTarget(null)}
+      />
     </>
   );
 }

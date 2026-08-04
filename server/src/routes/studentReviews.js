@@ -2,7 +2,7 @@
 //
 // Three audiences, three scopes, all from this one router:
 //   • staff    GET /?mine=true   their own; POST/PUT/DELETE their own
-//   • student  GET /me           reviews about themselves (read-only)
+//   • student  NOT here — see GET /api/student/me/reviews (the student router)
 //   • admin    GET /             everything, filterable — needs the studentreviews page
 //
 // The scope is always derived from the token, never from a query parameter, so there
@@ -46,21 +46,13 @@ const INCLUDE = { student: true, unit: true, staff: { select: { name: true } } }
 // The fixed choice lists, so the three clients never hard-code them.
 router.get("/options", (_req, res) => res.json({ progress: PROGRESS, concerns: CONCERNS }));
 
-// A STUDENT's own reviews. Listed before "/:id" so the literal path wins.
-router.get("/me", async (req, res) => {
-  if (req.user?.kind !== "student") return res.status(403).json({ error: "For student accounts only" });
-  const rows = await prisma.studentReview.findMany({
-    where: { studentId: req.user.id },
-    include: INCLUDE,
-    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-  });
-  res.json(rows.map(sReview));
-});
+// A student never reaches this router: requireAuth blocks a student token on every
+// mount except /api/student. Their own reviews are served by GET /api/student/me/reviews.
 
 // Staff and admin listing. `mine=true` limits it to the caller's own; otherwise the
 // caller must hold an admin page that covers student records.
 router.get("/", async (req, res) => {
-  if (req.user?.kind === "student") return res.status(403).json({ error: "Use /me" });
+  if (req.user?.kind === "student") return res.status(403).json({ error: "Not available for student accounts" });
   const mine = req.query?.mine === "true";
   const where = {};
   if (mine) {
@@ -166,9 +158,8 @@ async function mayEdit(req, id) {
 router.get("/:id", async (req, res) => {
   const row = await prisma.studentReview.findUnique({ where: { id: req.params.id }, include: INCLUDE });
   if (!row) return res.status(404).json({ error: "Review not found" });
-  const isSubject = req.user?.kind === "student" && row.studentId === req.user.id;
   const isAuthor = row.staffId === req.user.id;
-  if (!isSubject && !isAuthor && !hasPage(req.user, ADMIN_PAGES)) return res.status(404).json({ error: "Review not found" });
+  if (!isAuthor && !hasPage(req.user, ADMIN_PAGES)) return res.status(404).json({ error: "Review not found" });
   res.json(sReview(row));
 });
 

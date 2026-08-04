@@ -38,6 +38,13 @@ const gradeTone = (p) => p == null ? { bg: "bg-slate-100", text: "text-slate-400
     : p >= 60 ? { bg: "bg-blue-50", text: "text-blue-700", ring: "ring-blue-200", colour: "#2563eb", soft: "#eff6ff" }          // Merit
       : p >= 50 ? { bg: "bg-amber-50", text: "text-amber-800", ring: "ring-amber-200", colour: "#b45309", soft: "#fffbeb" }     // Pass
         : { bg: "bg-rose-50", text: "text-rose-800", ring: "ring-rose-200", colour: "#9e1b32", soft: "#fff1f2" };               // Fail
+// Progress bands from a lecturer's review. Same keys as pctTone/gradeTone so the chip
+// styles the same way, and an unknown or missing value lands on slate rather than
+// rendering with three undefined class names.
+const progressTone = (p) => p === "On Track" ? { bg: "bg-emerald-50", text: "text-emerald-700", ring: "ring-emerald-200", colour: "#059669", soft: "#ecfdf5" }
+  : p === "Monitor" ? { bg: "bg-orange-50", text: "text-orange-700", ring: "ring-orange-200", colour: "#ea580c", soft: "#fff7ed" }
+    : p === "At Risk" ? { bg: "bg-rose-50", text: "text-rose-800", ring: "ring-rose-200", colour: "#9e1b32", soft: "#fff1f2" }
+      : { bg: "bg-slate-100", text: "text-slate-500", ring: "ring-slate-200", colour: "#94a3b8", soft: "#f1f5f9" };
 const fmtDate = (iso) => { if (!iso) return null; const [y, m, d] = iso.split("-"); const mm = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1] || m; return `${Number(d)} ${mm} ${y}`; };
 
 // Attendance statuses. These are STATUS colours, so they always ship with the letter
@@ -153,6 +160,8 @@ const unitOf = (mr) => mr.unit || mr.module || {};
 
 /* ============================== app shell ============================== */
 
+// Five is the ceiling here: a sixth tab drops each target below the 44px it needs on a
+// 320px phone. Reviews are reached from the home screen and from More instead.
 const TABS = [
   { key: "home", label: "Home", Icon: HomeIcon },
   { key: "attendance", label: "Attendance", Icon: Percent },
@@ -166,6 +175,7 @@ export default function StudentApp({ user, logout }) {
   const [queries, setQueries] = useState([]);
   const [attendance, setAttendance] = useState(null);
   const [results, setResults] = useState(null);
+  const [reviews, setReviews] = useState(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(true);
   // Android back returns to the home screen from any other tab.
@@ -175,19 +185,20 @@ export default function StudentApp({ user, logout }) {
   // attendance and results without each tab refetching the same thing.
   const load = useCallback(async () => {
     setBusy(true); setErr("");
-    const [a, r, q] = await Promise.allSettled([
-      api.studentAttendance(), api.studentAssessments(), api.studentQueries(),
+    const [a, r, q, v] = await Promise.allSettled([
+      api.studentAttendance(), api.studentAssessments(), api.studentQueries(), api.studentReviewsAboutMe(),
     ]);
     if (a.status === "fulfilled") setAttendance(a.value);
     if (r.status === "fulfilled") setResults(r.value);
     if (q.status === "fulfilled") setQueries(q.value);
-    // ANY failure is reported, not only a total one. Requiring all three to fail meant
+    if (v.status === "fulfilled") setReviews(v.value);
+    // ANY failure is reported, not only a total one. Requiring all of them to fail meant
     // a single broken call showed the student "Not graded yet" or "0 sessions" — an
     // answer, and a wrong one — instead of telling them something didn't load.
-    const failed = [a, r, q].filter(x => x.status === "rejected");
+    const failed = [a, r, q, v].filter(x => x.status === "rejected");
     if (failed.length) {
-      const which = [a.status === "rejected" && "attendance", r.status === "rejected" && "results", q.status === "rejected" && "messages"].filter(Boolean);
-      setErr(failed.length === 3
+      const which = [a.status === "rejected" && "attendance", r.status === "rejected" && "results", q.status === "rejected" && "messages", v.status === "rejected" && "reviews"].filter(Boolean);
+      setErr(failed.length === 4
         ? (failed[0].reason?.message || "Could not load your information")
         : `Could not load your ${which.join(" or ")}. Tap the refresh icon at the top to try again — everything else here is up to date.`);
     }
@@ -209,18 +220,33 @@ export default function StudentApp({ user, logout }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, queries]);
 
-  const title = { home: "Student Hub", attendance: "My Attendance", assessments: "My Results", query: "Ask the College", more: "More" }[screen];
-  const shared = { attendance, results, queries, busy, err, reload: load, setScreen };
+  // The same seen-state trick for reviews a lecturer has filed but the student hasn't
+  // opened. Separate key so clearing one badge never clears the other.
+  const seenReviewKey = `lbc_seen_reviews_${user.id}`;
+  const reviewList = reviews || [];
+  let seenReviews = new Set();
+  try { seenReviews = new Set(JSON.parse(localStorage.getItem(seenReviewKey) || "[]")); } catch (_) { /* ignore */ }
+  const newReviews = reviewList.filter(r => !seenReviews.has(r.id)).length;
+  useEffect(() => {
+    if (screen === "reviews" && reviewList.length) {
+      try { localStorage.setItem(seenReviewKey, JSON.stringify(reviewList.map(r => r.id))); } catch (_) { /* ignore */ }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, reviews]);
+
+  const title = { home: "Student Hub", attendance: "My Attendance", assessments: "My Results", reviews: "My Reviews", query: "Ask the College", more: "More" }[screen];
+  const shared = { attendance, results, reviews, queries, busy, err, reload: load, setScreen };
 
   return (
     <PhoneShell header={<Header title={title} screen={screen} setScreen={setScreen} user={user} onRefresh={load} busy={busy} />}>
       <div className="flex min-h-full flex-col">
         <div className="flex-1" style={{ background: "linear-gradient(180deg,#f6f8fc 0%,#eef2f9 60%,#f6f8fc 100%)" }}>
-          {screen === "home" && <Home user={user} {...shared} newReplies={newReplies} />}
+          {screen === "home" && <Home user={user} {...shared} newReplies={newReplies} newReviews={newReviews} />}
           {screen === "attendance" && <AttendanceScreen {...shared} />}
           {screen === "assessments" && <ResultsScreen {...shared} />}
+          {screen === "reviews" && <ReviewsScreen {...shared} />}
           {screen === "query" && <QueryScreen queries={queries} reload={load} />}
-          {screen === "more" && <MoreScreen user={user} logout={logout} />}
+          {screen === "more" && <MoreScreen user={user} logout={logout} setScreen={setScreen} />}
         </div>
         <TabBar screen={screen} setScreen={setScreen} newReplies={newReplies} />
       </div>
@@ -308,7 +334,7 @@ function Header({ title, screen, setScreen, user, onRefresh, busy }) {
 
 /* ============================== home ============================== */
 
-function Home({ user, attendance, results, queries, busy, err, setScreen, newReplies }) {
+function Home({ user, attendance, results, queries, reviews, busy, err, setScreen, newReplies, newReviews }) {
   // Only blank the screen when nothing at all arrived. One failed call must not
   // hide the data that did load — that was the old silent-wrong-data bug inverted.
   if (err && !attendance && !results) return <Screen><ErrBox>{err}</ErrBox></Screen>;
@@ -323,6 +349,8 @@ function Home({ user, attendance, results, queries, busy, err, setScreen, newRep
   const totalAssess = results?.count ?? 0;
   const pending = Math.max(0, totalAssess - graded);
   const latestReply = queries.filter(q => q.status === "answered" && q.response)[0];
+  // The server returns reviews newest-first, so the first one is the latest.
+  const latestReview = (reviews || [])[0];
 
   // One clear message about where they stand, in words rather than numbers.
   const band = attPct == null ? null : attPct >= 85 ? { t: "Excellent attendance — keep it up.", c: "#059669" }
@@ -368,6 +396,22 @@ function Home({ user, attendance, results, queries, busy, err, setScreen, newRep
           </div>
           <p className="mt-2 line-clamp-2 text-[13px] leading-relaxed text-slate-600">{latestReply.response}</p>
           <p className="mt-1.5 flex items-center gap-1 text-[11px] font-bold" style={{ color: ACCENT.ask }}>Read the conversation <ChevronRight size={12} /></p>
+        </button>
+      )}
+
+      {/* A lecturer's review, surfaced the same way a college reply is. It carries the
+          summary rather than the progress band: the band belongs on the screen that
+          also gives it the context of what was discussed and agreed. */}
+      {latestReview && (
+        <button onClick={() => setScreen("reviews")} className="press fade-up w-full rounded-3xl bg-white p-4 text-left shadow-card ring-1 ring-slate-200/60" style={{ animationDelay: "245ms" }}>
+          <div className="flex items-center gap-2">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl" style={{ background: NAVY + "14" }}><Info size={14} style={{ color: NAVY }} /></span>
+            <p className="flex-1 text-[10px] font-extrabold uppercase tracking-widest" style={{ color: NAVY }}>From your lecturer</p>
+            {newReviews > 0 && <span className="pop shrink-0 rounded-full bg-amber-400 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-slate-900">{newReviews} new</span>}
+          </div>
+          <p className="mt-2 truncate text-[11px] font-bold text-slate-400">{latestReview.unit?.code ? `${latestReview.unit.code} · ` : ""}{fmtDate(latestReview.date)}{latestReview.staffName ? ` · ${latestReview.staffName}` : ""}</p>
+          {latestReview.summary && <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-slate-600">{latestReview.summary}</p>}
+          <p className="mt-1.5 flex items-center gap-1 text-[11px] font-bold" style={{ color: NAVY }}>Read your reviews <ChevronRight size={12} /></p>
         </button>
       )}
 
@@ -583,6 +627,84 @@ function ResultsScreen({ results, busy, err }) {
   );
 }
 
+/* ============================== progress reviews ============================== */
+
+// The section keeps the brand navy rather than taking a fifth ACCENT: the only colour
+// that should carry meaning on this screen is the progress band itself, and a coloured
+// section rule beside an "At Risk" chip reads as a second, competing verdict.
+function ReviewsScreen({ reviews, busy, err }) {
+  // This screen's OWN data decides what it shows, as on attendance and results — a
+  // failure in one of the other three calls must not blank it.
+  if (!reviews) return busy ? <LoadingScreen /> : <Screen><ErrBox>{err || "Could not load your reviews."}</ErrBox></Screen>;
+
+  return (
+    <Screen>
+      <p className="px-1 text-[12px] leading-relaxed text-slate-500">
+        When you have a progress conversation with a lecturer, they write up what was discussed and what you both agreed. If anything here doesn't look right, ask the college.
+      </p>
+
+      {reviews.length === 0 ? (
+        <Card className="!p-0"><Empty icon={Info} title="No reviews yet" msg="A lecturer's write-up of a progress conversation with you will appear here." /></Card>
+      ) : (
+        <>
+          <SectionTitle>Your reviews · {reviews.length}</SectionTitle>
+          {/* Stagger caps at the seventh card, so a long list doesn't leave the last
+              rows waiting seconds to appear. */}
+          {reviews.map((r, i) => <ReviewCard key={r.id} r={r} i={Math.min(i, 6)} />)}
+        </>
+      )}
+    </Screen>
+  );
+}
+
+function ReviewCard({ r, i }) {
+  const t = progressTone(r.progress);
+  const concerns = Array.isArray(r.concerns) ? r.concerns : [];
+  return (
+    <Card i={i} className="!p-3.5">
+      <div className="flex items-start gap-2.5">
+        <span className="mt-0.5 flex h-8 w-12 shrink-0 items-center justify-center rounded-xl text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{(r.unit?.code || "—").slice(0, 5)}</span>
+        <div className="min-w-0 flex-1">
+          {/* The unit can be null — a unit may be reorganised away long after the
+              conversation happened, and the record outlives it. */}
+          <p className="text-[13px] font-extrabold leading-tight text-slate-700">{r.unit?.name || "General progress review"}</p>
+          <p className="mt-0.5 text-[11px] leading-snug text-slate-400">{fmtDate(r.date) || "—"}{r.staffName ? ` · ${r.staffName}` : ""}</p>
+        </div>
+        {r.progress && <span className={`shrink-0 whitespace-nowrap rounded-xl px-2.5 py-1.5 text-[11px] font-extrabold ring-1 ${t.bg} ${t.text} ${t.ring}`}>{r.progress}</span>}
+      </div>
+
+      {concerns.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {concerns.map(c => (
+            <span key={c} className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${c === "No Concerns" ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-slate-100 text-slate-600"}`}>{c}</span>
+          ))}
+        </div>
+      )}
+
+      {r.summary ? <ReviewText label="Summary of discussion" text={r.summary} /> : null}
+      {r.agreedActions ? <ReviewText label="Agreed actions" text={r.agreedActions} /> : null}
+
+      {r.followUp && (
+        <p className="mt-2.5 flex items-center gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-700 ring-1 ring-amber-200">
+          <CalendarCheck size={13} className="shrink-0" />
+          {r.followUpDate ? `Follow-up on ${fmtDate(r.followUpDate)}` : "A follow-up was agreed"}
+        </p>
+      )}
+    </Card>
+  );
+}
+
+// Free text exactly as the lecturer typed it: line breaks kept, and long words broken
+// rather than pushing the card wider than the phone.
+function ReviewText({ label, text }) {
+  return (
+    <div className="mt-2.5 rounded-xl bg-slate-50 px-3 py-2.5">
+      <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">{label}</p>
+      <p className="mt-1 whitespace-pre-line break-words text-[12px] leading-relaxed text-slate-600">{text}</p>
+    </div>
+  );
+}
+
 /* ============================== ask the college ============================== */
 
 function QueryScreen({ queries = [], reload }) {
@@ -668,7 +790,7 @@ function QueryScreen({ queries = [], reload }) {
 
 /* ============================== more ============================== */
 
-function MoreScreen({ user, logout }) {
+function MoreScreen({ user, logout, setScreen }) {
   const [cur, setCur] = useState(""); const [nw, setNw] = useState(""); const [cf, setCf] = useState("");
   const [pwBusy, setPwBusy] = useState(false); const [pwErr, setPwErr] = useState(""); const [pwOk, setPwOk] = useState(false);
   const [openPw, setOpenPw] = useState(false);
@@ -708,6 +830,12 @@ function MoreScreen({ user, logout }) {
         <p className="mt-2.5 text-base font-extrabold text-slate-800">{user.name}</p>
         <p className="text-xs text-slate-400">{user.email}</p>
         {user.studentRef && <span className="mt-2 inline-block rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-500">Student · {user.studentRef}</span>}
+      </Card>
+
+      {/* The second way in. Home only shows a review card once one exists, so this row
+          is what makes the screen findable — and it's here whether there are any or not. */}
+      <Card className="!p-0 overflow-hidden">
+        <Row Icon={Info} label="My progress reviews" sub="What your lecturers have written" onClick={() => setScreen("reviews")} />
       </Card>
 
       {pwOk && <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 px-3.5 py-3 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200"><CheckCircle2 size={15} /> Password changed.</div>}

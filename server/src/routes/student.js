@@ -111,6 +111,38 @@ router.get("/me/queries", async (req, res) => {
   res.json(rows.map(sStudentQuery));
 });
 
+// GET /api/student/me/reviews — the progress reviews lecturers have written about
+// this student. Read-only: writing lives on /api/student-reviews, which is staff-only.
+//
+// It belongs HERE rather than on that router because requireAuth deliberately blocks a
+// student token from every router except /api/student — a single choke point that keeps
+// students out of all staff data regardless of any individual route's own guards.
+// Widening that allowlist to serve one endpoint would trade a strong invariant for a
+// convenience, so the endpoint moved to the student router instead.
+router.get("/me/reviews", async (req, res) => {
+  const rows = await prisma.studentReview.findMany({
+    where: { studentId: req.user.id },
+    include: { unit: true, staff: { select: { name: true } } },
+    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+  });
+  res.json(rows.map((r) => ({
+    id: r.id,
+    unitId: r.unitId,
+    unit: r.unit ? { id: r.unit.id, code: r.unit.code, name: r.unit.name } : null,
+    // The author's name is stored on the row, so a review still says who wrote it
+    // after that lecturer leaves the college.
+    staffName: r.staffName || r.staff?.name || "",
+    date: r.date,
+    progress: r.progress,
+    concerns: (() => { try { return JSON.parse(r.concerns || "[]"); } catch { return []; } })(),
+    summary: r.summary,
+    agreedActions: r.agreedActions,
+    followUp: r.followUp,
+    followUpDate: r.followUpDate,
+    createdAt: r.createdAt,
+  })));
+});
+
 // POST /api/student/me/query — the student sends a query to the college. Admins pick
 // it up and reply in the Student Queries tab; the reply comes back here to the student.
 router.post("/me/query", async (req, res) => {
