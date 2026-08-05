@@ -25,10 +25,26 @@ workflows:
       # Integrations exactly. Confirmed set up under this name.
       app_store_connect: CodemagicAppStoreKey
     environment:
-      # NOTE: no `ios_signing:` block here on purpose. That block does AUTOMATIC
-      # signing which only FETCHES an existing profile and fails on a new app
-      # ("No matching profiles found"). Instead the "Set up code signing" script
-      # below CREATES the certificate + profile via `fetch-signing-files --create`.
+      # Codemagic-managed signing. This replaces a hand-rolled
+      # `fetch-signing-files --create`, which could never have worked:
+      #
+      #   Cannot save Signing Certificates without certificate private key
+      #   Did not find matching provisioning profiles for code signing!
+      #    - Provisioning Profiles: []
+      #
+      # Apple never releases a certificate's private key — it only ever exists on
+      # the machine that generated the signing request. So the CLI could create a
+      # certificate at Apple, but had no key to pair it with, discarded it, and
+      # then had nothing to match a profile against. Every downstream value came
+      # out blank and the archive failed with "App requires a provisioning profile".
+      #
+      # With this block Codemagic generates the keypair itself, keeps it with the
+      # team, and installs the certificate and profile into the build keychain
+      # before the scripts run — so the private key survives between builds and
+      # no new certificate is burned each time (Apple caps distribution certs).
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: uk.ac.lbc.staffhub
       vars:
         XCODE_SCHEME: "App"
         BUNDLE_ID: "uk.ac.lbc.staffhub"
@@ -53,41 +69,27 @@ workflows:
         script: |
           cd client
           npx cap sync ios
-      - name: Set up code signing
+      - name: Apply the signing profile to the Xcode project
         script: |
           set -e
-          keychain initialize
-
-          # --verbose so the log shows exactly which certificate and profile were found
-          # or created. Without it this step prints almost nothing and exits 0 even when
-          # it produced NOTHING, which is why the archive failed 36s later with a generic
-          # "requires a provisioning profile" instead of failing here with the reason.
-          app-store-connect fetch-signing-files "$BUNDLE_ID"             --type IOS_APP_STORE --create --verbose
-
-          echo "=== provisioning profiles now on disk ==="
-          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ 2>/dev/null || echo "  (no profiles directory)"
-
-          keychain add-certificates
-          echo "=== signing certificates in the keychain ==="
-          keychain list-certificates | head -40 || true
-
-          # --project is required: this step runs from the repo root, unlike every other
-          # step, so without it use-profiles searches the wrong place and patches nothing.
+          # Codemagic has already installed the certificate and profile into the
+          # build keychain (see ios_signing above). This writes the profile into the
+          # project so the archive can find it.
+          #
+          # --project is required: this step runs from the repo root, unlike the rest,
+          # so without it use-profiles searches the wrong place and patches nothing.
           xcode-project use-profiles --project "client/ios/App/App.xcodeproj" --verbose
 
           echo "=== signing settings written into the project ==="
-          grep -oE "(DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY) = [^;]*"             client/ios/App/App.xcodeproj/project.pbxproj | sort -u
+          grep -oE "(DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY) = [^;]*" client/ios/App/App.xcodeproj/project.pbxproj | sort -u
 
-          # Fail HERE, loudly, rather than letting the archive fail with a message that
-          # says nothing about the cause. If no profile was written, the two most likely
-          # reasons are printed above: nothing was fetched, or the App Store Connect API
-          # key lacks the App Manager role needed to create certificates and profiles.
+          # Stop here with the reason rather than 36s later with a generic exit 65.
           if ! grep -q "PROVISIONING_PROFILE_SPECIFIER" client/ios/App/App.xcodeproj/project.pbxproj; then
             echo ""
             echo "FATAL: no provisioning profile was written into the Xcode project."
-            echo "Check the fetch-signing-files output above — if it found or created no"
-            echo "profile, the API key almost certainly lacks the App Manager role, or"
-            echo "the bundle id $BUNDLE_ID is not registered in your Apple Developer account."
+            echo "Codemagic did not install one. Check that the App Store Connect"
+            echo "integration is attached to this workflow and that the bundle id"
+            echo "$BUNDLE_ID is registered in the Apple Developer portal."
             exit 1
           fi
       - name: Set build number from latest TestFlight
