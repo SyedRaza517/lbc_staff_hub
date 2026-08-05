@@ -7,7 +7,7 @@ This Privacy Policy explains how the **LBC Staff Hub** application ("the app", "
 
 ## 1. Who is responsible for your data
 
-The data controller is **London Brookes College**. For any privacy questions or requests, contact us at **privacy@londonbrookescollege.co.uk**.
+The data controller is **London Brookes College**. For any privacy questions or requests, contact us at **info@londonbrookescollege.co.uk**.
 
 ## 2. What data we collect
 
