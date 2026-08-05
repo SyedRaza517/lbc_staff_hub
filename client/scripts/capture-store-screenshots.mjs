@@ -17,15 +17,25 @@ const APP = process.env.APP_URL || "http://localhost:5173";
 const EMAIL = "demo.screenshots@lbc.ac.uk";
 const PASSWORD = "Demo!Shots123";
 
-const OUT = "store/screenshots";
-const RAW = "store/screenshots-raw";
-const W = 1080, H = 1920;
+// Play keeps phone, 7-inch tablet and 10-inch tablet as three separate asset sets, each
+// with its own size. The viewport is chosen to match the real device so the app lays
+// itself out as a tablet user would actually see it — capturing a phone-width render and
+// upscaling it would show a phone layout claiming to be a tablet.
+const TARGETS = {
+  phone:    { out: "store/screenshots",          w: 1080, h: 1920, vw: 412, vh: 915,  dsf: 3 },
+  tablet7:  { out: "store/screenshots-tablet7",  w: 1200, h: 1920, vw: 600, vh: 960,  dsf: 2 },
+  tablet10: { out: "store/screenshots-tablet10", w: 1600, h: 2560, vw: 800, vh: 1280, dsf: 2 },
+};
+const TARGET = process.argv[2] || "phone";
+if (!TARGETS[TARGET]) { console.error(`Unknown target "${TARGET}". Use: ${Object.keys(TARGETS).join(" | ")}`); process.exit(1); }
+const { out: OUT, w: W, h: H, vw: VW, vh: VH, dsf: DSF } = TARGETS[TARGET];
+const RAW = `${OUT}-raw`;
 
 // Every screen the staff app can show, in the order a new user meets them. The keys are
 // the app's own screen names; `push:open` is the event the app already uses to jump to a
 // screen when a push notification is tapped, which is far more reliable than clicking
 // through tiles that move as the layout changes.
-const SCREENS = [
+const ALL_SCREENS = [
   ["home",          "Everything in one place"],
   ["checkin",       "Check in and out each day"],
   ["balance",       "See your holiday balance"],
@@ -39,6 +49,11 @@ const SCREENS = [
   ["approval",      "Approve your team's leave"],
   ["more",          "Your profile and settings"],
 ];
+// Play accepts at most 8 per set. For the tablet sets, drop Approvals (most staff never
+// see it) and More (a settings screen sells nothing), and keep the eight that show what
+// the app is actually for.
+const KEEP_8 = ["home", "checkin", "balance", "request", "summary", "timesheet", "reflection", "studentreview"];
+const SCREENS = TARGET === "phone" ? ALL_SCREENS : ALL_SCREENS.filter(([k]) => KEEP_8.includes(k));
 
 const BG = Buffer.from(
   `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
@@ -71,10 +86,11 @@ async function trimBottom(png) {
   return sharp(png).extract({ left: 0, top: 0, width: info.width, height }).png().toBuffer();
 }
 
+const CAP_H = Math.round(H * 0.078);
 const caption = (text) => Buffer.from(
-  `<svg width="${W}" height="150" xmlns="http://www.w3.org/2000/svg">
-     <text x="${W / 2}" y="96" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
-           font-size="56" font-weight="bold" fill="#ffffff">${text.replace(/&/g, "&amp;")}</text>
+  `<svg width="${W}" height="${CAP_H}" xmlns="http://www.w3.org/2000/svg">
+     <text x="${W / 2}" y="${Math.round(CAP_H * 0.64)}" text-anchor="middle" font-family="Helvetica,Arial,sans-serif"
+           font-size="${Math.round(H * 0.029)}" font-weight="bold" fill="#ffffff">${text.replace(/&/g, "&amp;")}</text>
    </svg>`
 );
 
@@ -84,15 +100,42 @@ await mkdir(OUT, { recursive: true });
 await mkdir(RAW, { recursive: true });
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ ...devices["Pixel 7"], deviceScaleFactor: 3 });
+const ctx = await browser.newContext({ viewport: { width: VW, height: VH }, deviceScaleFactor: DSF, isMobile: true, hasTouch: true });
+// Make the app lay itself out as the packaged native shell, which on a real device it is.
+//
+// PhoneShell picks its layout from `isNativeApp() || matchMedia("(max-width: 640px), …")`.
+// In the installed Android app Capacitor.isNativePlatform() is true on EVERY device,
+// tablets included, so the app draws its full-screen mobile layout. A plain browser at
+// tablet width instead gets the desktop presentation: a decorative phone frame floating
+// mid-page, a desktop top bar and a copyright footer — what a web visitor sees and a
+// tablet owner of the app never does. Capturing that would put a phone mockup inside the
+// tablet screenshots.
+//
+// Stubbing Capacitor itself does not survive: @capacitor/core assigns window.Capacitor
+// when it loads, replacing anything an init script set. So force the OTHER branch —
+// report the handset media query as matching, which is the same decision by a route the
+// app's own bundle cannot overwrite.
+await ctx.addInitScript(() => {
+  const real = window.matchMedia.bind(window);
+  window.matchMedia = (q) =>
+    String(q).includes("max-width: 640px")
+      ? { matches: true, media: q, onchange: null,
+          addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }
+      : real(q);
+});
+
 const page = await ctx.newPage();
 
-console.log(`Signing in at ${APP} …`);
+console.log(`Target: ${TARGET} — ${W}x${H} (viewport ${VW}x${VH} @${DSF}x)
+Signing in at ${APP} …`);
 await page.goto(APP, { waitUntil: "networkidle" });
-// The app opens on a chooser: Staff App vs Admin Dashboard. These screenshots are for
-// the phone app, so take the staff side.
-await page.getByRole("button", { name: /Staff App/i }).click();
-await page.waitForTimeout(900);
+// In a browser the app opens on a chooser (Staff App vs Admin Dashboard). In native
+// mode it goes straight to the sign-in form, so the chooser may not be there at all.
+const chooser = page.getByRole("button", { name: /Staff App/i });
+if (await chooser.isVisible().catch(() => false)) {
+  await chooser.click();
+  await page.waitForTimeout(900);
+}
 await page.locator('input[type="email"]').fill(EMAIL);
 await page.locator('input[type="password"]').fill(PASSWORD);
 await page.getByRole("button", { name: /^Sign in$/i }).click();
@@ -111,13 +154,13 @@ for (const [screen, text] of SCREENS) {
   await writeFile(`${RAW}/${screen}.png`, shot);
 
   const meta = await sharp(shot).metadata();
-  const TOP = 150, PAD = 30;
+  const TOP = CAP_H, PAD = Math.round(H * 0.016);
   const availH = H - TOP - PAD;
   // Scale by WIDTH, not into a fixed box: `fit: contain` pads a short screen out to the
   // full box with transparency, so it ends up floating with dead gradient above and
   // below. Sizing by width gives the true height, which is then centred in what's left
   // under the caption — tall screens fill the frame, short ones sit centred.
-  const byWidth = await sharp(shot).resize({ width: W - 120 }).toBuffer();
+  const byWidth = await sharp(shot).resize({ width: W - Math.round(W * 0.11) }).toBuffer();
   let fitted = byWidth;
   let fm = await sharp(byWidth).metadata();
   if (fm.height > availH) {
