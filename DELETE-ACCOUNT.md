@@ -27,7 +27,7 @@ This page explains how to request deletion of your **LBC Staff Hub** account and
 
 ### If you cannot sign in
 
-Email **privacy@londonbrookescollege.co.uk** from the address on your account, with the subject **"Delete my Staff Hub account"**. We will verify your identity with the College and complete the deletion within **30 days**.
+Email **info@londonbrookescollege.co.uk** from the address on your account, with the subject **"Delete my Staff Hub account"**. We will verify your identity with the College and complete the deletion within **30 days**.
 
 ---
 
@@ -83,6 +83,6 @@ If you are the **only administrator**, the app will not let you delete your acco
 ## Contact
 
 London Brookes College
-Email: **privacy@londonbrookescollege.co.uk**
+Email: **info@londonbrookescollege.co.uk**
 
 See also our [Privacy Policy](PRIVACY.md).
