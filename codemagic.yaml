@@ -55,19 +55,41 @@ workflows:
           npx cap sync ios
       - name: Set up code signing
         script: |
+          set -e
           keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+
+          # --verbose so the log shows exactly which certificate and profile were found
+          # or created. Without it this step prints almost nothing and exits 0 even when
+          # it produced NOTHING, which is why the archive failed 36s later with a generic
+          # "requires a provisioning profile" instead of failing here with the reason.
+          app-store-connect fetch-signing-files "$BUNDLE_ID"             --type IOS_APP_STORE --create --verbose
+
+          echo "=== provisioning profiles now on disk ==="
+          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ 2>/dev/null || echo "  (no profiles directory)"
+
           keychain add-certificates
-          # --project is REQUIRED here. Every other step cds into client/ios/App first;
-          # this one runs from the repo root, and without an explicit path use-profiles
-          # patched nothing. The archive then ran with CODE_SIGN_STYLE=Manual against a
-          # project that still had no PROVISIONING_PROFILE_SPECIFIER, and xcodebuild
-          # failed with: "App" requires a provisioning profile.
-          xcode-project use-profiles --project "client/ios/App/App.xcodeproj"
-          # Prove the project really was patched — if these come back empty the archive
-          # is going to fail again, and the log will say so here rather than 36s later.
-          echo "--- signing settings written into the project ---"
-          grep -oE "(DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY) = [^;]*" client/ios/App/App.xcodeproj/project.pbxproj | sort -u
+          echo "=== signing certificates in the keychain ==="
+          keychain list-certificates | head -40 || true
+
+          # --project is required: this step runs from the repo root, unlike every other
+          # step, so without it use-profiles searches the wrong place and patches nothing.
+          xcode-project use-profiles --project "client/ios/App/App.xcodeproj" --verbose
+
+          echo "=== signing settings written into the project ==="
+          grep -oE "(DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY) = [^;]*"             client/ios/App/App.xcodeproj/project.pbxproj | sort -u
+
+          # Fail HERE, loudly, rather than letting the archive fail with a message that
+          # says nothing about the cause. If no profile was written, the two most likely
+          # reasons are printed above: nothing was fetched, or the App Store Connect API
+          # key lacks the App Manager role needed to create certificates and profiles.
+          if ! grep -q "PROVISIONING_PROFILE_SPECIFIER" client/ios/App/App.xcodeproj/project.pbxproj; then
+            echo ""
+            echo "FATAL: no provisioning profile was written into the Xcode project."
+            echo "Check the fetch-signing-files output above — if it found or created no"
+            echo "profile, the API key almost certainly lacks the App Manager role, or"
+            echo "the bundle id $BUNDLE_ID is not registered in your Apple Developer account."
+            exit 1
+          fi
       - name: Set build number from latest TestFlight
         script: |
           cd client/ios/App
