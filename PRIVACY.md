@@ -74,7 +74,7 @@ We keep your data for as long as you hold an account with the College, and delet
 
 ## 8. Your rights
 
-Under UK GDPR you have the right to access, correct, erase, restrict or object to the processing of your data, and to data portability. To exercise these rights, contact **privacy@londonbrookescollege.co.uk**.
+Under UK GDPR you have the right to access, correct, erase, restrict or object to the processing of your data, and to data portability. To exercise these rights, contact **info@londonbrookescollege.co.uk**.
 
 You also have the right to complain to the UK Information Commissioner's Office (ICO) at [ico.org.uk](https://ico.org.uk).
 
@@ -98,4 +98,4 @@ We may update this policy from time to time. The "Last updated" date above shows
 ## 12. Contact us
 
 London Brookes College
-Email: **privacy@londonbrookescollege.co.uk**
+Email: **info@londonbrookescollege.co.uk**
