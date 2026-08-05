@@ -21,7 +21,9 @@ workflows:
     instance_type: mac_mini_m2      # Codemagic's macOS build machine
     max_build_duration: 60
     integrations:
-      app_store_connect: CodemagicAppStoreKey   # <-- rename to YOUR integration name from step 2
+      # Must match the App Store Connect integration name in Codemagic → Teams →
+      # Integrations exactly. Confirmed set up under this name.
+      app_store_connect: CodemagicAppStoreKey
     environment:
       # NOTE: no `ios_signing:` block here on purpose. That block does AUTOMATIC
       # signing which only FETCHES an existing profile and fails on a new app
