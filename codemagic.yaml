@@ -40,7 +40,6 @@ workflows:
         APP_STORE_APPLE_ID: 6795300712
       node: 22
       xcode: latest
-      cocoapods: default
     scripts:
       - name: Install JS dependencies (monorepo root)
         script: npm ci
@@ -66,7 +65,7 @@ workflows:
       - name: Build .ipa
         script: |
           cd client/ios/App
-          xcode-project build-ipa --workspace "App.xcworkspace" --scheme "$XCODE_SCHEME"
+          xcode-project build-ipa --project "App.xcodeproj" --scheme "$XCODE_SCHEME"
     artifacts:
       - client/ios/App/build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
