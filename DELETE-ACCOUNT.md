@@ -21,7 +21,7 @@ This page explains how to request deletion of your **LBC Staff Hub** account and
 
 1. Open **LBC Staff Hub** and sign in.
 2. Tap **More**.
-3. Tap **Delete account**.
+3. Tap **Delete my account**.
 4. Enter your password to confirm.
 5. Confirm. Your sign-in is removed immediately.
 
