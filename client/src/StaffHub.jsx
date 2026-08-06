@@ -1587,33 +1587,69 @@ function ChartTip({ active, payload, label, unit = "%", name }) {
 const GRID = "#eef1f6";
 const AXIS_TICK = { fontSize: 11, fill: "#94a3b8" };
 
-function ChartCard({ title, children, className = "" }) {
+function ChartCard({ title, children, className = "", accent = NAVY }) {
   return (
-    <div className={`rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 fade-up ${className}`}>
-      {title && <p className="mb-3 text-sm font-bold text-slate-700">{title}</p>}
+    <div className={`group relative overflow-hidden rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 transition-shadow duration-300 hover:shadow-md fade-up ${className}`}>
+      {title && (
+        <div className="mb-3 flex items-center gap-2">
+          {/* A short bar of the chart's own colour, so the title and the marks below
+              it are visibly the same thing. */}
+          <span className="h-4 w-1 rounded-full" style={{ background: accent }} />
+          <p className="text-sm font-bold text-slate-700">{title}</p>
+        </div>
+      )}
       {children}
     </div>
   );
 }
+// The three figures a principal actually opens this page for, on the brand gradient
+// so the eye lands on them before the grid of eight tiles below. Same treatment as the
+// mobile app's home card, so the two halves of the product look like one product.
+function ExecHero({ attPct, passRate, students, courses, marks }) {
+  const Stat = ({ label, value, sub }) => (
+    <div className="min-w-0 flex-1">
+      <p className="text-[11px] font-bold uppercase tracking-widest text-white/60">{label}</p>
+      <p className="mt-0.5 text-3xl font-extrabold leading-none tracking-tight text-white sm:text-4xl">{value}</p>
+      {sub && <p className="mt-1 text-[11px] text-white/60">{sub}</p>}
+    </div>
+  );
+  return (
+    <div className="animated-gradient relative mb-4 overflow-hidden rounded-2xl p-5 shadow-md fade-up"
+      style={{ background: `linear-gradient(135deg, ${NAVY} 0%, ${NAVY_DARK} 55%, ${MAROON} 140%)`, backgroundSize: "200% 200%" }}>
+      <GraduationCap size={150} className="pointer-events-none absolute -right-6 -top-8 text-white/[0.06]" />
+      <div className="relative flex flex-wrap items-end gap-6">
+        <Stat label="Attendance" value={attPct == null ? "—" : `${attPct}%`} sub={marks == null ? undefined : `${kNum(marks)} marks recorded`} />
+        <span className="hidden h-12 w-px bg-white/15 sm:block" />
+        <Stat label="Student pass rate" value={passRate == null ? "—" : `${passRate}%`} />
+        <span className="hidden h-12 w-px bg-white/15 sm:block" />
+        <Stat label="Students" value={students ?? "—"} sub={courses ? `across ${courses} course${courses === 1 ? "" : "s"}` : undefined} />
+      </div>
+    </div>
+  );
+}
+
 function ExecKpi({ label, value, tone = NAVY, sub, Icon }) {
   return (
-    <div className="group relative overflow-hidden rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md hover:ring-slate-300 fade-up">
-      {/* A hairline of the tile's own colour, so a row of tiles is scannable by
-          colour before any of the numbers are read. */}
-      <span className="absolute inset-x-0 top-0 h-[3px]" style={{ background: tone, opacity: 0.85 }} />
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+    <div className="group relative overflow-hidden rounded-2xl p-4 shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:ring-transparent fade-up"
+      style={{ background: `linear-gradient(150deg, #ffffff 0%, #ffffff 55%, ${tone}0f 100%)` }}>
+      {/* A wash of the tile's own colour in the corner, and a watermark of its icon.
+          Enough colour to make a row of tiles scannable at a glance without turning
+          the number into decoration. */}
+      <span className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full opacity-[0.07] transition-transform duration-500 group-hover:scale-125" style={{ background: tone }} />
+      {Icon && <Icon size={72} className="pointer-events-none absolute -bottom-3 -right-2 opacity-[0.05] transition-transform duration-500 group-hover:rotate-6" style={{ color: tone }} />}
+      <span className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, ${tone}, ${tone}55)` }} />
+
+      <div className="relative flex items-start justify-between gap-2">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
         {Icon && (
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors group-hover:scale-105"
-            style={{ background: `${tone}14`, color: tone }}>
-            <Icon size={14} />
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white shadow-sm transition-transform duration-300 group-hover:scale-110"
+            style={{ background: `linear-gradient(135deg, ${tone}, ${tone}bb)` }}>
+            <Icon size={15} />
           </span>
         )}
       </div>
-      {/* Proportional figures: tabular-nums makes a large standalone number look
-          loosely spaced. Equal-width digits are for columns, not hero values. */}
-      <p className="mt-1 text-3xl font-extrabold leading-none" style={{ color: tone }}>{value}</p>
-      {sub && <p className="mt-1.5 text-[11px] text-slate-400">{sub}</p>}
+      <p className="relative mt-1.5 text-[32px] font-extrabold leading-none tracking-tight" style={{ color: tone }}>{value}</p>
+      {sub && <p className="relative mt-1.5 text-[11px] font-medium text-slate-400">{sub}</p>}
     </div>
   );
 }
@@ -1775,18 +1811,19 @@ function ExecutiveDashboard({ store }) {
       </div>
       {err && <div className="mb-3 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 ring-1 ring-rose-200"><AlertCircle size={15} /> {err}</div>}
       {unitScoped && <p className="mb-3 text-[11px] text-slate-400">The {unit !== "all" && stage !== "all" ? "Year / Term and Unit filters apply" : unit !== "all" ? "Unit filter applies" : "Year / Term filter applies"} to the attendance figures; student and results figures cover the whole {course === "all" ? "college" : "course"}.</p>}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <ExecKpi label="Total Students" value={exec ? shownStudents : "—"} Icon={Users} />
+      <ExecHero attPct={attPct} passRate={shownPassRate} students={exec ? shownStudents : null}
+        courses={exec ? totalCourses : null} marks={totalMarks} />
+      {/* Five tiles, so five columns on a wide screen — at four they wrapped to a
+          lone orphan on a second row. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <ExecKpi label="Total Courses" value={exec ? totalCourses : "—"} Icon={BookOpen} />
-        <ExecKpi label="Attendance %" value={attPct == null ? "—" : `${attPct}%`} tone={pctColour(attPct)} Icon={Percent} />
         <ExecKpi label="Assessments" value={assessmentsCount == null ? "—" : assessmentsCount} Icon={Award} />
-        <ExecKpi label="Student Pass Rate" value={shownPassRate == null ? "—" : `${shownPassRate}%`} tone={pctColour(shownPassRate)} sub={shownPassed == null ? "unavailable" : shownGraded ? `of ${shownGraded} assessed` : "no marks yet"} Icon={GraduationCap} />
         <ExecKpi label="Students Passed" value={shownPassed == null ? "—" : shownPassed} tone="#0d7a5f" Icon={CheckCircle2} />
         <ExecKpi label="Total Sessions" value={totalSessions == null ? "—" : totalSessions} sub={totalSessions == null ? "all years only" : undefined} Icon={ClipboardList} />
         <ExecKpi label="Total Attendance" value={totalMarks == null ? "—" : kNum(totalMarks)} sub="marks recorded" Icon={TrendingUp} />
       </div>
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <ChartCard title="Attendance % by Year and Month">
+        <ChartCard title="Attendance % by Year and Month" accent={NAVY}>
           <ResponsiveContainer width="100%" height={260}>
             <AreaChart data={monthData} margin={{ top: 10, right: 14, left: 0, bottom: 0 }}>
               <defs>
@@ -1806,7 +1843,7 @@ function ExecutiveDashboard({ store }) {
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
-        <ChartCard title="Students passing (average ≥ 50%) by course">
+        <ChartCard title="Students passing (average ≥ 50%) by course" accent={MAROON}>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={courseData} layout="vertical" margin={{ top: 4, right: 44, left: 8, bottom: 0 }} barCategoryGap="28%">
               <CartesianGrid stroke={GRID} horizontal={false} />
