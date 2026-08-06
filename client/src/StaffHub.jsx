@@ -8218,6 +8218,8 @@ const MOODLE_COUNTS = [
   ["gradesUpdated", "Marks updated"], ["coursesUpdated", "Courses updated"],
   ["unitsUpdated", "Units updated"], ["assessmentsUpdated", "Assessments updated"],
   ["studentsMatched", "Students matched"], ["gradesSkippedManual", "Marks left alone"],
+  ["attendanceSessionsCreated", "Registers imported"], ["attendanceMarksCreated", "Attendance marks imported"],
+  ["attendanceSkippedConflict", "Attendance left alone"], ["attendanceSkippedNoStudent", "Attendance skipped — student not matched"],
 ];
 const moodleTotal = (s) => MOODLE_COUNTS.reduce((n, [k]) => n + (Number(s?.[k]) || 0), 0);
 

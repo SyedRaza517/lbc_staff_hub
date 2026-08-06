@@ -503,6 +503,11 @@ model HndSession {
   // What kind of session this register is, e.g. "Teaching" or "Seminar". On a
   // 6-hour day the first register is Teaching and the second Seminar.
   kind        String    @default("")
+  // The Moodle attendance session this register was imported from. NULL for every
+  // register created in Staff Hub itself. It exists so an import can be (a) re-run
+  // without duplicating anything and (b) removed again in one statement, without
+  // touching a single register a member of staff took by hand.
+  moodleSessionId Int?   @unique
   createdAt   DateTime  @default(now())
 
   marks AttendanceMark[]

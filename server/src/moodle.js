@@ -16,6 +16,7 @@
 // are the Moodle "attendance" grade item (Staff Hub records attendance itself) and
 // the course-total item.
 const prisma = require("./db");
+const { importAttendance } = require("./moodleAttendance");
 
 const BASE = () => (process.env.MOODLE_URL || "").replace(/\/+$/, "");
 const TOKEN = () => process.env.MOODLE_TOKEN || "";
@@ -159,6 +160,8 @@ async function syncFromMoodle({ dryRun = false } = {}) {
     assessmentsCreated: 0, assessmentsUpdated: 0,
     studentsCreated: 0, studentsMatched: 0, enrolmentsCreated: 0,
     gradesCreated: 0, gradesUpdated: 0, gradesSkippedManual: 0,
+    attendanceSessionsCreated: 0, attendanceMarksCreated: 0,
+    attendanceSkippedConflict: 0, attendanceSkippedNoStudent: 0,
   };
   const issues = [];
   const note = (m) => { if (issues.length < 300) issues.push(m); };
@@ -444,6 +447,21 @@ async function syncFromMoodle({ dryRun = false } = {}) {
         }
       }
     }
+  }
+
+  // ---------- Attendance ----------
+  // Runs last: it needs the students, units and courses above to exist and be matched
+  // before a register can be attached to anything. Kept in its own module because it
+  // reshapes the data rather than copying it — Moodle records attendance per intake,
+  // Staff Hub per unit.
+  //
+  // Deliberately non-fatal. Reading attendance needs mod_attendance functions on the
+  // token's external service, which is a separate Moodle setting from the rest of the
+  // sync; if it is missing, the grades and enrolments above must still land.
+  try {
+    Object.assign(summary, await importAttendance({ call, dryRun, note }));
+  } catch (e) {
+    note(`Attendance import failed: ${e.message}`);
   }
 
   return { summary, issues };
