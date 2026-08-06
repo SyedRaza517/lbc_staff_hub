@@ -2983,12 +2983,34 @@ function AdminHndRegisters({ store }) {
         ))}
       </div>
       {view === "courses" && <HndCourses store={store} onOpen={(pid) => { setCourseCourse(pid); setView("units"); }} />}
-      {view === "units" && <Units store={store} courseFilter={courseCourse} setCourseFilter={setCourseCourse} onView={(id) => { setUnitId(id); setView("sessions"); }} />}
-      {view === "sessions" && <HndSessions store={store} unitId={unitId} setUnitId={setUnitId} selected={selected} onTake={setOpenRegister} scoped={scoped} />}
+      {view === "units" && <>
+        {courseCourse && <BackTo label="courses" onClick={() => { setCourseCourse(""); setView("courses"); }} />}
+        <Units store={store} courseFilter={courseCourse} setCourseFilter={setCourseCourse} onView={(id) => { setUnitId(id); setView("sessions"); }} />
+      </>}
+      {view === "sessions" && <>
+        <BackTo label="units" onClick={() => setView("units")} />
+        <HndSessions store={store} unitId={unitId} setUnitId={setUnitId} selected={selected} onTake={setOpenRegister} scoped={scoped} />
+      </>}
       {view === "percentages" && <HndPercentages store={store} />}
       {view === "students" && <HndStudents store={store} />}
       {view === "semesters" && <HndSemesters store={store} />}
     </>
+  );
+}
+
+// Returns from a drilled-into view to the one above it.
+//
+// The admin sections are tab bars, and a tab click is not "back": opening a course to
+// see its units, then a unit to see its sessions, leaves you three levels in with the
+// tab row still showing the LEAF tab. Clicking another tab abandons the trail rather
+// than retracing it, and the context you drilled through (which course, which unit) is
+// silently kept. This walks one step up and clears that step's context.
+function BackTo({ label, onClick }) {
+  return (
+    <button onClick={onClick} aria-label={`Back to ${label}`}
+      className="press mb-3 flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900">
+      <ChevronLeft size={15} /> Back to {label}
+    </button>
   );
 }
 
@@ -6756,8 +6778,14 @@ function AdminAssessments({ store }) {
         ))}
       </div>
       {view === "courses" && <AssessmentCourses store={store} onView={(id) => { setCourseFilter(id); setView("units"); }} />}
-      {view === "units" && <AssessmentUnits store={store} courseFilter={courseFilter} setCourseFilter={setCourseFilter} onView={openUnit} />}
-      {view === "marks" && <AssessmentsManage store={store} unitId={unitId} setUnitId={setUnitId} courseFilter={courseFilter} onGrade={setOpenGrades} />}
+      {view === "units" && <>
+        {courseFilter && <BackTo label="courses" onClick={() => { setCourseFilter(""); setView("courses"); }} />}
+        <AssessmentUnits store={store} courseFilter={courseFilter} setCourseFilter={setCourseFilter} onView={openUnit} />
+      </>}
+      {view === "marks" && <>
+        <BackTo label="units" onClick={() => setView("units")} />
+        <AssessmentsManage store={store} unitId={unitId} setUnitId={setUnitId} courseFilter={courseFilter} onGrade={setOpenGrades} />
+      </>}
       {view === "results" && <AssessmentsOverview store={store} />}
       {view === "students" && <StudentAssessments store={store} />}
     </>
