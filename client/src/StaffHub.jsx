@@ -1542,6 +1542,51 @@ function FilterSelect({ label, value, onChange, options }) {
     </label>
   );
 }
+// ---- Chart chrome -----------------------------------------------------------
+// Shared so every chart in the console reads as one system rather than as whatever
+// Recharts does by default.
+
+// Course names are the qualification title in full — "Pearson BTEC Level 5 Higher
+// National Diploma in Business (October 2025)". On a category axis that wraps to
+// three lines of 9px text and becomes unreadable, so strip the boilerplate every
+// course shares and keep what actually tells them apart: the subject and the intake.
+function shortCourse(name) {
+  let s = String(name || "")
+    .replace(/^pearson\s+/i, "")
+    .replace(/btec\s+level\s+\d+\s+/i, "")
+    .replace(/higher\s+national\s+diploma\s+in\s+/i, "")
+    .replace(/^hnd\s+/i, "")
+    .trim();
+  const intake = s.match(/\(([^)]+)\)/);
+  s = s.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+  s = s.replace(/ and /gi, " & ").replace(/Management/gi, "Mgmt");
+  if (intake) {
+    const m = intake[1].match(/([A-Za-z]+)\s*(\d{4})/);
+    s += m ? ` · ${m[1].slice(0, 3)} ${m[2]}` : ` · ${intake[1]}`;
+  }
+  return s || String(name || "");
+}
+
+// Recharts' default tooltip is an unstyled bordered box. This matches the cards.
+function ChartTip({ active, payload, label, unit = "%", name }) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0];
+  return (
+    <div className="rounded-xl bg-white/95 px-3 py-2 text-xs shadow-lg ring-1 ring-slate-200 backdrop-blur">
+      <p className="font-bold text-slate-700">{p.payload?.full || label}</p>
+      <p className="mt-0.5 flex items-center gap-1.5 text-slate-500">
+        <span className="inline-block h-2 w-2 rounded-full" style={{ background: p.color || p.fill }} />
+        {name || p.name} <b className="text-slate-800">{p.value}{unit}</b>
+      </p>
+    </div>
+  );
+}
+
+// Solid hairlines, one shade off the surface. Dashed gridlines read as a threshold
+// or a projection when they are only a grid.
+const GRID = "#eef1f6";
+const AXIS_TICK = { fontSize: 11, fill: "#94a3b8" };
+
 function ChartCard({ title, children, className = "" }) {
   return (
     <div className={`rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 fade-up ${className}`}>
@@ -1550,12 +1595,25 @@ function ChartCard({ title, children, className = "" }) {
     </div>
   );
 }
-function ExecKpi({ label, value, tone = NAVY, sub }) {
+function ExecKpi({ label, value, tone = NAVY, sub, Icon }) {
   return (
-    <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 fade-up">
-      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="mt-1 text-3xl font-extrabold tabular-nums" style={{ color: tone }}>{value}</p>
-      {sub && <p className="text-[11px] text-slate-400">{sub}</p>}
+    <div className="group relative overflow-hidden rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md hover:ring-slate-300 fade-up">
+      {/* A hairline of the tile's own colour, so a row of tiles is scannable by
+          colour before any of the numbers are read. */}
+      <span className="absolute inset-x-0 top-0 h-[3px]" style={{ background: tone, opacity: 0.85 }} />
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+        {Icon && (
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors group-hover:scale-105"
+            style={{ background: `${tone}14`, color: tone }}>
+            <Icon size={14} />
+          </span>
+        )}
+      </div>
+      {/* Proportional figures: tabular-nums makes a large standalone number look
+          loosely spaced. Equal-width digits are for columns, not hero values. */}
+      <p className="mt-1 text-3xl font-extrabold leading-none" style={{ color: tone }}>{value}</p>
+      {sub && <p className="mt-1.5 text-[11px] text-slate-400">{sub}</p>}
     </div>
   );
 }
@@ -1685,7 +1743,7 @@ function ExecutiveDashboard({ store }) {
   const allCourses = exec?.courses || [];
   const courses = allCourses.filter(c => course === "all" || c.courseId === course);
   // Only plot courses that actually have a measurable pass rate.
-  const courseData = courses.filter(c => c.passRate != null).map(c => ({ code: c.code, passRate: c.passRate }));
+  const courseData = courses.filter(c => c.passRate != null).map(c => ({ code: c.code, short: shortCourse(c.code), full: c.code, passRate: c.passRate }));
   const shownStudents = course === "all" ? (exec?.totals?.students ?? store.students.length) : courses.reduce((a, c) => a + c.studentCount, 0);
   // Same rule for the exec-summary figures: a failed load shows "—", not a
   // confident zero beside a Pass Rate that correctly shows "—".
@@ -1718,35 +1776,47 @@ function ExecutiveDashboard({ store }) {
       {err && <div className="mb-3 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 ring-1 ring-rose-200"><AlertCircle size={15} /> {err}</div>}
       {unitScoped && <p className="mb-3 text-[11px] text-slate-400">The {unit !== "all" && stage !== "all" ? "Year / Term and Unit filters apply" : unit !== "all" ? "Unit filter applies" : "Year / Term filter applies"} to the attendance figures; student and results figures cover the whole {course === "all" ? "college" : "course"}.</p>}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <ExecKpi label="Total Students" value={exec ? shownStudents : "—"} />
-        <ExecKpi label="Total Courses" value={exec ? totalCourses : "—"} />
-        <ExecKpi label="Attendance %" value={attPct == null ? "—" : `${attPct}%`} tone={pctColour(attPct)} />
-        <ExecKpi label="Assessments" value={assessmentsCount == null ? "—" : assessmentsCount} />
-        <ExecKpi label="Student Pass Rate" value={shownPassRate == null ? "—" : `${shownPassRate}%`} tone={pctColour(shownPassRate)} sub={shownPassed == null ? "unavailable" : shownGraded ? `of ${shownGraded} assessed` : "no marks yet"} />
-        <ExecKpi label="Students Passed" value={shownPassed == null ? "—" : shownPassed} tone="#0d7a5f" />
-        <ExecKpi label="Total Sessions" value={totalSessions == null ? "—" : totalSessions} sub={totalSessions == null ? "all years only" : undefined} />
-        <ExecKpi label="Total Attendance" value={totalMarks == null ? "—" : kNum(totalMarks)} sub="marks recorded" />
+        <ExecKpi label="Total Students" value={exec ? shownStudents : "—"} Icon={Users} />
+        <ExecKpi label="Total Courses" value={exec ? totalCourses : "—"} Icon={BookOpen} />
+        <ExecKpi label="Attendance %" value={attPct == null ? "—" : `${attPct}%`} tone={pctColour(attPct)} Icon={Percent} />
+        <ExecKpi label="Assessments" value={assessmentsCount == null ? "—" : assessmentsCount} Icon={Award} />
+        <ExecKpi label="Student Pass Rate" value={shownPassRate == null ? "—" : `${shownPassRate}%`} tone={pctColour(shownPassRate)} sub={shownPassed == null ? "unavailable" : shownGraded ? `of ${shownGraded} assessed` : "no marks yet"} Icon={GraduationCap} />
+        <ExecKpi label="Students Passed" value={shownPassed == null ? "—" : shownPassed} tone="#0d7a5f" Icon={CheckCircle2} />
+        <ExecKpi label="Total Sessions" value={totalSessions == null ? "—" : totalSessions} sub={totalSessions == null ? "all years only" : undefined} Icon={ClipboardList} />
+        <ExecKpi label="Total Attendance" value={totalMarks == null ? "—" : kNum(totalMarks)} sub="marks recorded" Icon={TrendingUp} />
       </div>
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         <ChartCard title="Attendance % by Year and Month">
           <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={monthData} margin={{ top: 10, right: 12, left: -12, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eef1f6" />
-              <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} interval="preserveStartEnd" />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "#94a3b8" }} tickFormatter={v => `${v}%`} />
-              <Tooltip formatter={v => [`${v}%`, "Attendance"]} />
-              <Line type="monotone" dataKey="pct" stroke={MAROON} strokeWidth={2.5} dot={{ r: 2.5 }} />
-            </LineChart>
+            <AreaChart data={monthData} margin={{ top: 10, right: 14, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="attFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={NAVY} stopOpacity={0.16} />
+                  <stop offset="100%" stopColor={NAVY} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke={GRID} vertical={false} />
+              <XAxis dataKey="label" tick={AXIS_TICK} interval="preserveStartEnd" tickLine={false} axisLine={{ stroke: GRID }} />
+              <YAxis domain={[0, 100]} tick={AXIS_TICK} tickFormatter={v => `${v}%`} tickLine={false} axisLine={false} width={46} />
+              <Tooltip content={<ChartTip name="Attendance" />} cursor={{ stroke: "#cbd5e1", strokeWidth: 1 }} />
+              {/* No dot on every month — 12 markers is chrome, not information. The
+                  hover dot is 8px so it is a real touch target. */}
+              <Area type="monotone" dataKey="pct" stroke={NAVY} strokeWidth={2} fill="url(#attFill)"
+                dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "#fff" }} />
+            </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
         <ChartCard title="Students passing (average ≥ 50%) by course">
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={courseData} layout="vertical" margin={{ top: 5, right: 24, left: 10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eef1f6" horizontal={false} />
-              <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: "#94a3b8" }} tickFormatter={v => `${v}%`} />
-              <YAxis type="category" dataKey="code" width={130} tick={{ fontSize: 9, fill: "#64748b" }} />
-              <Tooltip formatter={v => [`${v}%`, "Pass rate"]} />
-              <Bar dataKey="passRate" fill={MAROON} radius={[0, 6, 6, 0]} />
+            <BarChart data={courseData} layout="vertical" margin={{ top: 4, right: 44, left: 8, bottom: 0 }} barCategoryGap="28%">
+              <CartesianGrid stroke={GRID} horizontal={false} />
+              <XAxis type="number" domain={[0, 100]} tick={AXIS_TICK} tickFormatter={v => `${v}%`} tickLine={false} axisLine={{ stroke: GRID }} />
+              {/* Short labels on one line. The full course name is in the tooltip. */}
+              <YAxis type="category" dataKey="short" width={132} tick={{ fontSize: 11, fill: "#475569" }} tickLine={false} axisLine={false} />
+              <Tooltip content={<ChartTip name="Pass rate" />} cursor={{ fill: "rgba(148,163,184,.10)" }} />
+              {/* Four bars at most, so labelling each end is selective, not noise. */}
+              <Bar dataKey="passRate" fill={MAROON} radius={[0, 6, 6, 0]} barSize={18}
+                label={{ position: "right", formatter: v => `${v}%`, fontSize: 11, fill: "#64748b", fontWeight: 700 }} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -2199,7 +2269,7 @@ function AdminOverview({ store, setTab }) {
           <ResponsiveContainer width="100%" height={230}>
             <AreaChart data={trend}>
               <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={NAVY} stopOpacity={0.35} /><stop offset="100%" stopColor={NAVY} stopOpacity={0} /></linearGradient></defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eef1f6" vertical={false} />
+              <CartesianGrid stroke={GRID} vertical={false} />
               <XAxis dataKey="day" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
               <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 13 }} />
@@ -3541,7 +3611,7 @@ function HndPercentages({ store }) {
           <p className="mb-3 text-sm font-bold text-slate-700">Attendance by unit</p>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={units.map(m => ({ code: m.code, pct: unitTotals[m.id]?.pct ?? 0 }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eef1f6" vertical={false} />
+              <CartesianGrid stroke={GRID} vertical={false} />
               <XAxis dataKey="code" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
               <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 13 }} formatter={(v) => [`${v}%`, "Attendance"]} />
@@ -4212,9 +4282,9 @@ function StudentAttendanceDetail({ student, store }) {
         <ChartCard title="Attendance % by Year and Month">
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={monthData} margin={{ top: 6, right: 10, left: -14, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eef1f6" />
-              <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#94a3b8" }} interval="preserveStartEnd" />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: "#94a3b8" }} tickFormatter={v => `${v}%`} />
+              <CartesianGrid stroke={GRID} />
+              <XAxis dataKey="label" tick={AXIS_TICK} interval="preserveStartEnd" />
+              <YAxis domain={[0, 100]} tick={AXIS_TICK} tickFormatter={v => `${v}%`} />
               <Tooltip formatter={v => [`${v}%`, "Attendance"]} />
               <Line type="monotone" dataKey="pct" stroke={MAROON} strokeWidth={2.5} dot={{ r: 2 }} />
             </LineChart>
@@ -7848,7 +7918,7 @@ function AdminKPI({ store }) {
         {chartData.length ? (
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eef1f6" vertical={false} />
+              <CartesianGrid stroke={GRID} vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
               <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 13 }} formatter={(v) => [`${v}%`, "KPI score"]} labelFormatter={(l) => chartData.find(d => d.name === l)?.full || l} />
