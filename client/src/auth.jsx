@@ -62,7 +62,15 @@ export function AuthProvider({ children }) {
   // When any API call hits a 401 (expired/invalid token), drop the user so the
   // app falls back to <Login> instead of getting stuck on a broken session.
   useEffect(() => {
-    const onUnauthorized = () => setUser(null);
+    const onUnauthorized = () => {
+      setUser(null);
+      // A 401 means the token is dead — expired, or revoked by a password change or
+      // reset bumping tokenVersion. A dead token is worth nothing remembered, and
+      // keeping it means every reopen prompts for a fingerprint, restores the same
+      // dead token and drops the user at the password screen with no explanation.
+      // The lock PREFERENCE stays on, so signing in again re-remembers automatically.
+      import("./biometric").then(({ forgetSession }) => forgetSession()).catch(() => {});
+    };
     window.addEventListener("auth:unauthorized", onUnauthorized);
     return () => window.removeEventListener("auth:unauthorized", onUnauthorized);
   }, []);
