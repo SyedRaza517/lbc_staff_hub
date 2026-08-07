@@ -28,6 +28,13 @@ const signToken = (staff) => jwt.sign({ sub: staff.id, kind: "staff", role: staf
 // A student session token. kind:"student" routes requireAuth down the student path.
 const signStudentToken = (student) => jwt.sign({ sub: student.id, kind: "student", purpose: "session", ver: student.tokenVersion ?? 0 }, SECRET, { expiresIn: EXPIRES });
 
+// The ONLY routers a student session may reach.
+//   /api/student  — their own data, every route scoped to req.user.id
+//   /api/auth     — /me, /change-password and /account, each of which branches on
+//                   req.user.kind === "student" before it touches a staff table
+// Nothing else. See the check in requireAuth below.
+const STUDENT_ROUTERS = ["/api/student", "/api/auth"];
+
 // Attaches req.user = { id, accountRole, ...publicStaff } when a valid Bearer token is present.
 async function requireAuth(req, res, next) {
   try {
@@ -44,11 +51,16 @@ async function requireAuth(req, res, next) {
     // Student session — a fully isolated path. The staff branch below is unchanged,
     // so nothing about existing staff/admin auth is affected.
     if (payload.kind === "student") {
-      // A student token may ONLY reach the student router and the shared auth router
-      // (for /auth/me). Every other router (staff, HND, leave, assessments, …) is
-      // off-limits — this one check keeps students out of all staff/admin data,
-      // regardless of each route's own guards.
-      if (req.baseUrl !== "/api/student" && req.baseUrl !== "/api/auth") {
+      // A student token may reach ONLY these two routers. Every other one — staff,
+      // hnd, leave, assessments, timesheets, documents, adjustments, moodle,
+      // staff-reviews, student-reviews, passwords, my-reviews, interactions,
+      // notifications, devices, signup, student-queries — is off-limits.
+      //
+      // An ALLOWLIST, deliberately: a router added tomorrow is closed to students
+      // without anyone remembering to close it. This single check is what keeps
+      // students out of every staff and admin surface regardless of each route's own
+      // guards, so it is the one line in the file most worth not breaking.
+      if (!STUDENT_ROUTERS.includes(req.baseUrl)) {
         return res.status(403).json({ error: "Not available for student accounts" });
       }
       const student = await prisma.student.findUnique({ where: { id: payload.sub } });
@@ -71,7 +83,12 @@ async function requireAuth(req, res, next) {
   }
 }
 
+// One definition of "this is a student", used by every guard below so they cannot
+// drift apart. Two independent markers, both set by requireAuth's student branch.
+const isStudent = (user) => user?.kind === "student" || user?.isStudent === true;
+
 function requireAdmin(req, res, next) {
+  if (isStudent(req.user)) return res.status(403).json({ error: "Not available for student accounts" });
   if (req.user?.accountRole !== "ADMIN") return res.status(403).json({ error: "Admin access required" });
   next();
 }
@@ -86,6 +103,7 @@ function requireStudent(req, res, next) {
 
 // Only the Super Admin — used to guard the access-management endpoints.
 function requireSuperAdmin(req, res, next) {
+  if (isStudent(req.user)) return res.status(403).json({ error: "Not available for student accounts" });
   if (!req.user?.isSuperAdmin) return res.status(403).json({ error: "Super Admin access required" });
   next();
 }
@@ -98,6 +116,7 @@ function requireSuperAdmin(req, res, next) {
 function requireAnyPage(pages) {
   const wanted = Array.isArray(pages) ? pages : [pages];
   return (req, res, next) => {
+    if (isStudent(req.user)) return res.status(403).json({ error: "Not available for student accounts" });
     if (hasPage(req.user, wanted)) return next();
     if (req.user?.accountRole !== "ADMIN" && !req.user?.isSuperAdmin) return res.status(403).json({ error: "Admin access required" });
     return res.status(403).json({ error: "You don't have access to this section" });
@@ -112,6 +131,12 @@ const requirePage = (page) => requireAnyPage([page]);
 // they were never granted. Gate the "see everyone" branch on this instead.
 function hasPage(user, pages) {
   if (!user) return false;
+  // A student NEVER holds an admin page. This is already true incidentally — sStudent
+  // sets no accountRole — but it is stated explicitly and FIRST, because the
+  // isSuperAdmin short-circuit below runs before the role check, so anything that ever
+  // put a truthy isSuperAdmin on a student object would sail straight past it.
+  // Isolation this important should not rest on a field simply being absent.
+  if (isStudent(user)) return false;
   if (user.isSuperAdmin) return true;
   if (user.accountRole !== "ADMIN") return false;
   const allowed = user.adminPages; // null = unconfigured = full access
@@ -157,4 +182,4 @@ function blockedByRank(actor, target) {
   return "You can't change an administrator whose access is broader than your own";
 }
 
-module.exports = { hashPassword, verifyPassword, signToken, signStudentToken, requireAuth, requireAdmin, requireStudent, requireSuperAdmin, requirePage, requireAnyPage, hasPage, outranks, blockedByRank, SECRET };
+module.exports = { hashPassword, verifyPassword, signToken, signStudentToken, requireAuth, requireAdmin, requireStudent, requireSuperAdmin, requirePage, requireAnyPage, hasPage, isStudent, outranks, blockedByRank, STUDENT_ROUTERS, SECRET };

@@ -2059,6 +2059,9 @@ const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kp
 // access). Anyone who isn't an admin gets nothing.
 const canAccessPage = (user, key) => {
   if (!user) return false;
+  // No student holds any admin page — stated first, mirroring the server's hasPage,
+  // so the isSuperAdmin short-circuit below can never be reached with a student.
+  if (user.kind === "student" || user.isStudent) return false;
   if (key === "access") return !!user.isSuperAdmin;   // never assignable to others
   if (user.isSuperAdmin) return true;
   if (user.accountRole !== "ADMIN") return false;
@@ -2513,6 +2516,14 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
   const openQueries = (store.studentQueries || []).filter(q => q.status === "open").length;
   const timesheetsPending = store.timesheetsPending || 0;
   // Guard placed after every hook above, for the reason noted at the top.
+  //
+  // The student check is explicit and FIRST. App.jsx already routes a student to
+  // StudentApp and never renders this component for them, and the server refuses a
+  // student token on every router but /api/student — so this is the third
+  // independent barrier, not the only one. It is here because "the dashboard is
+  // unreachable for students" should be true of this component on its own, not only
+  // true of the two things that happen to sit in front of it.
+  if (me?.kind === "student" || me?.isStudent) return <div className="p-4 text-slate-400">Access denied</div>;
   if (!store.isAdmin) return <div className="p-4 text-slate-400">Access denied</div>;
   return (
     <div className="flex min-h-[calc(100vh-40px)]">

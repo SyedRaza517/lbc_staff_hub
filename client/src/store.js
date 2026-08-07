@@ -46,7 +46,10 @@ export function useApiStore(notify, user) {
   // "" = all semesters; "unassigned" = sessions outside every semester.
   const [semesterId, setSemesterId] = useState("");
 
-  const isAdmin = user?.accountRole === "ADMIN";
+  // A student is never an admin, whatever else the object carries. Explicit rather
+  // than relying on sStudent simply not setting accountRole — this flag gates the
+  // admin dashboard, the Manager Approval tile and every admin-only fetch below.
+  const isAdmin = user?.accountRole === "ADMIN" && user?.kind !== "student" && !user?.isStudent;
 
   const refresh = useCallback(async () => {
     try {
