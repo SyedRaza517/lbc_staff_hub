@@ -77,6 +77,7 @@ app.use("/api/student", wrapAsync(require("./routes/student")));
 app.use("/api/student-queries", wrapAsync(require("./routes/studentQueries")));
 app.use("/api/moodle", wrapAsync(require("./routes/moodle")));
 app.use("/api/staff-reviews", wrapAsync(require("./routes/staffReviews")));
+app.use("/api/passwords", wrapAsync(require("./routes/passwords")));
 app.use("/api/my-reviews", wrapAsync(require("./routes/myReviews")));
 app.use("/api/student-reviews", wrapAsync(require("./routes/studentReviews")));
 

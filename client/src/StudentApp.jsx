@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import useReveal from "./RevealButton";
 import PhoneShell from "./PhoneShell";
 import { BrandMark } from "./Brand";
 import ConfirmDialog from "./ConfirmDialog";
@@ -909,10 +910,15 @@ function Row({ Icon, label, sub, onClick, danger, open }) {
 }
 
 function PwField({ label, value, onChange, disabled }) {
+  // One hook per instance, so each field on the change-password form reveals on its own.
+  const pw = useReveal();
   return (
     <div>
       <label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{label}</label>
-      <input type="password" value={value} onChange={e => onChange(e.target.value)} disabled={disabled} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2" style={{ "--tw-ring-color": NAVY }} />
+      <div className="relative mt-1">
+        <input type={pw.type} value={value} onChange={e => onChange(e.target.value)} disabled={disabled} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-11 text-sm outline-none focus:ring-2" style={{ "--tw-ring-color": NAVY }} />
+        {pw.button}
+      </div>
     </div>
   );
 }

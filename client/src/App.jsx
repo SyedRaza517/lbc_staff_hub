@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
+import useReveal from "./RevealButton";
 import { useAuth } from "./auth";
 import { useApiStore } from "./store";
 import { api } from "./api";
@@ -30,6 +31,9 @@ function LiveClock() {
 // and by the in-app modal for already-onboarded users. On success it calls
 // onSuccess() — the parent decides what to do (refresh user / close modal).
 function ChangePassword({ onSuccess, busyLabel = "Updating…", submitLabel = "Update password" }) {
+  const revCurrent = useReveal();
+  const revNext = useReveal();
+  const revConfirm = useReveal();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -56,29 +60,30 @@ function ChangePassword({ onSuccess, busyLabel = "Updating…", submitLabel = "U
     }
   };
 
-  const field = (label, value, setValue, Icon) => (
+  const field = (label, value, setValue, Icon, reveal) => (
     <label className="block">
       <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
       <div className="relative">
         <Icon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
-          type="password"
+          type={reveal.type}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           disabled={busy}
           autoComplete="off"
-          className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-transparent focus:ring-2 disabled:opacity-60"
+          className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-11 text-sm text-slate-800 outline-none transition focus:border-transparent focus:ring-2 disabled:opacity-60"
           style={{ "--tw-ring-color": NAVY }}
         />
+        {reveal.button}
       </div>
     </label>
   );
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3.5">
-      {field("Current password", current, setCurrent, Lock)}
-      {field("New password", next, setNext, KeyRound)}
-      {field("Confirm new password", confirm, setConfirm, KeyRound)}
+      {field("Current password", current, setCurrent, Lock, revCurrent)}
+      {field("New password", next, setNext, KeyRound, revNext)}
+      {field("Confirm new password", confirm, setConfirm, KeyRound, revConfirm)}
       <p className="text-[11px] text-slate-400">Use at least 8 characters. Choose something you haven't used here before.</p>
       {error && (
         <div className="pop flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 ring-1 ring-rose-200">

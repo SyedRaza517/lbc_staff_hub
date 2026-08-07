@@ -217,6 +217,26 @@ async function readEdits(body, row) {
   return { patch };
 }
 
+
+// PUT /api/signup/:id — correct a pending request WITHOUT deciding it.
+//
+// The decision endpoint already accepts corrections, but only at the moment of
+// approving. An admin who spots a typo while working through the queue, and is not
+// yet ready to approve, had nowhere to put it.
+router.put("/:id", requireAuth, requirePage("signups"), async (req, res) => {
+  const row = await prisma.signupRequest.findUnique({ where: { id: req.params.id } });
+  if (!row) return res.status(404).json({ error: "Sign-up request not found" });
+  // A decided request is part of the audit trail and stays as it was.
+  if (row.status !== "pending") return res.status(409).json({ error: "This request has already been decided, so it can no longer be edited" });
+
+  const edits = await readEdits(req.body, row);
+  if (edits.error) return res.status(400).json({ error: edits.error });
+  if (!Object.keys(edits.patch).length) return res.json(sSignup(row));
+
+  const updated = await prisma.signupRequest.update({ where: { id: row.id }, data: edits.patch });
+  res.json(sSignup(updated));
+});
+
 router.put("/:id/decision", requireAuth, requirePage("signups"), async (req, res) => {
   const { status, note, allowance } = req.body || {};
   if (!["approved", "rejected"].includes(status)) return res.status(400).json({ error: "status must be approved or rejected" });

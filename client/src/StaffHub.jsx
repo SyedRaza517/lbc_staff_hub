@@ -25,6 +25,7 @@ import PhoneShell, { useIsHandset } from "./PhoneShell";
 import DeleteAccount from "./DeleteAccount";
 import { biometricStatus, biometryLabel, isBiometricEnabled, enableBiometric, disableBiometric } from "./biometric";
 import { api } from "./api";
+import useReveal from "./RevealButton";
 
 /* ============================================================
    LONDON BROOKES COLLEGE — STAFF HUB
@@ -1509,8 +1510,8 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
 /* ============================================================ ADMIN DASHBOARD ============================================================ */
 // The assignable admin pages, in nav order. "access" is intentionally excluded —
 // it is Super-Admin-only and never granted. Keep in sync with server validate.js.
-const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "settings"];
-const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentreviews: "Student Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", settings: "Settings" };
+const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "passwords", "settings"];
+const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentreviews: "Student Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", passwords: "Reset Passwords", settings: "Settings" };
 
 // Can this user see/use a given admin page? The Super Admin gets everything,
 // including the Super-Admin-only Access tab. A page-scoped admin gets only their
@@ -1945,6 +1946,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
     { key: "studentqueries", label: "Student Queries", I: Inbox },
     { key: "staff", label: "Staff", I: Users },
     { key: "timesheets", label: "Timesheets", I: Timer },
+    { key: "passwords", label: "Reset Passwords", I: KeyRound },
     { key: "settings", label: "Settings", I: Settings },
     { key: "access", label: "Access", I: ShieldCheck },
   ];
@@ -2011,6 +2013,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
         {activeKey === "pat" && <AdminPAT store={store} />}
         {activeKey === "staffreviews" && <AdminStaffReviews store={store} />}
         {activeKey === "studentreviews" && <AdminStudentReviews store={store} />}
+        {activeKey === "passwords" && <AdminPasswords />}
         {activeKey === "studentqueries" && <AdminStudentQueries store={store} />}
         {activeKey === "staff" && <AdminStaff store={store} />}
         {activeKey === "timesheets" && <AdminTimesheets store={store} />}
@@ -2774,6 +2777,24 @@ function AdminSignups({ store }) {
     });
   };
 
+  // Keep the corrections on the request and leave it pending.
+  const saveEditsOnly = async () => {
+    const changed = {};
+    for (const [k, v] of Object.entries(edit || {})) {
+      const was = k === "jobTitle" ? (modal.req.role || "") : (modal.req[k] || "");
+      if (v.trim() !== was) changed[k] = v.trim();
+    }
+    if (!Object.keys(changed).length) { setModal(null); return; }
+    setBusy(true);
+    try {
+      // store.updateSignup refetches the queue and toasts on its own.
+      await store.updateSignup(modal.req.id, changed);
+      setModal(null);
+    } catch (_) {
+      // The store already showed the error and refetched, so the list is accurate.
+    } finally { setBusy(false); }
+  };
+
   const confirm = async () => {
     setBusy(true);
     try {
@@ -2976,11 +2997,148 @@ function AdminSignups({ store }) {
             </Field>
           )}
 
+          {modal?.action === "approved" && (
+            <button onClick={saveEditsOnly} disabled={busy}
+              className="press w-full rounded-xl border-2 border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40">
+              <Save size={15} className="mr-1.5 inline" /> Save changes without deciding
+            </button>
+          )}
           <PrimaryBtn colour={modal?.action === "approved" ? "#059669" : MAROON} onClick={confirm} disabled={busy} className="w-full">
             {modal?.action === "approved" ? <><CheckCircle2 size={16} /> {modal?.req.kind === "student" ? "Approve & activate student" : "Approve & create account"}</> : <><XCircle size={16} /> Confirm decline</>}
           </PrimaryBtn>
         </div>
       </Modal>
+    </>
+  );
+}
+
+/* ----- Dashboard: Reset Passwords ----- */
+// Setting someone else's password directly, for the cases self-service cannot reach:
+// a member of staff who has lost access to their college email, or a student standing
+// at the office desk. The server drops all of that person's existing sessions and tells
+// them it happened, so a reset can never be silent.
+function AdminPasswords() {
+  const [people, setPeople] = useState(null);
+  const [err, setErr] = useState("");
+  const [query, setQuery] = useState("");
+  const [picked, setPicked] = useState(null);
+  const [pw, setPw] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState("");
+  const reveal = useReveal();
+  const reveal2 = useReveal();
+
+  const load = useCallback(async () => {
+    setErr("");
+    try { setPeople(await api.passwordPeople()); }
+    catch (e) { setErr(e.message || "Could not load the list of people"); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const list = (people || []).filter(p => {
+    if (!terms.length) return true;
+    const hay = [p.name, p.email, p.detail].filter(Boolean).join(" ").toLowerCase();
+    return terms.every(t => hay.includes(t));
+  });
+
+  const tooShort = pw.length > 0 && pw.length < 8;
+  const mismatch = confirm.length > 0 && pw !== confirm;
+  const canSave = !!picked && pw.length >= 8 && pw === confirm && !busy;
+  const isPicked = (p) => picked && picked.id === p.id && picked.kind === p.kind;
+
+  const save = async () => {
+    if (!canSave) return;
+    setBusy(true); setErr(""); setDone("");
+    try {
+      const r = await api.setPassword(picked.kind, picked.id, pw, confirm);
+      setDone(r.name + " has a new password. They have been signed out everywhere and told it happened.");
+      setPw(""); setConfirm(""); setPicked(null);
+      load();
+    } catch (e) { setErr(e.message || "Could not change that password"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <AdminHeader title="Reset Passwords" subtitle="Set a new password for a member of staff or a student" Icon={KeyRound} />
+
+      {err && <div className="mb-3 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 ring-1 ring-rose-200"><AlertCircle size={15} /> {err}</div>}
+      {done && <div className="mb-3 flex items-start gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200"><CheckCircle2 size={15} className="mt-px shrink-0" /> {done}</div>}
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70">
+          <div className="relative mb-3">
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={query} onChange={e => setQuery(e.target.value)} type="search"
+              placeholder="Search staff or students by name, email or ID"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100" />
+          </div>
+          {!people && <div className="skeleton h-40 rounded-xl" />}
+          {people && (
+            <div className="max-h-96 space-y-1.5 overflow-y-auto pr-1">
+              {list.map(p => (
+                <button key={p.kind + ":" + p.id} onClick={() => { setPicked(p); setPw(""); setConfirm(""); setDone(""); }}
+                  className={"flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left transition " + (isPicked(p) ? "text-white ring-transparent" : "bg-white ring-1 ring-slate-200 hover:bg-slate-50")}
+                  style={isPicked(p) ? { background: NAVY } : {}}>
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: p.colour || NAVY }}>{p.initials}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5">
+                      <span className={"truncate text-sm font-bold " + (isPicked(p) ? "text-white" : "text-slate-700")}>{p.name}</span>
+                      {p.isSuperAdmin && <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-700">SUPER ADMIN</span>}
+                    </span>
+                    <span className={"block truncate text-[11px] " + (isPicked(p) ? "text-white/70" : "text-slate-400")}>{p.detail} - {p.email}</span>
+                    {p.note && <span className={"block truncate text-[10px] " + (isPicked(p) ? "text-white/60" : "text-amber-600")}>{p.note}</span>}
+                  </span>
+                </button>
+              ))}
+              {list.length === 0 && <p className="px-1 py-8 text-center text-xs text-slate-400">Nobody matches that search.</p>}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70">
+          {!picked ? (
+            <EmptyState Icon={KeyRound} title="Choose a person" msg="Pick a member of staff or a student on the left, then set their new password." />
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-200">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: picked.colour || NAVY }}>{picked.initials}</span>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-extrabold" style={{ color: NAVY }}>{picked.name}</p>
+                  <p className="truncate text-[11px] text-slate-400">{picked.detail} - {picked.email}</p>
+                </div>
+              </div>
+
+              <Field label="New password">
+                <div className="relative">
+                  <input type={reveal.type} value={pw} onChange={e => setPw(e.target.value)} autoComplete="new-password" className={inputCls + " pr-11"} />
+                  {reveal.button}
+                </div>
+                {tooShort && <p className="mt-1 text-[11px] font-semibold text-rose-600">At least 8 characters.</p>}
+              </Field>
+
+              <Field label="Confirm password">
+                <div className="relative">
+                  <input type={reveal2.type} value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" className={inputCls + " pr-11"} />
+                  {reveal2.button}
+                </div>
+                {mismatch && <p className="mt-1 text-[11px] font-semibold text-rose-600">The two passwords do not match.</p>}
+              </Field>
+
+              <p className="flex items-start gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800 ring-1 ring-amber-200">
+                <AlertCircle size={13} className="mt-px shrink-0" />
+                {picked.name} will be signed out on every device and told that you reset it. Give them the new password directly - it is not emailed.
+              </p>
+
+              <PrimaryBtn onClick={save} disabled={!canSave} colour={canSave ? NAVY : "#94a3b8"} className="w-full">
+                {busy ? <><Loader size={16} /> Saving...</> : <><KeyRound size={16} /> Set new password</>}
+              </PrimaryBtn>
+            </div>
+          )}
+        </div>
+      </div>
     </>
   );
 }
@@ -5507,6 +5665,9 @@ function StudentReviewScreen({ store, me }) {
   // Which course the unit list is scoped to. Nothing is offered until one is chosen —
   // "UNIT 1" exists in four intakes, so an unscoped list invites the wrong pick.
   const [reviewCourse, setReviewCourse] = useState("");
+  // What the lecturer has typed into the student search. A dropdown of 136 names is
+  // unusable on a phone; typing two letters of a surname is not.
+  const [studentQuery, setStudentQuery] = useState("");
   const [query, setQuery] = useState("");
   const [progressFilter, setProgressFilter] = useState("all");
 
@@ -5562,6 +5723,34 @@ function StudentReviewScreen({ store, me }) {
     if (editing?.student && !list.some(o => o.id === editing.student.id)) list.unshift({ id: editing.student.id, label: `${editing.student.name} — ${editing.student.studentRef}` });
     return list;
   }, [students, editing]);
+
+  // Search on name, college ID and email — the three things a lecturer might know.
+  // Capped, because a phone list that runs to 136 rows is no better than the dropdown
+  // it replaced; typing another letter is the way to narrow it.
+  const studentMatches = useMemo(() => {
+    const terms = studentQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return [];
+    return students.filter(s => {
+      const hay = [s.name, s.studentRef, s.email].filter(Boolean).join(" ").toLowerCase();
+      return terms.every(t => hay.includes(t));
+    }).slice(0, 8);
+  }, [students, studentQuery]);
+
+  const chosenStudent = useMemo(
+    () => students.find(s => s.id === form.studentId) || (editing?.student || null),
+    [students, form.studentId, editing],
+  );
+
+  // Choosing the student settles the course, so the lecturer never picks it twice.
+  // Falls back to leaving the course picker open when the student's course cannot be
+  // told — a few students are enrolled across courses, and guessing would file the
+  // review against the wrong unit.
+  const pickStudent = (stu) => {
+    set("studentId", stu.id);
+    setStudentQuery("");
+    const course = stu.courseId || "";
+    if (course !== reviewCourse) { setReviewCourse(course); set("unitId", ""); }
+  };
   const unitOptions = useMemo(() => {
     const list = units.map(u => ({ id: u.id, label: `${u.code} — ${u.name}` }));
     if (editing?.unit && !list.some(o => o.id === editing.unit.id)) list.unshift({ id: editing.unit.id, label: `${editing.unit.code} — ${editing.unit.name}` });
@@ -5574,13 +5763,14 @@ function StudentReviewScreen({ store, me }) {
   const concernChoices = options.concerns || [];
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const startNew = () => { setEditing(null); setForm(blankStudentReview()); setReviewCourse(""); setFormErr(""); setMode("form"); };
+  const startNew = () => { setEditing(null); setForm(blankStudentReview()); setReviewCourse(""); setStudentQuery(""); setFormErr(""); setMode("form"); };
   const openEdit = (r) => {
     setEditing(r);
     setForm(studentReviewForm(r));
     // Pre-select the course of the unit already on the review, or its unit dropdown
     // opens disabled and empty and the unit looks as though it has been cleared.
     setReviewCourse(units.find(u => u.id === r.unitId)?.courseId || "");
+    setStudentQuery("");
     setFormErr("");
     setMode("form");
   };
@@ -5749,16 +5939,51 @@ function StudentReviewScreen({ store, me }) {
           <Card>
             <div className="space-y-3.5">
               <Field label="Student *">
-                <select value={form.studentId} disabled={busy} onChange={e => set("studentId", e.target.value)} className={inputCls}>
-                  <option value="">Choose a student…</option>
-                  {studentOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-                </select>
+                {chosenStudent ? (
+                  <div className="flex items-center gap-2.5 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-200">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: chosenStudent.colour || NAVY }}>{chosenStudent.initials}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-slate-700">{chosenStudent.name}</p>
+                      <p className="truncate text-[11px] text-slate-400">{chosenStudent.studentRef}</p>
+                    </div>
+                    <button type="button" disabled={busy}
+                      onClick={() => { set("studentId", ""); set("unitId", ""); setReviewCourse(""); setStudentQuery(""); }}
+                      className="press shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-slate-500 ring-1 ring-slate-200 hover:bg-white">
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="relative">
+                      <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input value={studentQuery} onChange={e => setStudentQuery(e.target.value)} disabled={busy}
+                        type="search" inputMode="search" autoComplete="off"
+                        placeholder="Search name, college ID or email"
+                        className={inputCls + " pl-9"} style={{ "--tw-ring-color": NAVY }} />
+                    </div>
+                    {studentQuery.trim() && (
+                      <div className="mt-1.5 space-y-1">
+                        {studentMatches.map(stu => (
+                          <button key={stu.id} type="button" onClick={() => pickStudent(stu)}
+                            className="press flex w-full items-center gap-2.5 rounded-xl bg-white px-3 py-2 text-left ring-1 ring-slate-200 hover:bg-slate-50">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: stu.colour || NAVY }}>{stu.initials}</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-bold text-slate-700">{stu.name}</span>
+                              <span className="block truncate text-[11px] text-slate-400">{stu.studentRef}</span>
+                            </span>
+                          </button>
+                        ))}
+                        {studentMatches.length === 0 && <p className="px-1 py-2 text-[11px] text-slate-400">No student matches that.</p>}
+                      </div>
+                    )}
+                  </>
+                )}
               </Field>
 
               <Field label="Course">
                 <select value={reviewCourse} disabled={busy}
                   onChange={e => { setReviewCourse(e.target.value); set("unitId", ""); }} className={inputCls}>
-                  <option value="">— choose a course —</option>
+                  <option value="">{chosenStudent ? "— choose a course —" : "— pick the student first —"}</option>
                   {reviewCourses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </Field>

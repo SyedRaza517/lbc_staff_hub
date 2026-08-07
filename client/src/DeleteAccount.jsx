@@ -5,6 +5,7 @@
 // destroyed, then asks for the password, the authenticator code where one is set,
 // and the word DELETE typed out.
 import React, { useState } from "react";
+import useReveal from "./RevealButton";
 import { api } from "./api";
 import { useAuth } from "./auth";
 import { CodeInput } from "./TwoFactor";
@@ -16,6 +17,7 @@ const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-transparent focus:ring-2 disabled:opacity-60";
 
 export default function DeleteAccount({ user, onCancel }) {
+  const pw = useReveal();
   const { logout } = useAuth();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -74,8 +76,8 @@ export default function DeleteAccount({ user, onCancel }) {
         <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-400">Your password</span>
         <div className="relative">
           <Lock size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy}
-            autoComplete="current-password" className={inputClass} style={{ "--tw-ring-color": MAROON }} />
+          <div className="relative"><input type={pw.type} value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy}
+            autoComplete="current-password" className={`${inputClass} pr-11`} style={{ "--tw-ring-color": MAROON }} />{pw.button}</div>
         </div>
       </label>
 

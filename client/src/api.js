@@ -115,7 +115,14 @@ export const api = {
   deleteAccount: (password, confirm, code) => request("/auth/account", { method: "DELETE", body: { password, confirm, code } }),
   // self-service sign-up (public) + admin approval queue
   signUp: (data) => request("/signup", { method: "POST", body: data }),
+  // Admin password reset. `kind` is "staff" or "student" — one list, so the admin
+  // picks a person rather than first choosing which kind of person they are.
+  passwordPeople: () => request("/passwords/people"),
+  setPassword: (kind, id, password, confirm) => request(`/passwords/${kind}/${id}`, { method: "PUT", body: { password, confirm } }),
+
   listSignups: (status) => request(`/signup${status ? `?status=${status}` : ""}`),
+  // Correct a pending request without deciding it yet.
+  updateSignup: (id, edits) => request(`/signup/${id}`, { method: "PUT", body: edits }),
   // `edits` carries any corrections the admin made to what the applicant typed.
   decideSignup: (id, status, note, allowance, edits) => request(`/signup/${id}/decision`, { method: "PUT", body: { status, note, allowance, ...(edits || {}) } }),
 

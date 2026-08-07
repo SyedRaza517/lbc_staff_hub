@@ -73,7 +73,14 @@ router.get("/options", (_req, res) => res.json({ progress: PROGRESS, concerns: C
 router.get("/roster", async (_req, res) => {
   const [students, units] = await Promise.all([
     prisma.student.findMany({
-      select: { id: true, firstName: true, lastName: true, studentRef: true, email: true, initials: true, colour: true },
+      select: {
+        id: true, firstName: true, lastName: true, studentRef: true, email: true, initials: true, colour: true,
+        // Both routes to a course, so the app can pick the student and have their
+        // course follow. Only 4 of 136 students have a cohort, so the enrolments are
+        // what actually answers it for almost everyone.
+        cohort: { select: { courseId: true } },
+        enrolments: { select: { unit: { select: { courseId: true } } } },
+      },
       orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
     }),
     // courseId comes too, so the app can ask which course first and then show only
@@ -85,10 +92,17 @@ router.get("/roster", async (_req, res) => {
     }),
   ]);
   res.json({
-    students: students.map((s) => ({
-      id: s.id, name: `${s.firstName} ${s.lastName}`.trim(),
-      studentRef: s.studentRef, email: s.email, initials: s.initials, colour: s.colour,
-    })),
+    students: students.map((s) => {
+      // The cohort is authoritative when set; otherwise take the course their units
+      // agree on. Left null when the units span courses, so the app asks rather than
+      // guessing at a lecturer's expense.
+      const fromUnits = [...new Set(s.enrolments.map((e) => e.unit?.courseId).filter(Boolean))];
+      return {
+        id: s.id, name: `${s.firstName} ${s.lastName}`.trim(),
+        studentRef: s.studentRef, email: s.email, initials: s.initials, colour: s.colour,
+        courseId: s.cohort?.courseId || (fromUnits.length === 1 ? fromUnits[0] : null),
+      };
+    }),
     // Only units that belong to a course can be offered behind a course picker; a unit
     // with no course would be unreachable, so it is left in the list unscoped.
     units: units.map((u) => ({ id: u.id, code: u.code, name: u.name, courseId: u.courseId || null })),

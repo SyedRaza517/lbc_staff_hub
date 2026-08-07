@@ -3,6 +3,7 @@
 // An admin has created the account; the person sets their own password here, which
 // is what actually activates it. Until then it cannot be signed into at all.
 import React, { useEffect, useState } from "react";
+import useReveal from "./RevealButton";
 import { api } from "./api";
 import {
   GraduationCap, Loader2, XCircle, CheckCircle2, Lock, ShieldCheck, ArrowLeft, UserCheck,
@@ -35,6 +36,8 @@ function AuthCard({ header, body }) {
 }
 
 export default function AcceptInvite({ token, onDone }) {
+  const pw = useReveal();
+  const pw2 = useReveal();
   const [state, setState] = useState({ status: "checking" }); // checking | ready | invalid | done
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -128,16 +131,16 @@ export default function AcceptInvite({ token, onDone }) {
             <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-400">Choose a password</span>
             <div className="relative">
               <Lock size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy}
-                autoComplete="new-password" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+              <div className="relative"><input type={pw.type} value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy}
+                autoComplete="new-password" className={`${inputClass} pr-11`} style={{ "--tw-ring-color": NAVY }} />{pw.button}</div>
             </div>
           </label>
           <label className="block">
             <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-400">Confirm password</span>
             <div className="relative">
               <Lock size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} disabled={busy}
-                autoComplete="new-password" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+              <div className="relative"><input type={pw2.type} value={confirm} onChange={(e) => setConfirm(e.target.value)} disabled={busy}
+                autoComplete="new-password" className={`${inputClass} pr-11`} style={{ "--tw-ring-color": NAVY }} />{pw2.button}</div>
             </div>
           </label>
           <p className="text-[11px] text-slate-400">At least 8 characters. Only you will know it.</p>

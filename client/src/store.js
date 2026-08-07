@@ -323,6 +323,7 @@ export function useApiStore(notify, user) {
     addDoc: run((data) => api.addDocument(data), (d) => `"${d.name}" published`),
     deleteDoc: run((id) => api.deleteDocument(id), "Document removed", "error"),
     // sign-up requests
+    updateSignup: run((id, edits) => api.updateSignup(id, edits), "Sign-up request updated"),
     decideSignup: run(
       (id, status, note, allowance, edits) => api.decideSignup(id, status, note, allowance, edits),
       (id, status) => (status === "approved" ? "Account approved — they can now sign in" : "Sign-up declined"),

@@ -7,6 +7,7 @@
 // The reset link alone is never enough for an account with an authenticator: the
 // server also demands a current code, so reaching the mailbox doesn't bypass 2FA.
 import React, { useEffect, useState } from "react";
+import useReveal from "./RevealButton";
 import { api } from "./api";
 import { CodeInput } from "./TwoFactor";
 import {
@@ -141,6 +142,8 @@ export function ForgotPasswordForm({ onBack, prefillEmail = "" }) {
 /* ============ the page the emailed link opens ============ */
 
 export default function ResetPasswordPage({ token, onDone }) {
+  const pw = useReveal();
+  const pw2 = useReveal();
   const [state, setState] = useState({ status: "checking" }); // checking | ready | invalid | done
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -228,12 +231,12 @@ export default function ResetPasswordPage({ token, onDone }) {
       body={(
         <form onSubmit={submit} className="flex flex-col gap-3.5">
           <Labelled label="New password" Icon={Lock}>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy}
-              autoComplete="new-password" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+            <div className="relative"><input type={pw.type} value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy}
+              autoComplete="new-password" className={`${inputClass} pr-11`} style={{ "--tw-ring-color": NAVY }} />{pw.button}</div>
           </Labelled>
           <Labelled label="Confirm new password" Icon={Lock}>
-            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} disabled={busy}
-              autoComplete="new-password" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+            <div className="relative"><input type={pw2.type} value={confirm} onChange={(e) => setConfirm(e.target.value)} disabled={busy}
+              autoComplete="new-password" className={`${inputClass} pr-11`} style={{ "--tw-ring-color": NAVY }} />{pw2.button}</div>
           </Labelled>
           <p className="text-[11px] text-slate-400">At least 8 characters, and different from your current one.</p>
 
