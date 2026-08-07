@@ -12,6 +12,8 @@ import { TotpSetup, TotpVerify } from "./TwoFactor";
 import { ForgotPasswordForm } from "./ResetPassword";
 import PhoneShell, { useIsHandset } from "./PhoneShell";
 import useReveal from "./RevealButton";
+import { rememberedEmail, setRememberedEmail, rememberedPassword, setRememberedPassword } from "./rememberEmail";
+import BiometricSignIn from "./BiometricSignIn";
 import { useBackHandler } from "./backButton";
 import { BrandMark } from "./Brand";
 import {
@@ -103,8 +105,10 @@ function ErrorNote({ children }) {
 function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
   const { signIn } = useAuth();
   const pw = useReveal();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState(() => rememberedEmail());
+  const [password, setPassword] = useState(() => rememberedPassword());
+  // One tickbox covers both, so ticked means "I won't have to type anything again".
+  const [remember, setRemember] = useState(() => Boolean(rememberedEmail() || rememberedPassword()));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -113,6 +117,8 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
     setError("");
     if (!email.trim() || !password) { setError("Enter your email and password."); return; }
     setBusy(true);
+    setRememberedEmail(remember ? email : "");
+    setRememberedPassword(remember ? password : "");
     const res = await signIn(email.trim(), password);
     setBusy(false);
     if (res.ok) return;                       // signed straight in (no 2FA on this account)
@@ -128,17 +134,33 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
       </div>
 
       <Labelled label="Email" Icon={Mail}>
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy}
-          placeholder="name@londonbrookescollege.co.uk" autoComplete="username" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+        <input type="email" name="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy}
+          placeholder="name@londonbrookescollege.co.uk" autoComplete="username" autoCapitalize="none" spellCheck={false}
+          className={inputClass} style={{ "--tw-ring-color": NAVY }} />
       </Labelled>
 
       <Labelled label="Password" Icon={Lock}>
         <div className="relative">
-          <input type={pw.type} value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy}
+          <input type={pw.type} name="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy}
             autoComplete="current-password" className={`${inputClass} pr-11`} style={{ "--tw-ring-color": NAVY }} />
           {pw.button}
         </div>
       </Labelled>
+
+      <div className="-mt-1 space-y-1.5">
+        <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-500">
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} disabled={busy}
+            className="h-4 w-4 rounded border-slate-300 accent-[#1a3a8f]" />
+          Remember my email and password
+        </label>
+        {/* Said plainly at the moment of choosing, not buried in a policy — the
+            tickbox stores a password, which is not what "remember me" usually means. */}
+        {remember && (
+          <p className="text-[11px] leading-snug text-amber-700">
+            Both are saved on this device and stay saved after you sign out. Only use this on a phone that is yours alone.
+          </p>
+        )}
+      </div>
 
       <ErrorNote>{error}</ErrorNote>
 
@@ -147,6 +169,9 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
         style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}>
         {busy ? <><Loader2 size={16} className="animate-spin" /> Signing in…</> : <><LogIn size={16} /> Sign in</>}
       </button>
+
+      {/* Renders nothing unless a remembered session exists to unlock. */}
+      <BiometricSignIn />
 
       <button type="button" onClick={() => goForgot(email)} className="press -mt-1 text-center text-xs font-semibold text-slate-400 transition hover:text-slate-600">
         Forgotten your password?

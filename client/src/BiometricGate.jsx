@@ -6,7 +6,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { isNativeApp } from "./PhoneShell";
 import { getToken } from "./api";
-import { isBiometricEnabled, verifyBiometric, biometricStatus, biometryLabel, enableBiometric, consumeRestored } from "./biometric";
+import { isBiometricEnabled, isBiometricArmed, verifyBiometric, biometricStatus, biometryLabel, enableBiometric, consumeRestored } from "./biometric";
 import { Fingerprint, Loader2, LogOut, ShieldCheck, XCircle } from "lucide-react";
 import { useBackHandler } from "./backButton";
 
@@ -28,7 +28,7 @@ const RELOCK_AFTER_MS = 30_000;
 const RESUMED_SESSION = typeof window !== "undefined" && Boolean(getToken());
 
 export function useAppLock(hasSession) {
-  const [locked, setLocked] = useState(() => RESUMED_SESSION && isNativeApp() && isBiometricEnabled());
+  const [locked, setLocked] = useState(() => RESUMED_SESSION && isBiometricArmed());
   const backgroundedAt = useRef(null);
   // Tracks whether a session already existed last render, so a session that has
   // just APPEARED (a fresh sign-in) can be told apart from one that was already
@@ -40,7 +40,7 @@ export function useAppLock(hasSession) {
   // "Sign out" and falls back to the device passcode, and the authenticator (TOTP)
   // is still the account's second factor, so a missing sensor can't trap anyone.
   useEffect(() => {
-    if (isNativeApp() && isBiometricEnabled() && hasSession && !prevSession.current) {
+    if (isBiometricArmed() && hasSession && !prevSession.current) {
       // A session restored by the launch unlock has ALREADY been verified — locking
       // again would ask for the same finger twice in a row.
       if (!consumeRestored()) setLocked(true);
@@ -69,7 +69,21 @@ export function useAppLock(hasSession) {
     return () => cleanup();
   }, []);
 
-  return { locked: locked && isBiometricEnabled() && isNativeApp(), unlock: () => setLocked(false), lock: () => setLocked(true) };
+  // The browser's equivalent of appStateChange: switching tab, minimising, or the
+  // machine locking. Same grace period, so a brief alt-tab doesn't demand a face.
+  useEffect(() => {
+    if (isNativeApp() || typeof document === "undefined") return;
+    const onVisibility = () => {
+      if (!isBiometricArmed()) return;
+      if (document.visibilityState === "hidden") { backgroundedAt.current = Date.now(); return; }
+      const away = backgroundedAt.current ? Date.now() - backgroundedAt.current : 0;
+      if (away >= RELOCK_AFTER_MS) setLocked(true);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
+  return { locked: locked && isBiometricArmed(), unlock: () => setLocked(false), lock: () => setLocked(true) };
 }
 
 export default function BiometricGate({ user, onUnlock, logout }) {
@@ -91,7 +105,7 @@ export default function BiometricGate({ user, onUnlock, logout }) {
   useEffect(() => {
     (async () => {
       const status = await biometricStatus();
-      setLabel(biometryLabel(status.biometryType));
+      setLabel(status.label || biometryLabel(status.biometryType));
       // If the sensor has become unavailable since the lock was switched on (the
       // user removed their fingerprints, say), don't strand them behind it.
       if (!status.available) { onUnlock(); return; }
@@ -172,12 +186,14 @@ export function BiometricSetupPrompt() {
   useBackHandler(show, () => { dismissPrompt(); return true; });
 
   useEffect(() => {
-    if (!isNativeApp() || isBiometricEnabled()) return;
+    // No isNativeApp() gate: biometricStatus() below already reports false on a
+    // platform with no usable sensor, and the browser now has a real one to offer.
+    if (isBiometricEnabled()) return;
     let dismissed = false;
     try { dismissed = localStorage.getItem(PROMPT_DISMISSED_KEY) === "1"; } catch (_) {}
     if (dismissed) return;
     biometricStatus().then((s) => {
-      if (s.available) { setLabel(biometryLabel(s.biometryType)); setShow(true); }
+      if (s.available) { setLabel(s.label || biometryLabel(s.biometryType)); setShow(true); }
     });
   }, []);
 

@@ -1,0 +1,95 @@
+// "Sign in with Face / Fingerprint" on the sign-in screens.
+//
+// This unlocks a session that was REMEMBERED when the user last signed in with the
+// app lock switched on — the app being killed, or the tab closed, leaves that token
+// behind. An explicit Sign out clears it (clearBiometricPrefs → forgetSession), so
+// this is a way back into an interrupted session, never a way around signing out.
+//
+// The button renders nothing at all unless there is something to unlock, which is
+// why it can sit unconditionally in both sign-in forms.
+import React, { useEffect, useState } from "react";
+import { Fingerprint, ScanFace, Loader2, XCircle } from "lucide-react";
+import { useAuth } from "./auth";
+import { api, setToken } from "./api";
+import { biometricSignInStatus, biometricSignIn, forgetSession } from "./biometric";
+
+const NAVY = "#1a3a8f";
+
+export default function BiometricSignIn({ className = "" }) {
+  const { applySession } = useAuth();
+  const [offer, setOffer] = useState(null);   // { label, methods } once we know
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    biometricSignInStatus()
+      .then((s) => { if (!cancelled && s.ok) setOffer(s); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!offer) return null;
+
+  const methods = offer.methods?.length ? offer.methods : [{ key: "platform", label: offer.label }];
+
+  const go = async () => {
+    setBusy(true); setError("");
+    const res = await biometricSignIn();
+    if (!res.ok) {
+      setBusy(false);
+      // A cancel is a choice, not a fault.
+      if (!res.cancelled) setError(res.error || "Could not verify. Try again.");
+      return;
+    }
+    // The token is only as good as the server says it is: it may have expired, or
+    // been revoked by a password change bumping tokenVersion. Prove it with /me
+    // BEFORE handing the app a session, so a dead token drops the user back to the
+    // password form with an explanation instead of into a broken, half-signed-in app.
+    setToken(res.token);
+    try {
+      const user = await api.me();
+      applySession({ token: res.token, user });
+    } catch (e) {
+      setToken(null);
+      await forgetSession();
+      setOffer(null);
+      setBusy(false);
+      setError("That saved sign-in has expired. Please sign in with your password.");
+    }
+  };
+
+  return (
+    <div className={className}>
+      <div className="flex items-center gap-3 py-1">
+        <span className="h-px flex-1 bg-slate-200" />
+        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">or</span>
+        <span className="h-px flex-1 bg-slate-200" />
+      </div>
+      <div className="space-y-2">
+        {methods.map((m) => {
+          const Icon = m.key === "face" || m.key === "iris" ? ScanFace : Fingerprint;
+          return (
+            <button
+              key={m.key}
+              type="button"           /* never submit the password form */
+              onClick={go}
+              disabled={busy}
+              className="press flex w-full items-center justify-center gap-2 rounded-xl border-2 py-3 text-sm font-bold transition hover:bg-slate-50 disabled:opacity-60"
+              style={{ borderColor: NAVY, color: NAVY }}
+            >
+              {busy
+                ? <><Loader2 size={16} className="animate-spin" /> Waiting for you…</>
+                : <><Icon size={17} /> Sign in with {m.label}</>}
+            </button>
+          );
+        })}
+      </div>
+      {error && (
+        <p className="mt-2 flex items-center gap-1.5 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">
+          <XCircle size={13} className="shrink-0" /> {error}
+        </p>
+      )}
+    </div>
+  );
+}

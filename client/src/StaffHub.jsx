@@ -10,7 +10,8 @@ import {
   ClipboardList, Save, History, Building2, FileUp, Sparkles,
   Sun, Sunrise, Sunset, TrendingUp, Timer, Info, Phone,
   CalendarCheck, UserCheck, Layers, Activity, Award, ShieldCheck,
-  BookOpen, Percent, PlayCircle, RefreshCw, MoreHorizontal, MessageSquare, ChevronDown, Loader2, KeyRound, Send, Wallet
+  BookOpen, Percent, PlayCircle, RefreshCw, MoreHorizontal, MessageSquare, ChevronDown, Loader2, KeyRound, Send, Wallet,
+  Fingerprint, ScanFace
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis,
@@ -1344,47 +1345,148 @@ function SummaryScreen({ store, me }) {
 
 // App-lock toggle. Renders nothing on the web (no sensor), and explains itself when
 // the device has biometrics but the user hasn't enrolled any.
+// The app-lock toggle. Shared verbatim by the staff "More" screen and the student
+// "More" screen, so both sides behave identically and there is one implementation
+// to keep correct.
 export function BiometricSetting() {
   const [status, setStatus] = useState(null);
   const [on, setOn] = useState(isBiometricEnabled());
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
+  const [showWhy, setShowWhy] = useState(false);
 
-  useEffect(() => { biometricStatus().then(setStatus); }, []);
-
-  // Not the packaged app: nothing to offer.
-  if (status && status.reason === "not-native") return null;
-  if (!status) return null;
-
-  const label = biometryLabel(status.biometryType);
-  const toggle = async () => {
-    setBusy(true); setNote("");
-    const res = on ? await disableBiometric() : await enableBiometric();
+  const check = useCallback(async () => {
+    setBusy(true);
+    try {
+      setStatus(await biometricStatus());
+    } catch (e) {
+      // Without this catch a throw left `status` null for ever and the row rendered
+      // NOTHING — the same blank space this component has produced three times now,
+      // for three different reasons. A failure must be visible.
+      setStatus({ state: "error", available: false, label: "biometric unlock", detail: String(e?.message || e), reason: "Couldn't check this device. Tap Check again." });
+    }
     setBusy(false);
-    if (res.ok) { setOn(!on); return; }
-    if (res.reason !== "cancelled") setNote(res.reason || "Could not change this setting.");
+  }, []);
+  useEffect(() => { check(); }, [check]);
+
+  // NEVER render nothing. Every hidden state this component has had — "not native",
+  // "no plugin", "no sensor", "the check threw" — has been reported as "the feature
+  // is missing", because an empty space cannot tell you it is empty on purpose.
+  // Even the first paint, before the device has answered, says something.
+  if (!status) {
+    return (
+      <div className="flex items-center gap-2 px-4 py-3.5 text-sm font-semibold text-slate-400">
+        <Loader2 size={15} className="animate-spin" /> Checking this device…
+      </div>
+    );
+  }
+
+  const label = status.label || biometryLabel(status.biometryType);
+  const ready = status.state === "ready";
+  // Whatever the device actually offers. The fallback keeps a single sensible entry
+  // for a platform that reports no specific type (a browser, mainly).
+  const methods = status.methods?.length ? status.methods : [{ key: "platform", label }];
+  const errNote = note ? <p className="mt-2 rounded-lg bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-600">{note}</p> : null;
+
+  const turnOn = async () => {
+    setBusy(true); setNote("");
+    const res = await enableBiometric();
+    setBusy(false);
+    if (res.ok) { setOn(true); return; }
+    // A cancel is a choice, not a fault.
+    if (res.reason !== "cancelled") setNote(res.reason || "Could not turn this on.");
+  };
+  const turnOff = async () => {
+    setBusy(true); setNote("");
+    const res = await disableBiometric();
+    setBusy(false);
+    if (res.ok) { setOn(false); return; }
+    if (res.reason !== "cancelled") setNote(res.reason || "Could not turn this off.");
   };
 
+  /* --- Unavailable: say why, and offer a way to re-check --- */
+  if (!ready) {
+    return (
+      <div className="px-4 py-3.5">
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+          <Fingerprint size={15} className="text-slate-400" /> {label}
+        </span>
+        <span className="mt-0.5 block text-[11px] leading-snug text-slate-400">{status.reason}</span>
+        {/* Enrolling a face or finger happens in the DEVICE's settings, outside this
+            app, so there has to be a way back in that isn't force-quitting. */}
+        <div className="mt-2 flex items-center gap-3">
+          <button onClick={check} disabled={busy}
+            className="press flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600 transition hover:bg-slate-200 disabled:opacity-50">
+            {busy ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Check again
+          </button>
+          {status.detail && (
+            <button onClick={() => setShowWhy(v => !v)} className="text-[11px] font-semibold text-slate-400 underline transition hover:text-slate-600">
+              {showWhy ? "Hide details" : "Why?"}
+            </button>
+          )}
+        </div>
+        {showWhy && status.detail && (
+          <p className="mt-2 rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] leading-snug text-slate-500 ring-1 ring-slate-200">
+            Device reported: {status.detail}
+          </p>
+        )}
+        {errNote}
+      </div>
+    );
+  }
+
+  /* --- Already on: confirm it, and offer to switch it off --- */
+  if (on) {
+    return (
+      <div className="px-4 py-3.5">
+        <div className="flex items-center justify-between gap-3">
+          <span className="flex min-w-0 items-center gap-2">
+            <ShieldCheck size={16} className="shrink-0 text-emerald-600" />
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-slate-700">App lock is on</span>
+              <span className="block text-[11px] leading-snug text-slate-400">
+                You'll be asked for {methods.map(m => m.label).join(" or ")} when the app opens
+              </span>
+            </span>
+          </span>
+          <button onClick={turnOff} disabled={busy}
+            className="press shrink-0 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">
+            {busy ? <Loader2 size={12} className="animate-spin" /> : "Turn off"}
+          </button>
+        </div>
+        {errNote}
+      </div>
+    );
+  }
+
+  /* --- Off: one tappable option per method the device offers --- */
   return (
     <div className="px-4 py-3.5">
-      <div className="flex items-center justify-between">
-        <div className="min-w-0 pr-3">
-          <span className="block text-sm font-semibold capitalize text-slate-700">{label}</span>
-          <span className="block text-[11px] text-slate-400">
-            {status.available ? "Ask for this when you sign in or reopen the app" : "Set up biometrics in your device settings first"}
-          </span>
-        </div>
-        <button
-          onClick={toggle}
-          disabled={busy || !status.available}
-          aria-label={`Toggle ${label}`}
-          className={`relative h-6 w-11 shrink-0 rounded-full transition disabled:opacity-40 ${on ? "" : "bg-slate-200"}`}
-          style={on ? { background: NAVY } : {}}
-        >
-          <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${on ? "left-[22px]" : "left-0.5"}`} />
-        </button>
+      <p className="text-sm font-semibold text-slate-700">Open the app with</p>
+      <p className="mt-0.5 text-[11px] leading-snug text-slate-400">Tap one to switch the app lock on.</p>
+      <div className="mt-2.5 space-y-2">
+        {methods.map((m) => {
+          const Icon = m.key === "face" || m.key === "iris" ? ScanFace : Fingerprint;
+          return (
+            <button key={m.key} onClick={turnOn} disabled={busy}
+              className="press group flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(26,58,143,0.08)" }}>
+                <Icon size={17} style={{ color: NAVY }} />
+              </span>
+              <span className="flex-1 text-sm font-semibold text-slate-700">Open with {m.label}</span>
+              {busy ? <Loader2 size={15} className="animate-spin text-slate-400" /> : <ChevronRight size={16} className="text-slate-300 transition-transform group-hover:translate-x-0.5" />}
+            </button>
+          );
+        })}
       </div>
-      {note && <p className="mt-2 rounded-lg bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-600">{note}</p>}
+      {/* Said plainly, because the options above cannot control this: the OS owns the
+          choice of sensor once more than one is enrolled. */}
+      {methods.length > 1 && (
+        <p className="mt-2 text-[11px] leading-snug text-slate-400">
+          If you've set up more than one, your device chooses which to ask for.
+        </p>
+      )}
+      {errNote}
     </div>
   );
 }
@@ -1867,8 +1969,8 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
             </button>
           </div>
         ))}
-        {/* A real setting, unlike the two above: it drives the app lock. Hidden in
-            a browser, where there is no sensor to ask. */}
+        {/* A real setting, unlike the two above: it drives the app lock. Always
+            renders something — the options, or why they aren't available. */}
         <BiometricSetting />
       </Card>
       <Card className="!p-0">
