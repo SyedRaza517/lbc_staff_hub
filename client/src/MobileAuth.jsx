@@ -11,6 +11,7 @@ import { api } from "./api";
 import { TotpSetup, TotpVerify } from "./TwoFactor";
 import { ForgotPasswordForm } from "./ResetPassword";
 import PhoneShell, { useIsHandset } from "./PhoneShell";
+import useReveal from "./RevealButton";
 import { useBackHandler } from "./backButton";
 import { BrandMark } from "./Brand";
 import {
@@ -101,6 +102,7 @@ function ErrorNote({ children }) {
 
 function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
   const { signIn } = useAuth();
+  const pw = useReveal();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -131,8 +133,11 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
       </Labelled>
 
       <Labelled label="Password" Icon={Lock}>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy}
-          autoComplete="current-password" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+        <div className="relative">
+          <input type={pw.type} value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy}
+            autoComplete="current-password" className={`${inputClass} pr-11`} style={{ "--tw-ring-color": NAVY }} />
+          {pw.button}
+        </div>
       </Labelled>
 
       <ErrorNote>{error}</ErrorNote>
@@ -169,6 +174,8 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
 /* ============================== sign up ============================== */
 
 function SignUp({ goSignIn }) {
+  const pw = useReveal();
+  const pw2 = useReveal();
   const [role, setRole] = useState("staff"); // "staff" | "student"
   const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "", position: "", dept: DEPARTMENTS[0], site: SITES[0], collegeId: "" });
   const [error, setError] = useState("");
@@ -283,11 +290,19 @@ function SignUp({ goSignIn }) {
       {role === "student" && <p className="rounded-xl bg-blue-50 px-3 py-2 text-[11px] leading-relaxed text-blue-700 ring-1 ring-blue-100">Use the email the college has on file for you, so your attendance and results link to your account.</p>}
 
       <Labelled label="Password" Icon={Lock}>
-        <input type="password" value={form.password} onChange={set("password")} disabled={busy} autoComplete="new-password" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+        <div className="relative">
+          <input type={pw.type} value={form.password} onChange={set("password")} disabled={busy} autoComplete="new-password" className={`${inputClass} pr-11`} style={{ "--tw-ring-color": NAVY }} />
+          {pw.button}
+        </div>
       </Labelled>
 
       <Labelled label="Confirm password" Icon={Lock}>
-        <input type="password" value={form.confirmPassword} onChange={set("confirmPassword")} disabled={busy} autoComplete="new-password" className={inputClass} style={{ "--tw-ring-color": NAVY }} />
+        <div className="relative">
+          {/* Its own toggle: someone checking a typo in the first box should not be
+              made to reveal both, and the two are compared, not read together. */}
+          <input type={pw2.type} value={form.confirmPassword} onChange={set("confirmPassword")} disabled={busy} autoComplete="new-password" className={`${inputClass} pr-11`} style={{ "--tw-ring-color": NAVY }} />
+          {pw2.button}
+        </div>
       </Labelled>
 
       <p className="text-[11px] text-slate-400">At least 8 characters. You'll keep this password once approved.</p>

@@ -1,3 +1,4 @@
+import useReveal from "./RevealButton";
 import React, { useState } from "react";
 import { useAuth } from "./auth";
 import { TotpSetup, TotpVerify } from "./TwoFactor";
@@ -9,9 +10,10 @@ const NAVY = "#1a3a8f", NAVY_DARK = "#14306f", MAROON = "#9e1b32";
 
 export default function Login({ onBack }) {
   const { login, applySession, error } = useAuth();
-  const [email, setEmail] = useState("admin@lbc.ac.uk");
-  const [password, setPassword] = useState("password123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const pw = useReveal();
   // Admin accounts don't use 2FA by default, but one can turn it on — so this
   // screen has to be able to finish a two-step sign-in too.
   const [challenge, setChallenge] = useState(null);
@@ -85,8 +87,9 @@ export default function Login({ onBack }) {
             <label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Password</label>
             <div className="group relative mt-1">
               <Lock size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-blue-500" />
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-3 text-sm outline-none transition-all duration-200 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100" />
+              <input type={pw.type} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-11 text-sm outline-none transition-all duration-200 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100" />
+              {pw.button}
             </div>
           </div>
           {error && <p className="slide-down rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 ring-1 ring-rose-100">{error}</p>}
@@ -101,13 +104,6 @@ export default function Login({ onBack }) {
         </div>
         )}
 
-        {!challenge && !forgot && (
-        <div className="fade-up mt-5 rounded-xl border border-slate-100 bg-gradient-to-br from-slate-50 to-slate-100/60 p-3 text-[11px] text-slate-500" style={{ animationDelay: "0.2s" }}>
-          <p className="font-bold text-slate-600">Demo accounts (password: <code>password123</code>)</p>
-          <p className="mt-1">Admin — admin@lbc.ac.uk</p>
-          <p>Staff — j.whitfield@lbc.ac.uk</p>
-        </div>
-        )}
       </div>
     </div>
   );
