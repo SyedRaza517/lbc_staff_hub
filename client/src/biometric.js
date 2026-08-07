@@ -28,6 +28,13 @@ const ENABLED_KEY = "lbc_biometric_enabled";
 // browser. It identifies which platform credential to ask for later; the private key
 // never leaves the authenticator, so this is not a secret.
 const CRED_KEY = "lbc_biometric_credential";
+// Who the remembered session and credential belong to.
+//
+// Without this the keys are device-global and nothing ties them to an account, so on
+// a shared machine user A could arm the lock, user B sign in and be re-remembered
+// under A's credential, and A then unlock straight into B's session. The sign-in
+// button also refuses to appear for an address that isn't this one.
+const OWNER_KEY = "lbc_biometric_owner";
 // Where the remembered session lives. Capacitor Preferences is app-private storage
 // (Android SharedPreferences / iOS UserDefaults) — another app cannot read it, though
 // it is not the Keychain, which is why the token is only ever put there when the user
@@ -65,8 +72,14 @@ const webSession = {
   remove: () => { try { localStorage.removeItem(SESSION_KEY); } catch (_) {} },
 };
 
-export async function rememberSession(token) {
+export const storedOwner = () => { try { return localStorage.getItem(OWNER_KEY) || ""; } catch (_) { return ""; } };
+const setStoredOwner = (owner) => {
+  try { if (owner) localStorage.setItem(OWNER_KEY, String(owner).trim().toLowerCase()); else localStorage.removeItem(OWNER_KEY); } catch (_) {}
+};
+
+export async function rememberSession(token, owner) {
   if (!token) return false;
+  if (owner) setStoredOwner(owner);
   const P = await prefs();
   if (!P) return webSession.set(token);
   try { await P.set({ key: SESSION_KEY, value: token }); return true; } catch (_) { return false; }
@@ -87,6 +100,7 @@ export const markRestored = () => { restoredFlag = true; };
 export const consumeRestored = () => { const v = restoredFlag; restoredFlag = false; return v; };
 
 export async function forgetSession() {
+  setStoredOwner("");
   const P = await prefs();
   if (!P) { webSession.remove(); return; }
   try { await P.remove({ key: SESSION_KEY }); } catch (_) {}
@@ -346,7 +360,26 @@ const AUTH_ERRORS = {
 // Codes that mean "the user chose not to", which must never be shown as an error.
 const CANCEL_CODES = new Set(["userCancel", "appCancel", "systemCancel", "userFallback"]);
 
+// True while an OS credential prompt is on screen.
+//
+// The prompt is a separate system surface — Android's Credential Manager sheet, iOS's
+// LocalAuthentication dialog — and showing it can push the web page to
+// visibilityState "hidden". To the app-lock's resume listener that is indistinguishable
+// from the user leaving, so without this flag a slow verification re-locks the app at
+// the exact moment it succeeds, and the user is bounced back to the lock screen.
+let verifyInFlight = false;
+export const isVerifyInFlight = () => verifyInFlight;
+
 export async function verifyBiometric({ reason = "Unlock Staff Hub" } = {}) {
+  verifyInFlight = true;
+  try {
+    return await runVerify(reason);
+  } finally {
+    verifyInFlight = false;
+  }
+}
+
+async function runVerify(reason) {
   // Browser: WebAuthn drives the very same sensor, via the OS's own prompt.
   if (!isNativeApp()) {
     if (!webAuthnSupported()) return { ok: false, error: "Biometric unlock isn't available in this browser." };
@@ -403,12 +436,14 @@ export const setBiometricEnabled = (on) => {
  * INTERRUPTED — the app killed, the tab closed — never a way around signing out.
  */
 export async function biometricSignInStatus() {
-  if (!isBiometricEnabled()) return { ok: false };
+  if (!isBiometricArmed()) return { ok: false };
   const token = await storedSession();
   if (!token) return { ok: false };
   const s = await biometricStatus();
   if (!s.available) return { ok: false };
-  return { ok: true, label: s.label, methods: s.methods || [] };
+  // The owner travels with the offer so the sign-in screen can name the account and
+  // refuse to show the button for a different address.
+  return { ok: true, label: s.label, methods: s.methods || [], owner: storedOwner() };
 }
 
 /** Verify, then hand the remembered token back to the caller. */
@@ -416,7 +451,13 @@ export async function biometricSignIn() {
   const token = await storedSession();
   if (!token) return { ok: false, error: "There's no saved sign-in on this device yet." };
   const res = await verifyBiometric({ reason: "Sign in to Staff Hub" });
-  if (!res.ok) return { ok: false, cancelled: res.cancelled, error: res.error };
+  if (!res.ok) return { ok: false, cancelled: res.cancelled, code: res.code, error: res.error };
+  // The user has JUST proved themselves. Without this the app lock cannot tell that
+  // apart from a fresh password sign-in, so it locked immediately and fired a second
+  // prompt seconds after the first — and cancelling that one left a blank lock screen
+  // whose only exit deleted the credential. auth.jsx's launch restore has always
+  // marked it; this path was added later and did not.
+  markRestored();
   return { ok: true, token };
 }
 
@@ -434,6 +475,7 @@ export const clearBiometricPrefs = () => {
   try {
     localStorage.removeItem(ENABLED_KEY);
     localStorage.removeItem(CRED_KEY);
+    localStorage.removeItem(OWNER_KEY);
     localStorage.removeItem("lbc_biometric_prompt_dismissed");
   } catch (_) {}
   // Fire-and-forget: the caller is signing out and must not wait on storage.
@@ -444,7 +486,24 @@ export const clearBiometricPrefs = () => {
  * Turn the lock on. Verifies once first — enabling a lock the device can't
  * actually satisfy would shut the user out of their own app.
  */
-export async function enableBiometric({ name } = {}) {
+/**
+ * Turn the lock off WITHOUT a verification, and forget the remembered session.
+ *
+ * The escape hatch for a credential the authenticator no longer holds — after a
+ * Windows Hello PIN reset, a changed Android screen lock, or a recreated browser
+ * profile. Every check then fails with a 60-second timeout reported as a "cancel",
+ * so the user sits behind a gate that can never open. This costs them the session
+ * (they sign in with their password again), which is the correct trade: a lock you
+ * cannot satisfy is a lockout, and the account itself is unaffected.
+ */
+export async function resetBiometric() {
+  setBiometricEnabled(false);
+  try { localStorage.removeItem(CRED_KEY); } catch (_) {}
+  await forgetSession();
+  return { ok: true };
+}
+
+export async function enableBiometric({ name, owner } = {}) {
   const status = await biometricStatus();
   if (!status.available) return { ok: false, reason: status.reason };
 
@@ -452,7 +511,7 @@ export async function enableBiometric({ name } = {}) {
   // runs the same face/finger/PIN check before it will hand back a credential, so
   // a separate verify step would ask the user twice for nothing.
   if (status.backend === "web") {
-    try { await webEnrol(name); }
+    try { await webEnrol(name || owner); }
     catch (e) { const m = webAuthError(e); return { ok: false, reason: m.cancelled ? "cancelled" : m.error }; }
     setBiometricEnabled(true);
     // Remember the session so the SIGN-IN screen can offer the button too, not just
@@ -460,7 +519,7 @@ export async function enableBiometric({ name } = {}) {
     try {
       const { getToken } = await import("./api");
       const t = getToken();
-      if (t) await rememberSession(t);
+      if (t) await rememberSession(t, owner);
     } catch (_) { /* remembering is a convenience, never a reason to fail the toggle */ }
     return { ok: true, label: status.label };
   }
@@ -482,6 +541,18 @@ export async function enableBiometric({ name } = {}) {
 // phone can't simply switch the lock off.
 export async function disableBiometric() {
   const res = await verifyBiometric({ reason: "Confirm it's you to turn off app lock" });
+  // Turning the lock OFF must not require a check that can never succeed. If the
+  // credential has been destroyed out from under us — a Windows Hello PIN reset, a
+  // changed Android screen lock, a recreated browser profile — verification fails for
+  // ever, and demanding it here left the lock permanently on AND permanently
+  // unsatisfiable. Removing a protection you can no longer use is always allowed;
+  // the session itself is still behind the password.
+  if (!res.ok && !res.cancelled && !isNativeApp() && !storedCredential()) {
+    setBiometricEnabled(false);
+    try { localStorage.removeItem(CRED_KEY); } catch (_) {}
+    await forgetSession();
+    return { ok: true, recovered: true };
+  }
   if (!res.ok) return { ok: false, reason: res.cancelled ? "cancelled" : res.error };
   setBiometricEnabled(false);
   // Drop the browser credential too, so turning the lock back on later registers a

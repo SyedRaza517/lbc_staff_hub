@@ -811,7 +811,7 @@ function MoreScreen({ user, logout, setScreen }) {
     if (nw.length < 8) { setPwErr("New password must be at least 8 characters."); return; }
     if (nw !== cf) { setPwErr("New passwords do not match."); return; }
     setPwBusy(true);
-    try { const res = await api.changePassword(cur, nw); if (res?.token) setToken(res.token); setCur(""); setNw(""); setCf(""); setPwOk(true); setOpenPw(false); }
+    try { const res = await api.changePassword(cur, nw); if (res?.token) setToken(res.token); try { const m = await import("./rememberEmail"); m.forgetRememberedPassword(); } catch (_) {} setCur(""); setNw(""); setCf(""); setPwOk(true); setOpenPw(false); }
     catch (e) { setPwErr(e.message || "Could not change your password."); }
     finally { setPwBusy(false); }
   };
@@ -846,8 +846,8 @@ function MoreScreen({ user, logout, setScreen }) {
 
       {/* Settings rows */}
       <Card className="!p-0 overflow-hidden">
-        {/* Renders nothing on the web or on a device with no enrolled biometrics. */}
-        <BiometricSetting />
+        {/* Always renders something — the options, or why they aren't available. */}
+        <BiometricSetting owner={user.email} />
         <Row Icon={KeyRound} label="Change password" sub="Update your sign-in password" onClick={() => setOpenPw(v => !v)} open={openPw} />
         {openPw && (
           <div className="space-y-2.5 border-t border-slate-100 bg-slate-50 p-3.5">

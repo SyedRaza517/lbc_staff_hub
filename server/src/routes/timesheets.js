@@ -62,21 +62,29 @@ router.get("/", requireAuth, async (req, res) => {
     if (!isMonth(req.query.month)) return res.status(400).json({ error: "month must be YYYY-MM" });
     where.date = { startsWith: String(req.query.month) };
   }
-  if (isAdmin) {
+  // "See everyone" is now OPT-IN, not the default for an admin.
+  //
+  // The admin branch used to fire whenever no staffId was given — including for the
+  // STAFF APP's own "My Timesheet" screen, which sends only a month. So a finance
+  // admin's personal timesheet showed the whole college's hours; their own drafts
+  // vanished (admins never see drafts) so they could never send their own month; and
+  // colleagues' bounced-back entries rendered with Edit and Delete beside them.
+  const wantsEveryone = isAdmin && (req.query.staffId || req.query.scope === "all");
+  if (wantsEveryone) {
     if (req.query.staffId) where.staffId = String(req.query.staffId);
     // The finance review screen shows everything that has left "draft" — pending
     // (submitted), approved, and bounced-back (changes_requested) — so both the
     // approval queue and the history are visible. It NEVER shows private drafts,
-    // whether or not a staffId is given. (An `?all` escape hatch used to bypass
-    // this and return every staff member's unsent drafts — removed.)
+    // whether or not a staffId is given.
     where.status = { in: ["submitted", "approved", "changes_requested"] };
   } else {
-    where.staffId = req.user.id; // staff: always scoped to self
+    where.staffId = req.user.id; // everyone, admin included, defaults to their own
   }
+  const isAdminView = wantsEveryone;
   const rows = await prisma.timesheetEntry.findMany({
     where,
     orderBy: [{ date: "desc" }, { startTime: "asc" }],
-    ...(isAdmin ? { include: { staff: { select: { name: true, dept: true, initials: true, colour: true } } } } : {}),
+    ...(isAdminView ? { include: { staff: { select: { name: true, dept: true, initials: true, colour: true } } } } : {}),
   });
   res.json(rows.map(sTimesheet));
 });
@@ -158,6 +166,14 @@ router.post("/review", requireAuth, requirePage("timesheets"), async (req, res) 
   if (note != null && typeof note !== "string") return res.status(400).json({ error: "note must be text" });
   if (note && note.length > 2000) return res.status(400).json({ error: "note is too long (2000 characters maximum)" });
   if (decision === "changes_requested" && !(note && note.trim())) return res.status(400).json({ error: "Add a comment explaining what needs changing" });
+
+  // Nobody signs off their own hours. The screen groups by staff member and rendered
+  // an Approve button on every group including the reviewer's own, so a finance admin
+  // could log 180 hours, send them, and approve them — stamped reviewedBy themselves,
+  // with no second pair of eyes anywhere in the flow.
+  if (staffId === req.user.id) {
+    return res.status(403).json({ error: "Your own timesheet has to be reviewed by someone else." });
+  }
 
   const staff = await prisma.staff.findUnique({ where: { id: staffId } });
   if (!staff) return res.status(404).json({ error: "Unknown staff member" });

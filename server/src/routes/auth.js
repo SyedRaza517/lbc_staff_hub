@@ -119,7 +119,10 @@ const CODE_LOCK_MS = 15 * 60 * 1000;
 function codeState(staffId) {
   const now = Date.now();
   let s = CODE_ATTEMPTS.get(staffId);
+  // Same lock-before-window rule as rateState — see the note there.
+  if (s && s.lockedUntil > now) return s;
   if (!s || now - s.first > CODE_WINDOW_MS) { s = { count: 0, first: now, lockedUntil: 0 }; CODE_ATTEMPTS.set(staffId, s); }
+  sweep(CODE_ATTEMPTS, now, CODE_WINDOW_MS);
   return s;
 }
 // Returns a minutes-remaining number when locked, otherwise null.
@@ -139,14 +142,51 @@ const clearCodeAttempts = (staffId) => CODE_ATTEMPTS.delete(staffId);
 function rateState(key) {
   const now = Date.now();
   let s = ATTEMPTS.get(key);
+  // Check the LOCK before the window. `first` is stamped on the first attempt but
+  // `lockedUntil` is set on the last, so resetting purely on the window threw the
+  // lockout away with it: one failure at 09:00:00 and seven at 09:14:50 locked the
+  // account until 09:29:50, and the very next attempt at 09:15:01 cleared the lock
+  // 14 minutes early. It also allowed a 15-attempt burst across the boundary against
+  // an advertised cap of 8, and made the "try again in N minutes" figure untrue.
+  if (s && s.lockedUntil > now) return s;
   if (!s || now - s.first > WINDOW_MS) { s = { count: 0, first: now, lockedUntil: 0 }; ATTEMPTS.set(key, s); }
+  sweep(ATTEMPTS, now, WINDOW_MS);
   return s;
+}
+
+// Reclaim expired entries.
+//
+// These maps were only ever pruned when the SAME key came back, so unauthenticated
+// traffic with random addresses grew them without bound — two entries per login
+// attempt, one per reset request, until the container hit its memory ceiling and
+// restarted. The sign-up limiter already sweeps on a size trigger for exactly this
+// reason; the auth limiters did not. Swept on read, so a blocked caller cannot stop
+// the tidying by going quiet.
+const SWEEP_ABOVE = 5000;
+// windowMs is per-map: RESET_ATTEMPTS counts over an hour, the others over 15
+// minutes. Sweeping them all on the shortest window would discard a reset counter
+// 45 minutes early and let someone past the 5-per-hour cap — a sweep meant to bound
+// memory must not quietly widen a rate limit.
+function sweep(map, now, windowMs) {
+  if (map.size <= SWEEP_ABOVE) return;
+  for (const [k, v] of map) {
+    const dead = (!v.lockedUntil || v.lockedUntil < now) && now - v.first > windowMs;
+    if (dead) map.delete(k);
+  }
 }
 
 // POST /api/auth/login
 router.post("/login", async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: "Email and password required" });
+  // TYPE-check, not just truthiness. `{}` is truthy, and bcrypt.compareSync throws on
+  // a non-string — which produced a 500 when the account existed and a 401 when it
+  // didn't. That is a clean account-existence oracle, and because the throw happened
+  // before the counters below were incremented, NEITHER rate limiter ever fired: the
+  // whole staff and student roster could be enumerated at full speed.
+  if (typeof email !== "string" || typeof password !== "string") {
+    return res.status(400).json({ error: "Email and password must be text" });
+  }
 
   const key = keyFor(req, email);
   const s = rateState(key);
@@ -493,8 +533,9 @@ function resetRateLimited(req, email) {
   const key = `${req.ip}|${String(email || "").toLowerCase()}`;
   const now = Date.now();
   let s = RESET_ATTEMPTS.get(key);
-  if (!s || now - s.first > RESET_WINDOW_MS) { s = { count: 0, first: now }; RESET_ATTEMPTS.set(key, s); }
+  if (!s || now - s.first > RESET_WINDOW_MS) { s = { count: 0, first: now, lockedUntil: 0 }; RESET_ATTEMPTS.set(key, s); }
   s.count += 1;
+  sweep(RESET_ATTEMPTS, now, RESET_WINDOW_MS);
   return s.count > RESET_MAX_PER_WINDOW;
 }
 
@@ -509,10 +550,15 @@ router.post("/forgot-password", async (req, res) => {
 
   const staff = await prisma.staff.findUnique({ where: { email } });
   if (staff) {
-    // Any earlier outstanding link for this account stops working now, so a
+    // Any earlier outstanding RESET link for this account stops working now, so a
     // forwarded or intercepted old email can't be used later.
+    //
+    // Scoped to purpose "reset" deliberately. Without the filter this also burned the
+    // 7-day INVITE link — so someone whose invitation email was slow, and who tapped
+    // "Forgotten your password?" in the meantime, destroyed the only working way into
+    // their account. (The other half of that bug is fixed in /reset-password below.)
     await prisma.passwordReset.updateMany({
-      where: { staffId: staff.id, usedAt: null },
+      where: { staffId: staff.id, purpose: "reset", usedAt: null },
       data: { usedAt: new Date() },
     });
 
@@ -619,6 +665,12 @@ router.post("/reset-password", async (req, res) => {
       data: {
         passwordHash: hashPassword(newPassword),
         mustChangePassword: false,
+        // Choosing a password IS activating the account. Without this an invited
+        // member of staff who reset their password was told "you can now sign in",
+        // and then rejected at login for ever — /login refuses pendingActivation
+        // accounts, and nothing else in this flow cleared the flag. Their only
+        // remaining route in (the invitation link) had just been burned above.
+        pendingActivation: false,
         // Sign every existing session out. A reset is often prompted by a
         // suspected compromise, so leaving old sessions alive would defeat it.
         tokenVersion: { increment: 1 },

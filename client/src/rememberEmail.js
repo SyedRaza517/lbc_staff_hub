@@ -1,50 +1,89 @@
 // Remembering the sign-in details, so returning users don't retype them.
 //
-// TWO SEPARATE OPT-INS, because they carry very different risk:
+// The email and password are stored TOGETHER, as one record keyed to the address they
+// belong to. They were separate keys with one tickbox, which desynced in a way that
+// leaked a secret: teacher A signs in and signs out; teacher B opens the app, sees A's
+// address with a filled password box, and either reads A's password through the reveal
+// button or overwrites the address and re-saves B's email against A's password. One
+// record with the owner baked in makes that state unrepresentable.
 //
-//   email     Harmless. An address is not a secret, and it is on every register and
-//             email footer in the college already.
+// WHAT STORING A PASSWORD HERE MEANS — chosen deliberately, not by accident:
 //
-//   password  A REAL SECRET, and this stores it in plain text.
+//   • Plain text. Anything that can run script on this origin can read it. Obfuscating
+//     (base64, a fixed XOR key) would be worse than nothing: the key ships in the same
+//     bundle, so it stops nobody and only hides the risk from a future reviewer.
+//   • It survives sign-out. That is the point — signing out and retyping would defeat
+//     the feature — so on a shared machine the address stays on screen. The password
+//     is NOT revealable until the user retypes it (see the login screens), so the next
+//     person cannot read it, and changing the address clears it.
+//   • It is cleared the moment it can no longer be right: a password change, a reset,
+//     account deletion, or a 401 on that address.
 //
-// What storing the password actually means — decided deliberately, not by accident:
-//
-//   • It sits in localStorage/WebView storage in plain text. Anything that can run
-//     script on this origin can read it. One XSS anywhere in the app stops being
-//     "someone reads this session" and becomes "someone has this person's password",
-//     which they may well have reused elsewhere.
-//   • It SURVIVES SIGN OUT. That is the point of the feature — signing out and then
-//     having to retype would defeat it — but it means "Sign out" no longer clears
-//     this device. On a shared machine the next person gets a filled-in password box.
-//   • Obfuscating it (base64, a fixed XOR key) would be worse than doing nothing:
-//     the key ships in the same bundle, so it stops nobody and only makes the risk
-//     harder to see in a review.
-//
-// It is OFF by default and each tickbox is independent, so nobody gets this without
-// choosing it, and unticking removes what was stored immediately.
-//
-// THE SAFER PATH, already built and preferred where it is available: turn on the
-// biometric app lock (More → Preferences). The sign-in screen then offers "Sign in
-// with Face / Fingerprint", which unlocks a remembered SESSION — a token that
-// expires on its own and that the server can revoke by bumping tokenVersion. That
-// gives the same one-tap convenience without a reusable password sitting on disk.
-const EMAIL_KEY = "lbc_remembered_email";
-const PW_KEY = "lbc_remembered_password";
+// THE SAFER PATH, already built: turn on the biometric app lock (More → Preferences).
+// The sign-in screen then offers "Sign in with Face / Fingerprint", which unlocks a
+// remembered SESSION — a token that expires on its own and that the server can revoke.
+// Same one-tap result, no reusable password on disk.
+const KEY = "lbc_remembered_login";
+// The previous email-only key. Read once for prefill so existing users don't lose
+// their address, but it deliberately does NOT tick the box: everyone who had the old
+// email-only "remember me" must opt in to password storage explicitly, rather than
+// being silently upgraded into it by a relabelled tickbox.
+const LEGACY_EMAIL_KEY = "lbc_remembered_email";
 
-const read = (key) => { try { return localStorage.getItem(key) || ""; } catch (_) { return ""; } };
-const write = (key, value) => {
+const readRecord = () => {
   try {
-    if (value) localStorage.setItem(key, value); else localStorage.removeItem(key);
-  } catch (_) { /* private browsing / storage disabled — remembering is optional */ }
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const r = JSON.parse(raw);
+      if (r && typeof r.email === "string") return { email: r.email, password: typeof r.password === "string" ? r.password : "" };
+    }
+    const legacy = localStorage.getItem(LEGACY_EMAIL_KEY);
+    if (legacy) return { email: legacy, password: "" };
+  } catch (_) { /* private browsing, or a corrupt record — fall through to nothing */ }
+  return { email: "", password: "" };
 };
 
-export const rememberedEmail = () => read(EMAIL_KEY);
-export const setRememberedEmail = (email) => write(EMAIL_KEY, String(email || "").trim().toLowerCase());
+export const rememberedEmail = () => readRecord().email;
+export const rememberedPassword = () => readRecord().password;
 
-export const rememberedPassword = () => read(PW_KEY);
-// Not trimmed or lower-cased: a password's whitespace and case are significant.
-export const setRememberedPassword = (password) => write(PW_KEY, password ? String(password) : "");
+/**
+ * Save (or clear) both together. Call this only AFTER the server has accepted the
+ * credentials — saving first persisted typos and, worse, kept a temporary password
+ * that the forced-change gate had already replaced, so the form later prefilled a
+ * dead password as dots and the user locked themselves out retrying it.
+ */
+export function setRememberedLogin(email, password) {
+  const e = String(email || "").trim().toLowerCase();
+  try {
+    localStorage.removeItem(LEGACY_EMAIL_KEY);   // migrate off the old key
+    if (!e) { localStorage.removeItem(KEY); return; }
+    localStorage.setItem(KEY, JSON.stringify({ email: e, password: password ? String(password) : "" }));
+  } catch (_) { /* remembering is optional */ }
+}
 
-// Wipe both. Exported so a "forget this device" control can be added later without
-// callers needing to know the key names.
-export const forgetRememberedLogin = () => { write(EMAIL_KEY, ""); write(PW_KEY, ""); };
+/** Forget everything. Safe to call unconditionally. */
+export const forgetRememberedLogin = () => {
+  try { localStorage.removeItem(KEY); localStorage.removeItem(LEGACY_EMAIL_KEY); } catch (_) {}
+};
+
+/**
+ * Drop only the stored PASSWORD, keeping the address.
+ *
+ * Used when the password is known to be stale but the person is unchanged — after a
+ * password change or reset, or a 401 for that address. Keeping the email means the
+ * next sign-in is still half-filled, which is the harmless half of the feature.
+ */
+export function forgetRememberedPassword() {
+  const { email } = readRecord();
+  if (email) setRememberedLogin(email, ""); else forgetRememberedLogin();
+}
+
+/**
+ * True when the stored password belongs to the address currently in the box. The
+ * login screens use this to decide whether to prefill at all, so an address the user
+ * has edited never carries someone else's secret.
+ */
+export const passwordMatchesEmail = (email) => {
+  const r = readRecord();
+  return Boolean(r.password) && r.email === String(email || "").trim().toLowerCase();
+};

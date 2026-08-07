@@ -26,10 +26,16 @@ export default function DeleteAccount({ user, onCancel }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
-  // Two-factor is switched off server-side (TOTP_ENFORCED), and there is no longer
-  // any UI to enrol an authenticator — so demanding a code here locked legacy
-  // totpEnabled accounts out of deleting themselves, which the app stores require.
-  const needsCode = false;
+  // Driven by SERVER truth, not by an assumption about TOTP_ENFORCED.
+  //
+  // The server gates the code on `totpEnabled` alone — an account that deliberately
+  // enrolled is always challenged, regardless of that switch. Hard-coding false here
+  // meant such an account got "Enter the current code from your authenticator app"
+  // with no code field on screen: deletion was impossible and the error unactionable,
+  // which is the exact App Store requirement this screen exists to satisfy. The
+  // comment claimed it fixed a lockout; it created one. ResetPassword.jsx already
+  // does this correctly by asking the server.
+  const needsCode = Boolean(user?.totpEnabled);
   const ready = password.length > 0 && confirm.trim().toUpperCase() === "DELETE" && (!needsCode || code.length === 6);
 
   const submit = async (e) => {
@@ -38,6 +44,9 @@ export default function DeleteAccount({ user, onCancel }) {
     setBusy(true);
     try {
       await api.deleteAccount(password, confirm.trim().toUpperCase(), needsCode ? code : undefined);
+      // The account is gone; leaving its address and password on the device would be
+      // personal data outliving the deletion that was meant to remove it.
+      try { const m = await import("./rememberEmail"); m.forgetRememberedLogin(); } catch (_) {}
       setDone(true);
       // Give the confirmation a moment to be read, then drop the session.
       setTimeout(() => logout(), 2600);

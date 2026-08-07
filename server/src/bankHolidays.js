@@ -21,7 +21,19 @@ const firstMondayOf = (year, month) => { const d = mkUTC(year, month, 1); return
 const lastMondayOf = (year, month) => { const d = mkUTC(year, month + 1, 0); return addDays(d, -((d.getUTCDay() + 6) % 7)); };
 const substitute = (d) => { const wd = d.getUTCDay(); return wd === 6 ? addDays(d, 2) : wd === 0 ? addDays(d, 1) : d; };
 
-// The 8 England & Wales bank holiday dates ('YYYY-MM-DD') for a year.
+// One-off royal bank holidays, which no rule can derive.
+//
+// The generator computes the standard 8 correctly, but Parliament grants extra days
+// for events like a jubilee or a coronation, and moves the spring holiday to suit.
+// Without these, backfilling historical leave over-charges staff: 30 May – 3 Jun 2022
+// came out as 4 chargeable days when only Tuesday 31 May was actually workable.
+// Verified against gov.uk. Add future one-offs here as they are announced.
+const ONE_OFFS = {
+  2022: { add: ["2022-06-02", "2022-06-03"], remove: ["2022-05-30"] },  // Platinum Jubilee
+  2023: { add: ["2023-05-08"], remove: [] },                            // Coronation
+};
+
+// The England & Wales bank holiday dates ('YYYY-MM-DD') for a year — normally 8.
 function ukBankHolidays(year) {
   const easter = easterSunday(year);
   const dow25 = mkUTC(year, 11, 25).getUTCDay();
@@ -29,7 +41,7 @@ function ukBankHolidays(year) {
   if (dow25 === 6) { xmasDay = 27; boxDay = 28; }
   else if (dow25 === 0) { xmasDay = 27; boxDay = 26; }
   else if (dow25 === 5) { boxDay = 28; }
-  return [
+  const base = [
     substitute(mkUTC(year, 0, 1)),
     addDays(easter, -2),
     addDays(easter, 1),
@@ -39,6 +51,9 @@ function ukBankHolidays(year) {
     mkUTC(year, 11, xmasDay),
     mkUTC(year, 11, boxDay),
   ].map(iso);
+  const oneOff = ONE_OFFS[year];
+  if (!oneOff) return base;
+  return [...base.filter((d) => !oneOff.remove.includes(d)), ...oneOff.add].sort();
 }
 
 // Days actually charged against the bookable allowance for an inclusive [start,end]
@@ -50,8 +65,23 @@ function ukBankHolidays(year) {
 // Year must charge each year the days it actually uses — attributing the whole
 // booking to its start year let one 20-day entitlement cover a run of leave that
 // mostly fell in the following year.
+// A hard ceiling on the range this will walk.
+//
+// This is an O(days) synchronous loop that also builds a bank-holiday table per year
+// in the span, and Node is single-threaded. An unbounded range is therefore a total
+// outage, not a slow request: "2026-08-10" → "9999-12-31" is 2,016,373 days, measured
+// at 8.5 SECONDS of fully blocked event loop on a dev machine — and the approval path
+// re-walks the range once per year spanned (7,974 of them), which is hours.
+//
+// The route layer rejects long ranges with a readable message; this exists so that a
+// caller which forgets to cannot take the API down. Returning 0 is deliberate: every
+// caller already treats 0 as "nothing chargeable", so a slipped-through absurd range
+// degrades to a harmless no-op rather than a crash.
+const MAX_SPAN_DAYS = 800;
+
 function chargeableDays(start, end, year) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) return 0;
+  if (spanDays(start, end) > MAX_SPAN_DAYS) return 0;
   const y0 = Number(start.slice(0, 4)), y1 = Number(end.slice(0, 4));
   const set = new Set();
   for (let y = y0; y <= y1; y++) for (const d of ukBankHolidays(y)) set.add(d);
@@ -84,4 +114,13 @@ function bankHolidayCount(year) {
   return ukBankHolidays(year).length;
 }
 
-module.exports = { ukBankHolidays, chargeableDays, bankHolidayCount, yearsSpanned };
+// Inclusive day count between two YYYY-MM-DD dates, computed arithmetically rather
+// than by walking — so it is safe to call on a range before deciding whether the
+// range is safe to walk.
+function spanDays(start, end) {
+  const a = Date.parse(`${start}T00:00:00Z`), b = Date.parse(`${end}T00:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
+  return Math.floor((b - a) / 86400000) + 1;
+}
+
+module.exports = { ukBankHolidays, chargeableDays, bankHolidayCount, yearsSpanned, spanDays, MAX_SPAN_DAYS };

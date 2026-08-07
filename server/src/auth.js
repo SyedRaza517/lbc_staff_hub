@@ -120,4 +120,41 @@ function hasPage(user, pages) {
   return wanted.some((p) => allowed.includes(p));
 }
 
-module.exports = { hashPassword, verifyPassword, signToken, signStudentToken, requireAuth, requireAdmin, requireStudent, requireSuperAdmin, requirePage, requireAnyPage, hasPage, SECRET };
+// May `actor` (req.user) act ON this staff row — edit it, delete it, reset its
+// password, strip its second factor, re-send its invitation?
+//
+// RANK, not merely "is the target the Super Admin". The previous guard protected
+// exactly one row, which left every OTHER administrator open to takeover by any
+// colleague holding a single narrow page:
+//
+//   • an admin with only "passwords" could PUT /api/passwords/staff/<anyAdmin> and
+//     own that account outright, in one request;
+//   • an admin with only "staff" could strip a colleague admin's 2FA, repoint their
+//     email at their own inbox, and run a password reset.
+//
+// Either way they inherit every page that account holds. The rule is therefore: you
+// may only act on an account whose authority your own already covers.
+function outranks(actor, target) {
+  if (!actor || !target) return false;
+  if (actor.id === target.id) return true;                 // acting on yourself
+  if (actor.isSuperAdmin) return true;                     // the Super Admin outranks all
+  if (target.isSuperAdmin) return false;                   // and only they outrank one
+  if (target.accountRole !== "ADMIN") return true;         // a plain staff member
+  // Both are admins. The actor must hold every page the target holds.
+  const actorPages = actor.adminPages;                     // already parsed by sStaff; null = unrestricted
+  if (actorPages == null) return true;                     // unrestricted actor covers anything
+  const { parseAdminPages } = require("./serializers");
+  const targetPages = parseAdminPages(target.adminPages);  // raw DB row, still a JSON string
+  if (targetPages == null) return false;                   // target unrestricted, actor is not
+  return targetPages.every((p) => actorPages.includes(p));
+}
+
+// Express-friendly wrapper: returns an error MESSAGE when the action is refused, or
+// null when it is allowed — matching how the staff routes already read.
+function blockedByRank(actor, target) {
+  if (outranks(actor, target)) return null;
+  if (target?.isSuperAdmin) return "Only a Super Admin can change or remove the Super Admin account";
+  return "You can't change an administrator whose access is broader than your own";
+}
+
+module.exports = { hashPassword, verifyPassword, signToken, signStudentToken, requireAuth, requireAdmin, requireStudent, requireSuperAdmin, requirePage, requireAnyPage, hasPage, outranks, blockedByRank, SECRET };

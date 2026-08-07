@@ -89,7 +89,13 @@ export function useApiStore(notify, user) {
       // (Vercel client ahead of the Render server), it must not break the rest.
       try { setCohorts(await api.listCohorts()); } catch (_) { setCohorts([]); }
       try { setTerms(await api.listTerms()); } catch (_) { setTerms([]); }
-    } catch (e) { notify?.(e.message || "Failed to load registers", "error"); }
+    } catch (e) {
+      // Tolerate a 403 silently, exactly as refreshAssessments does. AdminKPI calls
+      // this on mount, and hndLoaded is set even on failure, so the focus/visibility
+      // refetch re-fired it — giving a KPI-only admin a red "You don't have access to
+      // this section" toast every single time they switched back to the tab.
+      if (e?.status !== 403) notify?.(e.message || "Failed to load registers", "error");
+    }
     setHndLoaded(true);
   }, [notify, semesterId]);
 
@@ -102,13 +108,24 @@ export function useApiStore(notify, user) {
   //   • 20 holiday allowance — the days a staff member can actually book.
   // Bank holidays never draw down the bookable 20; they live in their own counter.
   const thisYear = Number(todayISO().slice(0, 4));
-  // A generous span: chargeableDays consults this set, and outside the window the
-  // client would count a bank holiday as a chargeable working day while the server
-  // (which computes the exact years) would not — so the two would disagree on what a
-  // booking costs. Covering several years either side keeps backfills and far-future
-  // bookings consistent.
+  // The set used for DISPLAY (the calendar's amber highlights, the Bank Holidays
+  // card). A fixed window is fine for that.
+  //
+  // It is NOT what chargeableDays consults any more. A window meant the client and
+  // the server disagreed outside it — the server computes the exact years a booking
+  // spans — so a 2032 booking was quoted as 10 working days on screen and stored as
+  // 8, and bookableAllowance for that year was 28 rather than 20. The lookup below is
+  // now computed per-range, on demand, exactly like the server's.
   const bankHolidays = useMemo(() => ukBankHolidaysRange(thisYear - 5, thisYear + 5), [thisYear]);
   const bankHolidaySet = useMemo(() => new Map(bankHolidays.map((h) => [h.date, h.name])), [bankHolidays]);
+  // year -> Set of ISO dates, filled on demand and memoised for the session. Mirrors
+  // server/src/bankHolidays.js, which builds exactly the years a range touches.
+  const holidayYears = useRef(new Map());
+  const holidaysForYear = useCallback((y) => {
+    const cache = holidayYears.current;
+    if (!cache.has(y)) cache.set(y, new Set(ukBankHolidaysRange(y, y).map((h) => h.date)));
+    return cache.get(y);
+  }, []);
   const isBankHoliday = useCallback((iso) => bankHolidaySet.has(iso), [bankHolidaySet]);
   // How many bank holidays fall inside an inclusive date range.
   const bankHolidaysBetween = useCallback((start, end) => bankHolidays.reduce((n, h) => n + (h.date >= start && h.date <= end ? 1 : 0), 0), [bankHolidays]);
@@ -129,21 +146,28 @@ export function useApiStore(notify, user) {
   // `year` (optional) counts only the days falling in that calendar year, because the
   // allowance is per leave year — a booking straddling New Year charges each year the
   // days it actually uses. Mirrors the server's chargeableDays exactly.
+  // Mirrors server/src/bankHolidays.js exactly, including its 800-day backstop — the
+  // server refuses anything longer, and walking a multi-million-day range here froze
+  // the browser for every user who could see the row.
+  const MAX_SPAN_DAYS = 800;
   const chargeableDays = useCallback((start, end, year) => {
     if (!start || !end || start > end) return 0;
     let cur = new Date(start + "T00:00:00Z");
     const last = new Date(end + "T00:00:00Z");
     if (isNaN(cur) || isNaN(last)) return 0;
+    if ((last - cur) / 86400000 + 1 > MAX_SPAN_DAYS) return 0;
     const wantYear = year == null ? null : String(year);
     let n = 0;
     while (cur <= last) {
       const iso = cur.toISOString().slice(0, 10);
       const dow = cur.getUTCDay(); // 0 = Sun … 6 = Sat
-      if (dow !== 0 && dow !== 6 && !bankHolidaySet.has(iso) && (wantYear === null || iso.slice(0, 4) === wantYear)) n += 1;
+      // Looked up per-year rather than from a fixed window, so the client and server
+      // agree on every date, not just dates within five years of today.
+      if (dow !== 0 && dow !== 6 && !holidaysForYear(iso.slice(0, 4)).has(iso) && (wantYear === null || iso.slice(0, 4) === wantYear)) n += 1;
       cur = new Date(cur.getTime() + 86400000);
     }
     return n;
-  }, [bankHolidaySet]);
+  }, [holidaysForYear]);
 
   // The leave year is the CALENDAR year: entitlement and usage both reset on 1 Jan,
   // which matches how the bank-holiday pot is already counted. Without this the used
@@ -159,7 +183,19 @@ export function useApiStore(notify, user) {
   // Days charged against a given leave year (defaults to the current one). Counting
   // per-year means a Dec->Jan booking draws from both years, and next year's pot is
   // untouched by this year's usage.
+  // APPROVED only. This is the figure every screen labels "used" — the Balances
+  // table and its CSV, the KPI panel, the staff member's own balance card — and days
+  // that are merely requested have not been used. It also matches the server, which
+  // counts approved leave alone when it enforces the allowance.
   const usedDays = useCallback((id, year = thisYear) => leave.filter((l) => l.staffId === id && l.status === "approved" && l.type !== "unpaid").reduce((s, l) => s + chargeableDays(l.start, l.end, year), 0), [leave, chargeableDays, thisYear]);
+  // Approved PLUS pending — what the allowance is already spoken for, as opposed to
+  // what has been spent. Used only by the booking guard below, never displayed as
+  // "used", so the warning can fire without misreporting anyone's record.
+  //
+  // Without it the booking form was blind: two non-overlapping 20-day requests both
+  // submitted against a 20-day pot, each showing "20 days left" and no warning, and
+  // the conflict only surfaced on the manager's screen at approval.
+  const committedDays = useCallback((id, year = thisYear) => leave.filter((l) => l.staffId === id && (l.status === "approved" || l.status === "pending") && l.type !== "unpaid").reduce((s, l) => s + chargeableDays(l.start, l.end, year), 0), [leave, chargeableDays, thisYear]);
   // Adjustments belong to the leave year they were recorded in — matching the server.
   // Summing them across all time meant a one-off "+3 carried over" quietly granted 3
   // extra days every year after, while usedDays reset each January, so the two figures
@@ -174,12 +210,16 @@ export function useApiStore(notify, user) {
   // The bank-holiday pot is per YEAR, matching the server's bankHolidayCount(year).
   // Using the current year's count while scoping everything else to the requested one
   // meant a January booking made in December could be sized against the wrong pot.
-  const bankHolidayCountIn = useCallback((year) => bankHolidays.filter((h) => h.date.slice(0, 4) === String(year)).length, [bankHolidays]);
+  // Also per-year now: outside the display window this returned 0, so the bookable
+  // pot for a 2032 booking came out as the full 28 instead of 28 − 8.
+  const bankHolidayCountIn = useCallback((year) => holidaysForYear(String(year)).size, [holidaysForYear]);
   const bookableAllowance = useCallback((id, year = thisYear) => Math.max(0, effectiveAllowance(id, year) - bankHolidayCountIn(year)), [effectiveAllowance, bankHolidayCountIn, thisYear]);
   // Remaining in a specific leave year. Booking forms MUST pass the year they are
   // booking into - pinning this to the current year stopped staff booking January
   // leave in December, and hid next year's already-approved bookings.
-  const remainingIn = useCallback((id, year) => bookableAllowance(id, year) - usedDays(id, year), [bookableAllowance, usedDays]);
+  // The BOOKING guard: what is still free to request, so pending requests count
+  // against it. Display figures use usedDays/remaining instead.
+  const remainingIn = useCallback((id, year) => bookableAllowance(id, year) - committedDays(id, year), [bookableAllowance, committedDays]);
   // Days a staff member has left to book: bookable allowance − their approved leave.
   const remaining = useCallback((id) => bookableAllowance(id, thisYear) - usedDays(id, thisYear), [bookableAllowance, usedDays, thisYear]);
   // The first leave year a booking would overflow, or null if it fits. Checks every
@@ -436,7 +476,7 @@ export function useApiStore(notify, user) {
     units, students, sessions, semesters, courses, cohorts, terms, unassignedSessions, semesterId, attendance, hndLoaded,
     interactions, interactionsLoaded,
     assessments, assessmentOverview, assessmentsLoaded,
-    usedDays, adjDays, effectiveAllowance, bookableAllowance, remaining, remainingIn, overflowYear, chargeableDays,
+    usedDays, committedDays, adjDays, effectiveAllowance, bookableAllowance, remaining, remainingIn, overflowYear, chargeableDays,
     bankHolidays, bankHolidaySet, isBankHoliday, bankHolidaysBetween, bankHolidayDaysUsed, bankHolidayTotal,
     notify, currentUser: user, isAdmin,
     ...actions,

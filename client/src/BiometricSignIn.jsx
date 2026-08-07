@@ -15,9 +15,9 @@ import { biometricSignInStatus, biometricSignIn, forgetSession } from "./biometr
 
 const NAVY = "#1a3a8f";
 
-export default function BiometricSignIn({ className = "" }) {
+export default function BiometricSignIn({ className = "", email = "" }) {
   const { applySession } = useAuth();
-  const [offer, setOffer] = useState(null);   // { label, methods } once we know
+  const [offer, setOffer] = useState(null);   // { label, methods, owner } once we know
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -30,6 +30,15 @@ export default function BiometricSignIn({ className = "" }) {
   }, []);
 
   if (!offer) return null;
+
+  // The remembered session belongs to ONE account. This button ignores the email box
+  // entirely — it hands back whatever token is stored — so on the admin login an
+  // administrator could type their own address, tap it, and land in whichever
+  // colleague last armed the lock on that browser. Only offer it when the address in
+  // the box is that account's, and name the account on the button so the two can
+  // never be confused.
+  const typed = String(email || "").trim().toLowerCase();
+  if (offer.owner && typed && typed !== offer.owner) return null;
 
   const methods = offer.methods?.length ? offer.methods : [{ key: "platform", label: offer.label }];
 
@@ -52,10 +61,20 @@ export default function BiometricSignIn({ className = "" }) {
       applySession({ token: res.token, user });
     } catch (e) {
       setToken(null);
-      await forgetSession();
-      setOffer(null);
       setBusy(false);
-      setError("That saved sign-in has expired. Please sign in with your password.");
+      // "The server rejected this token" and "I never reached the server" need
+      // opposite responses, and api.js distinguishes them: a network failure or a
+      // timeout rejects with NO `.status`. Treating both as "expired" threw away a
+      // session that was valid for another six days because someone opened the app
+      // in a tunnel — and the button then vanished, with no way to get it back.
+      const definitelyRejected = e?.status && e.status !== 502 && e.status !== 503 && e.status !== 504;
+      if (definitelyRejected) {
+        await forgetSession();
+        setOffer(null);
+        setError("That saved sign-in has expired. Please sign in with your password.");
+      } else {
+        setError("Couldn't reach the server. Check your connection and try again.");
+      }
     }
   };
 
@@ -81,6 +100,7 @@ export default function BiometricSignIn({ className = "" }) {
               {busy
                 ? <><Loader2 size={16} className="animate-spin" /> Waiting for you…</>
                 : <><Icon size={17} /> Sign in with {m.label}</>}
+              {!busy && offer.owner && <span className="ml-1 max-w-[45%] truncate text-[11px] font-semibold text-slate-400">as {offer.owner}</span>}
             </button>
           );
         })}

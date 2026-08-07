@@ -9,19 +9,26 @@ const today = () => localDate();
 
 // GET /api/documents — admin: all; staff: shared + personal templates + own private docs
 router.get("/", requireAuth, async (req, res) => {
-  let rows;
-  // Only a documents admin sees every document (including ones privately
-  // assigned to an individual). Everyone else sees org-wide + their own.
-  // Overview and Settings both show a document count, so they read the full list too.
-  if (hasPage(req.user, ["documents", "overview", "settings"])) {
-    rows = await prisma.document.findMany({ orderBy: { date: "desc" } });
-  } else {
-    rows = await prisma.document.findMany({
-      where: { OR: [{ scope: "all" }, { AND: [{ scope: "personal" }, { assignedToId: req.user.id }] }] },
-      orderBy: { date: "desc" },
-    });
+  // Only a documents admin sees the CONTENT of every document.
+  const canReadAll = hasPage(req.user, "documents");
+  // Overview and Settings both render a document COUNT, and previously read the full
+  // list to get it — which shipped every private document's title and assignee to
+  // admins who were never granted Documents ("Disciplinary outcome — T. Ward", plus
+  // the staff id it belongs to). They still get an accurate count, but a row they may
+  // not read arrives redacted rather than omitted, so `docs.length` stays correct
+  // without the names travelling.
+  const needsCount = hasPage(req.user, ["overview", "settings"]);
+
+  const rows = await prisma.document.findMany({ orderBy: { date: "desc" } });
+  const mine = (d) => d.scope !== "personal" || d.assignedToId === req.user.id;
+
+  if (canReadAll) return res.json(rows.map(sDoc));
+  if (needsCount) {
+    return res.json(rows.map((d) => (mine(d) ? sDoc(d) : {
+      id: d.id, name: "Private document", type: d.type, date: d.date, scope: "personal", assignedTo: null, redacted: true,
+    })));
   }
-  res.json(rows.map(sDoc));
+  res.json(rows.filter(mine).map(sDoc));
 });
 
 // POST /api/documents  (admin)

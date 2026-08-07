@@ -176,22 +176,39 @@ async function syncFromMoodle({ dryRun = false } = {}) {
       // A course of the same name may already exist from manual setup — adopt it
       // rather than creating a duplicate.
       const byName = await prisma.course.findUnique({ where: { name: courseName } });
-      if (byName) {
+      // Only adopt a same-named course that ISN'T already claimed by another Moodle
+      // course. Two Moodle courses sharing a fullname both adopted the same row and
+      // rewrote moodleCourseId, so one Staff Hub course flip-flopped between them on
+      // alternate nights, merging two intakes' units and registers into one.
+      if (byName && byName.moodleCourseId == null) {
         summary.coursesUpdated++;
-        dbCourse = dryRun ? byName
-          : await prisma.course.update({ where: { id: byName.id }, data: { moodleCourseId: course.id } });
+        try {
+          dbCourse = dryRun ? byName
+            : await prisma.course.update({ where: { id: byName.id }, data: { moodleCourseId: course.id } });
+        } catch (e) { note(`${label}: could not link to the existing course "${courseName}" — ${e.message}`); continue; }
+      } else if (byName) {
+        note(`${label}: a Staff Hub course called "${courseName}" is already linked to a different Moodle course, so this one was skipped. Rename one of them in Moodle.`);
+        continue;
       } else {
         summary.coursesCreated++;
         if (!dryRun) {
-          dbCourse = await prisma.course.create({
-            data: { name: courseName, colour: colourFor(courseName), moodleCourseId: course.id },
-          });
+          try {
+            dbCourse = await prisma.course.create({
+              data: { name: courseName, colour: colourFor(courseName), moodleCourseId: course.id },
+            });
+          } catch (e) { note(`${label}: could not create the course — ${e.message}`); continue; }
         }
       }
     } else if (dbCourse.name !== courseName) {
-      // Renames follow Moodle; nothing is ever deleted.
+      // Renames follow Moodle; nothing is ever deleted. Guarded like every sibling
+      // branch: Course.name is @unique, so a rename that collides with another course
+      // threw P2002 straight out of the sync and abandoned every course after this one
+      // — no marks, no attendance, for the whole night.
       summary.coursesUpdated++;
-      if (!dryRun) await prisma.course.update({ where: { id: dbCourse.id }, data: { name: courseName } });
+      if (!dryRun) {
+        try { await prisma.course.update({ where: { id: dbCourse.id }, data: { name: courseName } }); }
+        catch (e) { note(`${label}: could not rename to "${courseName}" — ${e.code === "P2002" ? "another course already has that name" : e.message}`); }
+      }
     }
 
     // ---------- Units (the unit-shaped sections) ----------
@@ -353,10 +370,27 @@ async function syncFromMoodle({ dryRun = false } = {}) {
       if (!row && unit.id) row = await prisma.assessment.findFirst({ where: { unitId: unit.id, title } });
       if (row) {
         summary.assessmentsUpdated++;
-        if (!dryRun) row = await prisma.assessment.update({
-          where: { id: row.id },
-          data: { title, maxMarks: max, moodleItemId: itemId, moodleCmid: item.cmid || null },
-        });
+        if (!dryRun) {
+          // Never lower the maximum below a mark already awarded.
+          //
+          // PUT /assessments/:id refuses this and names the offending mark; the sync
+          // wrote the same column with no check at all — unattended, at 02:00. A
+          // rescale from 100 to 50 with a 78 on file gave 100% from the API, 156% on
+          // the marking screen, a false Distinction, and a Save button disabled for
+          // the whole assessment so nobody could correct it.
+          let safeMax = max;
+          if (max < row.maxMarks) {
+            const top = await prisma.assessmentGrade.aggregate({ where: { assessmentId: row.id }, _max: { marks: true } });
+            if (top._max.marks != null && top._max.marks > max) {
+              safeMax = row.maxMarks;
+              note(`${unit.code} · ${title}: Moodle lowered the maximum to ${max}, but ${top._max.marks} has already been awarded — kept the maximum at ${row.maxMarks}. Change that mark first, then re-sync.`);
+            }
+          }
+          row = await prisma.assessment.update({
+            where: { id: row.id },
+            data: { title, maxMarks: safeMax, moodleItemId: itemId, moodleCmid: item.cmid || null },
+          });
+        }
       } else {
         summary.assessmentsCreated++;
         if (!dryRun && unit.id) {
@@ -441,7 +475,11 @@ async function syncFromMoodle({ dryRun = false } = {}) {
             summary.gradesSkippedManual++;
             note(`${target.unit.code} · ${clean(item.itemname)}: Moodle has ${marks}/${target.max} but ${existing.marks}/${target.max} was entered by hand — left unchanged.`);
           }
-        } else if (existing.marks !== marks || existing.submittedAt !== stamps.submittedAt || existing.gradedOn !== stamps.gradedOn) {
+        // `feedback` belongs in this predicate. Without it, a tutor who entered a mark
+        // on Monday and wrote their feedback on Wednesday — touching neither the grade
+        // nor its dates — never had that feedback imported, so the student's app showed
+        // a mark with an empty comment for ever.
+        } else if (existing.marks !== marks || existing.submittedAt !== stamps.submittedAt || existing.gradedOn !== stamps.gradedOn || existing.feedback !== clean(item.feedback).slice(0, 2000)) {
           summary.gradesUpdated++;
           if (!dryRun) await prisma.assessmentGrade.update({ where: { id: existing.id }, data: { marks, source: "moodle", feedback: clean(item.feedback).slice(0, 2000), gradedAt: new Date(), ...stamps } });
         }

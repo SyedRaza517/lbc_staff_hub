@@ -18,12 +18,25 @@ const sStaff = (s) => ({
   adminPages: parseAdminPages(s.adminPages),
 });
 
-// NULL → null (unconfigured, full access). Valid JSON array → the array. Anything
-// else (including '[]') → as parsed; only unparseable text falls back to null.
+// NULL → null, which every caller reads as "never configured → full access".
+//
+// Anything UNPARSEABLE now returns [] — deny everything — not null. This is a
+// security decision and it must fail closed: a truncated or corrupt column used to
+// be indistinguishable from "unconfigured", so one bad value silently promoted a
+// page-scoped admin to an unrestricted one, with no audit trail and no visible
+// change in the Access grid. An admin who suddenly has no pages is a loud, safe
+// failure; an admin who suddenly has all of them is a silent, dangerous one.
 function parseAdminPages(raw) {
   if (raw == null) return null;
-  try { const a = JSON.parse(raw); return Array.isArray(a) ? a : null; }
-  catch (_) { return null; }
+  try {
+    const a = JSON.parse(raw);
+    if (Array.isArray(a)) return a;
+    console.error(`[rbac] adminPages is not an array, denying all pages: ${String(raw).slice(0, 120)}`);
+    return [];
+  } catch (_) {
+    console.error(`[rbac] adminPages is not valid JSON, denying all pages: ${String(raw).slice(0, 120)}`);
+    return [];
+  }
 }
 
 const sSignup = (r) => ({
@@ -125,4 +138,4 @@ const sStudentQuery = (q) => ({
   ...(q.student ? { studentName: q.student.name || `${q.student.firstName} ${q.student.lastName}`, studentRef: q.student.studentRef, studentEmail: q.student.email, studentInitials: q.student.initials, studentColour: q.student.colour } : {}),
 });
 
-module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sCourse, sCohort, sTerm, sUnit, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet, sStudentQuery };
+module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sCourse, sCohort, sTerm, sUnit, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet, sStudentQuery, parseAdminPages };

@@ -52,6 +52,10 @@ function ChangePassword({ onSuccess, busyLabel = "Updating…", submitLabel = "U
       // back a fresh token for THIS session — the caller must store it or we'd
       // immediately 401 ourselves.
       const res = await api.changePassword(current, next);
+      // The remembered password is now the OLD one. Left in place it prefills the
+      // sign-in form with a value that can only fail — which is how a new starter,
+      // fresh off the forced-change gate, locked themselves out by retrying it.
+      try { const m = await import("./rememberEmail"); m.forgetRememberedPassword(); } catch (_) {}
       await onSuccess?.(res);
     } catch (err) {
       setError(err.message || "Could not change password.");

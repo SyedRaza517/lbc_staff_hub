@@ -14,10 +14,16 @@
 // apostrophe is the standard defusal: the cell is treated as text, and the apostrophe
 // is not shown by the spreadsheet. The value is unchanged everywhere else in the app.
 const RISKY_START = /^[=+\-@\t\r]/;
+// A plain number is never a formula, and defusing one turns it into TEXT. That hit
+// every negative value we export — the Adjustments and Remaining columns of
+// holiday-balances.csv, which go negative on an overrun — so Excel left-aligned them
+// and SUM() silently skipped every negative row, and an HR reconciliation of the
+// export didn't balance. Formula injection only matters for free text.
+const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
 function escapeCell(value) {
   if (value === null || value === undefined) return "";
   let str = String(value);
-  if (RISKY_START.test(str)) str = `'${str}`;
+  if (RISKY_START.test(str) && !PLAIN_NUMBER.test(str)) str = `'${str}`;
   if (/[",\n\r]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
   }

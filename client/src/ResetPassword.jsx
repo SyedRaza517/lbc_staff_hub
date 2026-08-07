@@ -173,6 +173,8 @@ export default function ResetPasswordPage({ token, onDone }) {
     setBusy(true);
     try {
       await api.resetPassword(token, password, state.requiresCode ? code : undefined);
+      // Whatever was remembered on this device is now the OLD password.
+      try { const m = await import("./rememberEmail"); m.forgetRememberedPassword(); } catch (_) {}
       setState((s) => ({ ...s, status: "done" }));
     } catch (err) {
       setError(err.message || "Could not reset your password.");

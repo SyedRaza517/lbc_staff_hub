@@ -160,6 +160,11 @@ const attMeta = (key) => ATT_STATUSES.find(s => s.key === key) || null;
 // the client must derive from this one value — the server holds the same constant in
 // routes/assessments.js. Three separate literals had already drifted apart once.
 const PASS_MARK = 50;
+// A mark as a percentage of its maximum, clamped 0–100 — the same shape as the
+// server's pctOf in routes/assessments.js. The clamp is the safety net for a historic
+// mark that exceeds its assessment's current maximum; without it the client printed
+// >100% for a grade the API reported as 100%.
+const clampPct = (marks, max) => (max > 0 ? Math.min(100, Math.max(0, Math.round((marks / max) * 1000) / 10)) : null);
 // Traffic-light tone for an attendance percentage. Thresholds match the college's
 // attendance-rating bands (see riskBand): under 40% is High Risk, 40–50 Monitor,
 // 50–70 Good, 70+ on track. Keeping one set of cut-offs stops the same figure from
@@ -1348,7 +1353,7 @@ function SummaryScreen({ store, me }) {
 // The app-lock toggle. Shared verbatim by the staff "More" screen and the student
 // "More" screen, so both sides behave identically and there is one implementation
 // to keep correct.
-export function BiometricSetting() {
+export function BiometricSetting({ owner = "" }) {
   const [status, setStatus] = useState(null);
   const [on, setOn] = useState(isBiometricEnabled());
   const [busy, setBusy] = useState(false);
@@ -1390,7 +1395,9 @@ export function BiometricSetting() {
 
   const turnOn = async () => {
     setBusy(true); setNote("");
-    const res = await enableBiometric();
+    // The owner binds the credential and the remembered session to this account, so a
+    // shared device can't unlock one person's session with another's face.
+    const res = await enableBiometric({ owner });
     setBusy(false);
     if (res.ok) { setOn(true); return; }
     // A cancel is a choice, not a fault.
@@ -1821,7 +1828,10 @@ function TimesheetScreen({ store, me }) {
 
   const del = async (id) => {
     const e = list.find(x => x.id === id);
-    if (!window.confirm(`Delete this timesheet entry?${e ? `\n\n${fmtDate(e.date)} · ${e.startTime}–${e.endTime} · ${e.title}` : ""}\n\nThis cannot be undone.`)) return;
+    // e.start / e.end — the serializer renames startTime/endTime, so the DB names
+    // read undefined and the confirmation said "undefined–undefined", giving no way
+    // to tell WHICH of the day's sessions was about to be irreversibly deleted.
+    if (!window.confirm(`Delete this timesheet entry?${e ? `\n\n${fmtDate(e.date)} · ${e.start}–${e.end} · ${e.title}` : ""}\n\nThis cannot be undone.`)) return;
     try { await store.removeTimesheet(id); reload(); } catch (_) {}
   };
   const send = async () => { setBusy(true); try { await store.submitTimesheet(month); setConfirmSend(false); reload(); } catch (_) {} finally { setBusy(false); } };
@@ -1971,7 +1981,7 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
         ))}
         {/* A real setting, unlike the two above: it drives the app lock. Always
             renders something — the options, or why they aren't available. */}
-        <BiometricSetting />
+        <BiometricSetting owner={me.email} />
       </Card>
       <Card className="!p-0">
         {items.map((it, i) => <button key={it.label} onClick={() => store.notify(`Opening ${it.label}…`)} className={`group flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-slate-50 active:scale-[0.99] ${i < items.length - 1 ? "border-b border-slate-100" : ""}`}><it.I size={18} className="transition-transform group-hover:scale-110" style={{ color: NAVY }} /><span className="flex-1 text-sm font-semibold text-slate-700">{it.label}</span><ChevronRight size={16} className="text-slate-300 transition-transform group-hover:translate-x-1 group-hover:text-slate-400" /></button>)}
@@ -2403,7 +2413,12 @@ function ExecutiveDashboard({ store }) {
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
-        <ChartCard title="Students passing (average ≥ 50%) by course" accent={MAROON}>
+        {/* "Unweighted" said out loud, because Assessment.weight IS stored, validated
+            and shown on the assessment itself — so a reader could reasonably assume
+            this figure honours it. It does not: it is a plain mean of graded
+            percentages, and whether it SHOULD be weighted is an academic policy
+            decision for the college, not one to change quietly in a chart. */}
+        <ChartCard title="Students passing (unweighted average ≥ 50%) by course" accent={MAROON}>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={courseData} layout="vertical" margin={{ top: 4, right: 44, left: 8, bottom: 0 }} barCategoryGap="28%">
               <CartesianGrid stroke={GRID} horizontal={false} />
@@ -2669,13 +2684,15 @@ function AdminTimesheets({ store }) {
 
   // Loading state only on a deliberate month switch — not on the background poll.
   useEffect(() => { setEntries(null); }, [month]);
-  // No staffId → admin gets every non-draft entry for the month (submitted/approved/
-  // changes). Refresh every 20s so newly-sent timesheets appear, swapping IN PLACE
-  // (no flicker to 0). `store` is intentionally not a dependency (fresh object each
-  // render → would refetch and blank the list constantly).
+  // scope:"all" → every non-draft entry for the month (submitted/approved/changes).
+  // It has to be asked for explicitly now: "no staffId" used to mean "everyone", which
+  // also caught the staff app's own My Timesheet screen and showed a finance admin the
+  // whole college's hours in place of their own. Refresh every 20s so newly-sent
+  // timesheets appear, swapping IN PLACE (no flicker to 0). `store` is intentionally
+  // not a dependency (fresh object each render → would refetch and blank the list).
   useEffect(() => {
     let cancelled = false;
-    const fetchNow = () => store.listTimesheets({ month })
+    const fetchNow = () => store.listTimesheets({ month, scope: "all" })
       .then(d => { if (!cancelled) setEntries(d); })
       .catch(() => { if (!cancelled) setEntries(prev => prev || []); });
     fetchNow();
@@ -4213,7 +4230,12 @@ function HndRegister({ store, sessionId, onBack }) {
     setSaving(true);
     try {
       // `locked` term → send the admin override so the server accepts the correction.
-      await store.saveRegister(sessionId, changedRows.map(r => ({ studentId: r.student.id, status: draft[r.student.id]?.status || null, remark: draft[r.student.id]?.remark || "" })), locked);
+      // `reopened`, not `locked`. Sending the override whenever the register HAPPENED
+      // to be locked meant the server's 423 could never fire from the app and the
+      // "Reopen for corrections" button was decorative — every out-of-term save went
+      // through silently. Now the override is only sent when a person has explicitly
+      // reopened the register, which is what makes it an auditable act.
+      await store.saveRegister(sessionId, changedRows.map(r => ({ studentId: r.student.id, status: draft[r.student.id]?.status || null, remark: draft[r.student.id]?.remark || "" })), reopened);
       await load();
       setReopened(false);
     } catch (_e) { /* the store already surfaced the error as a toast */ }
@@ -4577,13 +4599,19 @@ function HndPercentages({ store }) {
                   </td>
                 </tr>
               ))}
-              {paged.slice.length === 0 && <tr><td colSpan={units.length + 2} className="px-5 py-10"><EmptyState Icon={Percent} title="Nothing to show" msg="No students match, or no registers have been taken yet." /></td></tr>}
+              {paged.slice.length === 0 && <tr><td colSpan={visibleUnits.length + 2} className="px-5 py-10"><EmptyState Icon={Percent} title="Nothing to show" msg="No students match, or no registers have been taken yet." /></td></tr>}
             </tbody>
             {paged.slice.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-slate-200 bg-slate-50">
                   <td className="px-5 py-3 text-xs font-extrabold uppercase tracking-wide text-slate-500">Cohort average</td>
-                  {units.map(m => (
+                  {/* visibleUnits, not units — the header and every body row iterate
+                      the filtered list, so iterating the unfiltered one here shifted
+                      the whole footer sideways: with TUTORIAL units present (they sort
+                      before UNIT01) the figure under UNIT01 was TUTORIAL's average, and
+                      the last unit's average plus the real Overall fell off the end of
+                      the table. Picking any course in the dropdown did the same. */}
+                  {visibleUnits.map(m => (
                     <td key={m.id} className="px-4 py-3 text-center">
                       <span className="text-xs font-extrabold" style={{ color: pctTone(unitTotals[m.id]?.pct ?? null).colour }}>{fmtPct(unitTotals[m.id]?.pct ?? null)}</span>
                     </td>
@@ -5168,9 +5196,15 @@ function StudentAttendanceDetail({ student, store }) {
   }, [student.id]);
 
   // Computed entirely from data the Students tab already loads — no extra request,
-  // so it works instantly and doesn't depend on the API being redeployed. A unit's
-  // end date is its last session (store.sessions); once that date passes the unit is
-  // "finished" and drops into "previous", and the overall counts only current units.
+  // so it works instantly and doesn't depend on the API being redeployed.
+  //
+  // A unit is FINISHED when its own teaching window (unit.endDate) has passed; its
+  // last session date is only the fallback for a unit nobody has scheduled. That is
+  // the rule the server (/students/:id/attendance-terms) and the student's own app
+  // both use. This screen used the last-session date ALONE, so a unit whose registers
+  // were generated one term at a time read "current" on the student's phone and
+  // "previous" here — 78% against 90% for the same student on the same day, with the
+  // at-risk unit tucked out of sight under Previous.
   const today = todayISO();
   const row = (store.attendance?.rows || []).find(r => r.student.id === student.id) || null;
   const unitById = Object.fromEntries((store.units || []).map(m => [m.id, m]));
@@ -5179,7 +5213,8 @@ function StudentAttendanceDetail({ student, store }) {
   const emptyStats = { P: 0, L: 0, E: 0, A: 0, marked: 0, earned: 0, possible: 0, pct: null };
   const unitRows = (student.unitIds || []).map(mid => {
     const mod = unitById[mid] || { id: mid, code: "?", name: "Unknown unit" };
-    const endDate = endByUnit[mid] || null;
+    // The unit's own end date wins; its last register is only the fallback.
+    const endDate = mod.endDate || endByUnit[mid] || null;
     return { unit: { id: mod.id, code: mod.code, name: mod.name }, summary: row?.units?.[mid] || emptyStats, endDate, finished: !!(endDate && endDate < today) };
   });
   const currentUnits = unitRows.filter(r => !r.finished).sort((a, b) => (a.endDate || "9999").localeCompare(b.endDate || "9999"));
@@ -8406,14 +8441,28 @@ function GradeEntry({ store, assessment, onBack }) {
   const dirty = rows.some(r => (draft[r.student.id] ?? "") !== (saved[r.student.id] ?? ""));
   const marked = rows.map(r => draft[r.student.id]).filter(v => v !== "" && v != null && !isNaN(Number(v))).map(Number);
   const avgMarks = marked.length ? Math.round(marked.reduce((x, y) => x + y, 0) / marked.length * 10) / 10 : null;
-  const avgPct = avgMarks != null ? Math.round(avgMarks / max * 1000) / 10 : null;
+  // Clamped 0–100, matching the server's pctOf. Unclamped, a historic mark above its
+  // assessment's current maximum printed 156% here while the API reported 100% for
+  // the same mark — two different numbers for one grade on two screens.
+  const avgPct = avgMarks != null ? clampPct(avgMarks, max) : null;
   const dist = { Distinction: 0, Merit: 0, Pass: 0, Fail: 0 };
-  marked.forEach(m => { const b = bandOf(Math.round(m / max * 1000) / 10); if (b) dist[b]++; });
+  marked.forEach(m => { const b = bandOf(clampPct(m, max)); if (b) dist[b]++; });
   const overMax = marked.some(m => m > max);
 
   const save = async () => {
     setSaving(true);
-    try { await store.saveGrades(assessment.id, rows.map(r => ({ studentId: r.student.id, marks: (draft[r.student.id] === "" || draft[r.student.id] == null) ? null : Number(draft[r.student.id]) }))); await load(); }
+    // ONLY the rows this marker actually changed — the same rule HndRegister and
+    // UnitGradeGrid already follow, and for the same two reasons:
+    //
+    //  1. A blank box is sent as null, and null means DELETE server-side. Sending
+    //     every row meant a tab opened before a colleague entered 12 marks carried
+    //     nulls for all 12 and deleted them, reporting "Grades saved" in green.
+    //  2. Every write stamps source:"manual", which the Moodle sync then refuses to
+    //     touch for ever. Correcting one mark out of 30 permanently deafened the whole
+    //     assessment to the VLE, so an exam-board rescale could never arrive.
+    const changed = rows.filter(r => (draft[r.student.id] ?? "") !== (saved[r.student.id] ?? ""));
+    if (!changed.length) { setSaving(false); return; }
+    try { await store.saveGrades(assessment.id, changed.map(r => ({ studentId: r.student.id, marks: (draft[r.student.id] === "" || draft[r.student.id] == null) ? null : Number(draft[r.student.id]) }))); await load(); }
     catch (_e) { /* store toasted */ }
     setSaving(false);
   };
@@ -8452,7 +8501,7 @@ function GradeEntry({ store, assessment, onBack }) {
               {paged.slice.map(r => {
                 const v = draft[r.student.id] ?? "";
                 const num = v === "" ? null : Number(v);
-                const pct = num == null ? null : Math.round(num / max * 1000) / 10;
+                const pct = num == null ? null : clampPct(num, max);
                 const band = bandOf(pct);
                 const gt = gradeTone(band);
                 const bad = num != null && num > max;

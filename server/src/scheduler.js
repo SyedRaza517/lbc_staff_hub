@@ -11,6 +11,11 @@ const prisma = require("./db");
 const { localDate, localTime } = require("./clock");
 const { notifyStaff } = require("./notify");
 
+// The reminder's own link, distinct from the "timesheet" link that review outcomes
+// use, so the dedupe below can tell its own notifications from anybody else's. The
+// staff app treats any link starting "timesheet" as the timesheet screen.
+const REMINDER_LINK = "timesheet:reminder";
+
 // Last calendar day of the month that `dateStr` (YYYY-MM-DD) falls in.
 function lastDayOfMonth(dateStr) {
   const [y, m] = dateStr.split("-").map(Number);
@@ -35,8 +40,11 @@ async function sendTimesheetReminders(todayOverride) {
   // idempotent and survives a host restart, without the London-midnight/UTC edge.
   const recentCutoff = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
 
+  // Not `accountRole: "STAFF"` — being granted any single admin page flips an account
+  // to ADMIN, so a lecturer who also manages one dashboard section stopped receiving
+  // timesheet reminders entirely, for ever. Everyone who can file a timesheet gets one.
   const staff = await prisma.staff.findMany({
-    where: { accountRole: "STAFF", pendingActivation: false },
+    where: { pendingActivation: false },
     select: { id: true },
   });
 
@@ -46,12 +54,17 @@ async function sendTimesheetReminders(todayOverride) {
     const submitted = await prisma.timesheetEntry.count({ where: { staffId: s.id, status: "submitted", date: { startsWith: month } } });
     if (submitted > 0) continue;
     // Already reminded in this run window → skip (no double-send).
-    const already = await prisma.notification.count({ where: { staffId: s.id, link: "timesheet", createdAt: { gte: recentCutoff } } });
+    // Matched on the reminder's OWN link, not the shared "timesheet" one. The review
+    // outcomes ("approved" / "needs changes") also use link:"timesheet", so a staff
+    // member whose timesheet was bounced back yesterday matched this dedupe and was
+    // skipped — the one person who provably had an unsent timesheet was the one person
+    // never reminded to send it.
+    const already = await prisma.notification.count({ where: { staffId: s.id, link: REMINDER_LINK, createdAt: { gte: recentCutoff } } });
     if (already > 0) continue;
     await notifyStaff(s.id, {
       type: "info",
       message: `Reminder: please send your ${monthName} timesheet before the month ends so it can be approved.`,
-      link: "timesheet",
+      link: REMINDER_LINK,
     });
     sent++;
   }
@@ -74,8 +87,26 @@ async function maybeSyncMoodle() {
   if (!moodle.isConfigured() || moodle.isRunning()) return false;
   if (localTime().slice(0, 2) !== SYNC_HOUR) return false;
 
+  // Resolve abandoned runs BEFORE the dedupe counts them.
+  //
+  // A process killed mid-sync (a Render deploy, an OOM) leaves its row saying
+  // "running" for ever. The only sweeper lived inside GET /moodle/status, which the
+  // scheduler never calls — so the ghost counted as "tonight's run already happened",
+  // the import was skipped entirely, and the admin card read "Never run" beside
+  // "Nothing to change — Staff Hub already matches Moodle."
+  const STALE_AFTER_MS = 60 * 60 * 1000;
+  await prisma.moodleSync.updateMany({
+    where: { status: "running", startedAt: { lt: new Date(Date.now() - STALE_AFTER_MS) } },
+    data: { status: "failed", finishedAt: new Date(), error: "Interrupted — the server restarted while this sync was running." },
+  });
+
   const recent = await prisma.moodleSync.count({
-    where: { mode: "scheduled", startedAt: { gte: new Date(Date.now() - 12 * 60 * 60 * 1000) } },
+    where: {
+      mode: "scheduled",
+      // A run that never finished is not a run that happened.
+      status: { in: ["ok", "failed"] },
+      startedAt: { gte: new Date(Date.now() - 12 * 60 * 60 * 1000) },
+    },
   });
   if (recent > 0) return false; // tonight's run already happened
 

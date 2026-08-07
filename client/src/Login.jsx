@@ -5,7 +5,7 @@ import { TotpSetup, TotpVerify } from "./TwoFactor";
 import { ForgotPasswordForm } from "./ResetPassword";
 import { LogIn, Loader2, Mail, Lock, GraduationCap, ArrowLeft } from "lucide-react";
 import { BrandLockup } from "./Brand";
-import { rememberedEmail, setRememberedEmail, rememberedPassword, setRememberedPassword } from "./rememberEmail";
+import { rememberedEmail, rememberedPassword, setRememberedLogin, forgetRememberedLogin, passwordMatchesEmail } from "./rememberEmail";
 import BiometricSignIn from "./BiometricSignIn";
 
 const NAVY = "#1a3a8f", NAVY_DARK = "#14306f", MAROON = "#9e1b32";
@@ -14,8 +14,14 @@ export default function Login({ onBack }) {
   const { login, applySession, error } = useAuth();
   const [email, setEmail] = useState(() => rememberedEmail());
   const [password, setPassword] = useState(() => rememberedPassword());
-  // One tickbox covers both, so ticked means "I won't have to type anything again".
-  const [remember, setRemember] = useState(() => Boolean(rememberedEmail() || rememberedPassword()));
+  // One tickbox covers both. It starts ticked ONLY when a password was actually
+  // stored — an existing user who had the old email-only "remember me" must opt into
+  // password storage deliberately, not be upgraded into it by a relabelled tickbox.
+  const [remember, setRemember] = useState(() => Boolean(rememberedPassword()));
+  // The password box is prefilled from storage and has not been retyped. While that
+  // holds, the reveal button is withheld, so the next person at a shared machine
+  // cannot simply read the previous user's password off the screen.
+  const [pwFromStore, setPwFromStore] = useState(() => Boolean(rememberedPassword()));
   const [busy, setBusy] = useState(false);
   const pw = useReveal();
   // Admin accounts don't use 2FA by default, but one can turn it on — so this
@@ -27,10 +33,15 @@ export default function Login({ onBack }) {
     // A real form submit, so Enter works and password managers see a sign-in.
     e?.preventDefault();
     setBusy(true);
-    setRememberedEmail(remember ? email : "");
-    setRememberedPassword(remember ? password : "");
     const res = await login(email.trim(), password);
     setBusy(false);
+    // Save only once the server has ACCEPTED these credentials. Saving beforehand
+    // persisted typos, and kept a temporary password that the forced-change gate had
+    // already replaced — the form then prefilled a dead password as dots and the user
+    // locked their own account by retrying it.
+    if (res?.ok || res?.mfaRequired || res?.totpSetupRequired) {
+      if (remember) setRememberedLogin(email, password); else forgetRememberedLogin();
+    }
     if (res?.mfaRequired || res?.totpSetupRequired) setChallenge(res);
   };
 
@@ -93,7 +104,15 @@ export default function Login({ onBack }) {
             <div className="group relative mt-1">
               <Mail size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-blue-500" />
               <input id="login-email" name="email" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false}
-                value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy} placeholder="name@londonbrookescollege.co.uk"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  // The stored password belongs to the stored address. The moment the
+                  // address is edited it no longer does, so drop it rather than send
+                  // one person's password against another person's email.
+                  if (pwFromStore && !passwordMatchesEmail(e.target.value)) { setPassword(""); setPwFromStore(false); }
+                }}
+                disabled={busy} placeholder="name@londonbrookescollege.co.uk"
                 className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-3 text-sm outline-none transition-all duration-200 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:opacity-60" />
             </div>
           </div>
@@ -101,10 +120,12 @@ export default function Login({ onBack }) {
             <label htmlFor="login-password" className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Password</label>
             <div className="group relative mt-1">
               <Lock size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-blue-500" />
-              <input id="login-password" name="password" type={pw.type} autoComplete="current-password"
-                value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy}
+              <input id="login-password" name="password" type={pwFromStore ? "password" : pw.type} autoComplete="current-password"
+                value={password} onChange={(e) => { setPassword(e.target.value); setPwFromStore(false); }} disabled={busy}
                 className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-11 text-sm outline-none transition-all duration-200 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:opacity-60" />
-              {pw.button}
+              {/* No reveal button while the value came from storage — otherwise the
+                  next person at a shared machine reads the previous user's password. */}
+              {!pwFromStore && pw.button}
             </div>
           </div>
           <div className="space-y-1.5">
@@ -127,8 +148,8 @@ export default function Login({ onBack }) {
             style={{ background: `linear-gradient(135deg, ${NAVY} 0%, ${NAVY_DARK} 60%, ${MAROON} 130%)`, boxShadow: "0 10px 25px -8px rgba(26,58,143,0.6)" }}>
             {busy ? <Loader2 size={18} className="animate-spin" /> : <LogIn size={18} />} {busy ? "Signing in…" : "Sign in"}
           </button>
-          {/* Renders nothing unless a remembered session exists to unlock. */}
-          <BiometricSignIn />
+          {/* Renders nothing unless a remembered session exists for THIS address. */}
+          <BiometricSignIn email={email} />
           {/* type="button", or clicking this would submit the form instead. */}
           <button type="button" onClick={() => setForgot(true)} className="press w-full text-center text-xs font-semibold text-slate-400 transition hover:text-slate-600">
             Forgotten your password?

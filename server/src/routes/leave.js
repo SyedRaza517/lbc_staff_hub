@@ -4,7 +4,13 @@ const { sLeave } = require("../serializers");
 const { requireAuth, requireAnyPage, hasPage } = require("../auth");
 const { notifyStaff, notifyAdmins } = require("../notify");
 const { localDate } = require("../clock");
-const { chargeableDays, bankHolidayCount, yearsSpanned } = require("../bankHolidays");
+const { chargeableDays, bankHolidayCount, yearsSpanned, spanDays } = require("../bankHolidays");
+
+// The longest single booking anyone can make. A year and a bit covers sabbaticals and
+// long-term sick; beyond that it is a data-entry error or an attack (see the guard in
+// POST / below). Deliberately smaller than bankHolidays.MAX_SPAN_DAYS, so the route
+// gives a readable message before the module's silent backstop can engage.
+const MAX_BOOKING_DAYS = 400;
 
 // Local (London) date, not the server's UTC date — so a request made just after
 // midnight BST is filed under the correct day, not the previous one.
@@ -66,6 +72,18 @@ router.post("/", requireAuth, async (req, res) => {
   const isRealDate = (s) => { const d = new Date(s + "T00:00:00Z"); return !isNaN(d) && d.toISOString().slice(0, 10) === s; };
   if (!isRealDate(start) || !isRealDate(end)) return res.status(400).json({ error: "Dates must be valid calendar dates" });
   if (start > end) return res.status(400).json({ error: "End date must not be before start date" });
+  // Bound the range BEFORE any date maths touches it.
+  //
+  // chargeableDays walks the range a day at a time, synchronously, on Node's single
+  // thread — and the approval path re-walks it once per calendar year spanned. A
+  // request for "9999-12-31" passes every check above (it is a real date), produces
+  // 2,016,373 days, and was measured blocking the event loop for 8.5 seconds; the row
+  // then persists, and the approval that follows blocks it for hours. That is a total
+  // API outage available to any signed-in member of staff, so it is refused here
+  // rather than merely capped downstream.
+  if (spanDays(start, end) > MAX_BOOKING_DAYS) {
+    return res.status(400).json({ error: `A single booking can't be longer than ${MAX_BOOKING_DAYS} days. Split it into separate requests.` });
+  }
   // Only a leave admin may backfill a past date, so they can still record a past
   // absence on someone's behalf. Ordinary staff can never book the past.
   if (!hasPage(req.user, LEAVE_ADMIN_PAGES) && start < today()) return res.status(400).json({ error: "You can't book leave for a past date." });
@@ -155,6 +173,14 @@ router.delete("/:id", requireAuth, async (req, res) => {
     // Cancelling leave already taken would rewrite history; an admin still can.
     if (existing.end < today() && !isLeaveAdmin) {
       return { status: 400, body: { error: "That leave has already been taken." } };
+    }
+    // A DECLINED request is part of the audit trail, not the requester's to erase.
+    // Deleting it is a hard delete, so the decision, the decider, the date and the
+    // manager's note all vanished — and since the overlap check only looks at pending
+    // and approved rows, the same dates could then be re-submitted with no trace that
+    // they had ever been refused.
+    if (existing.status === "rejected" && !isLeaveAdmin) {
+      return { status: 403, body: { error: "This request was declined, so it stays on your record. Ask an administrator if it needs removing." } };
     }
     try {
       await prisma.leave.delete({ where: { id: existing.id } });

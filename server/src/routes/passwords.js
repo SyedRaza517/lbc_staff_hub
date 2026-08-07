@@ -18,7 +18,7 @@
 //     in that message, so a reset can never be silent.
 const router = require("express").Router();
 const prisma = require("../db");
-const { requireAuth, requirePage, hashPassword } = require("../auth");
+const { requireAuth, requirePage, hashPassword, blockedByRank } = require("../auth");
 const { notifyStaff } = require("../notify");
 
 const MIN_LENGTH = 8;
@@ -74,20 +74,28 @@ router.put("/:kind/:id", async (req, res) => {
   const passwordHash = hashPassword(password);
 
   if (kind === "staff") {
-    const target = await prisma.staff.findUnique({ where: { id }, select: { id: true, name: true, email: true, isSuperAdmin: true } });
+    const target = await prisma.staff.findUnique({ where: { id }, select: { id: true, name: true, email: true, isSuperAdmin: true, accountRole: true, adminPages: true } });
     if (!target) return res.status(404).json({ error: "Staff member not found" });
-    // The same rule as PUT /staff/:id. Without it, an admin holding only this page
-    // could take over the Super Admin account and then grant themselves everything.
-    if (target.isSuperAdmin && !req.user?.isSuperAdmin) {
-      return res.status(403).json({ error: "Only a Super Admin can reset the Super Admin's password" });
-    }
-    await prisma.staff.update({
-      where: { id: target.id },
-      // mustChangePassword stays false: the admin has just told this person their new
-      // password in person, and forcing an immediate change would only confuse them.
-      // pendingActivation clears, because a set password IS an activated account.
-      data: { passwordHash, tokenVersion: { increment: 1 }, pendingActivation: false },
-    });
+    // A RANK check, not a Super-Admin-only one. Setting someone's password IS taking
+    // over their account, so this was the shortest path in the whole app to a
+    // privilege escalation: an admin granted only this page could reset any OTHER
+    // administrator and inherit every section they held, in a single request.
+    const blocked = blockedByRank(req.user, target);
+    if (blocked) return res.status(403).json({ error: blocked });
+    await prisma.$transaction([
+      prisma.staff.update({
+        where: { id: target.id },
+        // mustChangePassword stays false: the admin has just told this person their new
+        // password in person, and forcing an immediate change would only confuse them.
+        // pendingActivation clears, because a set password IS an activated account.
+        data: { passwordHash, tokenVersion: { increment: 1 }, pendingActivation: false },
+      }),
+      // Retire every outstanding link. This was the one password-setting path that
+      // didn't, so a 7-day invitation sent to a mistyped address stayed live against
+      // an account the admin had since activated by hand — and whoever held that
+      // mailbox could set their own password on it.
+      prisma.passwordReset.updateMany({ where: { staffId: target.id, usedAt: null }, data: { usedAt: new Date() } }),
+    ]);
     notifyStaff(target.id, {
       type: "warning",
       message: `Your password was reset by ${req.user?.name || "an administrator"}. If this wasn't expected, tell the college office straight away.`,

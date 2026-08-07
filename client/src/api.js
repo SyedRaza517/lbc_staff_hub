@@ -88,6 +88,10 @@ async function request(path, { method = "GET", body, timeoutMs = DEFAULT_TIMEOUT
     // server rejected me" apart from "I never reached the server".
     const err = new Error(data?.error || `Request failed (${res.status})`);
     err.status = res.status;
+    // Carry the whole body. The server sends flags alongside the message — notably
+    // `locked: true` on a 423 term-locked register — and discarding them meant no
+    // caller could react to one even if it wanted to.
+    err.body = data;
     throw err;
   }
   return data;

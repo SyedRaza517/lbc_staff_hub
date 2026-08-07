@@ -68,7 +68,11 @@ async function validate(body, partial) {
   }
   if (body?.followUpDate !== undefined) {
     const d = str(body.followUpDate);
-    if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) return { error: "followUpDate must be a date (YYYY-MM-DD)" };
+    // isRealDate, not a bare regex — the rest of this file (and studentReviews, and
+    // checkins) already use it. "2026-02-30" matches the shape, gets stored verbatim,
+    // and the follow-up view filters on the exact string, so the row becomes
+    // unreachable: a student flagged for a wellbeing follow-up nobody can ever find.
+    if (d && !isRealDate(d)) return { error: "followUpDate must be a real calendar date (YYYY-MM-DD)" };
     data.followUpDate = d || null;
   }
   // A date without a follow-up is meaningless, so switching the follow-up off clears

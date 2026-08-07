@@ -19,6 +19,19 @@ const IMPORT_STAMP = "Moodle import";
 
 // Moodle's acronyms are inconsistent about small words — TCBE keeps "The", MoHR keeps
 // "of", but MPP drops "and" — so build both forms and accept either.
+// The shortest description that may be matched by the substring shortcut below.
+//
+// Without a floor, `similar()` returned 0.92 for ANY description whose letters are a
+// substring of a unit name — so "Management" scored 0.92 against both "Human Resource
+// Management" and "Leadership and Management", "IT" matched "Digital Business In
+// Practice", and even "a" and "in" matched. `Array.find` then took whichever row the
+// database happened to return first, and 25 students' attendance was charged to the
+// wrong unit with nothing reported (note() only fires when NOTHING matches).
+const MIN_SUBSTRING_MATCH = 6;
+// How far clear the best candidate must be before we trust it. Two units scoring
+// within this of each other is an ambiguity a human has to resolve, not a coin toss.
+const MATCH_MARGIN = 0.05;
+
 const SMALL = /^(of|and|the|a|an|in|for|to|with|&)$/i;
 const wordsOf = (n) => String(n).replace(/\(.*?\)/g, " ").split(/[\s\-/,.]+/).filter(Boolean);
 function acronyms(name) {
@@ -34,10 +47,30 @@ function similar(a, b) {
   a = norm(a); b = norm(b);
   if (!a || !b) return 0;
   if (a === b) return 1;
-  if (a.includes(b) || b.includes(a)) return 0.92;
+  // The substring shortcut needs a length floor — see MIN_SUBSTRING_MATCH.
+  if ((a.includes(b) || b.includes(a)) && Math.min(a.length, b.length) >= MIN_SUBSTRING_MATCH) return 0.92;
   let hits = 0; const pool = b.split("");
   for (const ch of a) { const i = pool.indexOf(ch); if (i >= 0) { pool.splice(i, 1); hits++; } }
   return hits / Math.max(a.length, b.length);
+}
+
+/**
+ * Score EVERY unit and take the best — but only if it is clearly better than the
+ * runner-up. `units.find(u => similar(...) >= 0.85)` returned the first row over the
+ * line in arbitrary database order, so where two units tied it silently picked one.
+ * An ambiguous register is reported and left for a human instead.
+ */
+function bestFuzzyMatch(desc, units, note) {
+  const scored = units
+    .map((u) => ({ u, score: similar(desc, u.name) }))
+    .filter((x) => x.score >= 0.85)
+    .sort((a, b) => b.score - a.score);
+  if (!scored.length) return null;
+  if (scored.length > 1 && scored[0].score - scored[1].score < MATCH_MARGIN) {
+    note(`Attendance: "${desc}" matches both ${scored[0].u.code} (${scored[0].u.name}) and ${scored[1].u.code} (${scored[1].u.name}) equally well — recorded against the course instead. Rename the Moodle session to name one unit.`);
+    return null;   // falls through to the Tutorial / Seminar bucket, not a guess
+  }
+  return scored[0].u;
 }
 
 // Descriptions carry the delivery type as a suffix: "MPP (Lecture)", "TCBE - Lecture".
@@ -116,7 +149,7 @@ async function importAttendance({ call, dryRun = false, note = () => {} } = {}) 
 
       const desc = describe(s.description);
       let unit = units.find((u) => acronyms(u.name).has(desc.toUpperCase()))
-        || units.find((u) => similar(desc, u.name) >= 0.85);
+        || bestFuzzyMatch(desc, units, note);
 
       if (!unit) {
         // Course-level session. Create the holding unit on first need only, so a
@@ -124,10 +157,24 @@ async function importAttendance({ call, dryRun = false, note = () => {} } = {}) 
         if (!tutorialUnit) {
           if (dryRun) { tutorialUnit = { id: null, code: TUTORIAL_CODE, name: TUTORIAL_NAME }; }
           else {
-            tutorialUnit = await prisma.unit.create({
-              data: { code: TUTORIAL_CODE, name: TUTORIAL_NAME, unitNumber: "", courseId: course.id, tutor: "" },
-            });
+            try {
+              tutorialUnit = await prisma.unit.create({
+                data: { code: TUTORIAL_CODE, name: TUTORIAL_NAME, unitNumber: "", courseId: course.id, tutor: "" },
+              });
+            } catch (e) {
+              // A course with several attendance activities (one per term) walks this
+              // loop once per activity, and `units` was rebound locally rather than on
+              // the shared course object — so the second activity didn't see the unit
+              // the first had created, tried again, and hit the (courseId, code) unique
+              // index. That P2002 propagated out of importAttendance and was swallowed
+              // by the caller's catch, zeroing EVERY attendance counter while the run
+              // still reported "ok". Adopt the existing row instead.
+              if (e?.code !== "P2002") throw e;
+              tutorialUnit = await prisma.unit.findFirst({ where: { courseId: course.id, code: TUTORIAL_CODE } });
+              if (!tutorialUnit) throw e;
+            }
             units = [...units, tutorialUnit];
+            course.units = units;   // share it, so the next activity on this course sees it
           }
         }
         unit = tutorialUnit;
@@ -171,6 +218,24 @@ async function importAttendance({ call, dryRun = false, note = () => {} } = {}) 
         rows.push({ studentId, status, remark: String(l.remarks || "").slice(0, 500) });
       }
       if (!rows.length || !session) { out.attendanceMarksCreated += dryRun ? rows.length : 0; continue; }
+
+      // Enrol everyone we are about to mark.
+      //
+      // Moodle only ever enrols a student on the COURSE, and the gradebook sync infers
+      // unit enrolment from the Moodle course-sections — which never include the
+      // synthetic Tutorial / Seminar unit. So this import wrote marks onto a unit with
+      // zero enrolments, and the consequences all landed on the lecturer:
+      //   • a new tutorial register showed "No students enrolled" and could not be taken;
+      //   • adding the students Moodle missed returned "N students are not enrolled";
+      //   • and every one of those marks was excluded from the attendance aggregates,
+      //     which is what made the matrix's rows and totals disagree.
+      // Marking someone present IS the evidence they are on it, so record that.
+      if (!dryRun && unit.id) {
+        await prisma.enrolment.createMany({
+          data: rows.map((r) => ({ studentId: r.studentId, unitId: unit.id })),
+          skipDuplicates: true,
+        });
+      }
 
       if (reused) {
         // A register that already exists may hold marks a member of staff took. Those

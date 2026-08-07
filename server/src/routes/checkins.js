@@ -24,7 +24,17 @@ router.get("/", requireAuth, async (req, res) => {
   // (monthly hours). Gating on the owning page alone made those screens show zeros.
   if (!hasPage(req.user, ["checkin", "summaries", "overview", "kpi", "staff"])) where.staffId = req.user.id;
   const rows = await prisma.checkIn.findMany({ where, orderBy: { date: "desc" } });
-  res.json(rows.map(sCheckin));
+  // Overview/KPI/Staff are widened above because they need dates and times — who is
+  // in, punctuality, monthly hours. They do NOT need the free-text daily summary,
+  // which "Daily Summaries" is a separate checkbox for, so it is blanked for them.
+  // sCheckin emitted it unconditionally, handing every colleague's written account of
+  // their day to admins granted an unrelated page.
+  const canReadSummaries = hasPage(req.user, ["checkin", "summaries"]);
+  res.json(rows.map((r) => {
+    const out = sCheckin(r);
+    if (!canReadSummaries && r.staffId !== req.user.id) out.summary = "";
+    return out;
+  }));
 });
 
 // GET /api/checkins/on-site — who is in today, for EVERY member of staff.
@@ -42,9 +52,19 @@ router.get("/", requireAuth, async (req, res) => {
 router.get("/on-site", requireAuth, async (req, res) => {
   const date = req.query.date ? String(req.query.date) : today();
   if (!isRealDate(date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
-
+  // TODAY only, unless the caller holds a page that legitimately reviews history.
+  // The date was unbounded, so any lecturer could walk backwards day by day and
+  // rebuild every colleague's arrival and departure times — a timesheet on someone
+  // else, which is exactly what the note above says this endpoint must never become.
+  if (date !== today() && !hasPage(req.user, ["checkin", "summaries"])) {
+    return res.status(403).json({ error: "You can only see who is on site today." });
+  }
+  // A wall board shows who is IN, so a row with no real clock-in isn't one. timeIn ""
+  // is the sentinel PUT /summary writes for "wrote a summary, never checked in"; it
+  // was listed as a present colleague with a blank arrival time, sorted to the very
+  // top (""localeCompare beats every real time) and counted in "checked in today".
   const rows = await prisma.checkIn.findMany({
-    where: { date },
+    where: { date, NOT: { timeIn: "" } },
     include: {
       staff: {
         select: { id: true, name: true, initials: true, colour: true, jobTitle: true, dept: true, site: true },
@@ -67,7 +87,11 @@ router.get("/on-site", requireAuth, async (req, res) => {
         site: r.staff.site || null,       // home site, from sign-up — what the filter uses
         checkedInAt: r.site || null,       // where this clock-in happened, when recorded
         timeIn: r.timeIn,
-        timeOut: r.timeOut || null,
+        // Departure time is withheld from the general audience, as the note above
+        // promises ("no check-out"). Arrival answers "is she in?"; arrival PLUS
+        // departure is a record of how long a colleague worked, which is the Check-In
+        // and Daily Summaries pages' business, not a wall board's.
+        ...(hasPage(req.user, ["checkin", "summaries"]) ? { timeOut: r.timeOut || null } : {}),
       }))
       // Earliest arrival first: the list reads as the order people came in.
       .sort((a, b) => String(a.timeIn).localeCompare(String(b.timeIn))),

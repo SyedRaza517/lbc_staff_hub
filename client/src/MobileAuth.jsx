@@ -12,7 +12,7 @@ import { TotpSetup, TotpVerify } from "./TwoFactor";
 import { ForgotPasswordForm } from "./ResetPassword";
 import PhoneShell, { useIsHandset } from "./PhoneShell";
 import useReveal from "./RevealButton";
-import { rememberedEmail, setRememberedEmail, rememberedPassword, setRememberedPassword } from "./rememberEmail";
+import { rememberedEmail, rememberedPassword, setRememberedLogin, forgetRememberedLogin, passwordMatchesEmail } from "./rememberEmail";
 import BiometricSignIn from "./BiometricSignIn";
 import { useBackHandler } from "./backButton";
 import { BrandMark } from "./Brand";
@@ -107,8 +107,9 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
   const pw = useReveal();
   const [email, setEmail] = useState(() => rememberedEmail());
   const [password, setPassword] = useState(() => rememberedPassword());
-  // One tickbox covers both, so ticked means "I won't have to type anything again".
-  const [remember, setRemember] = useState(() => Boolean(rememberedEmail() || rememberedPassword()));
+  // Ticked only when a password was actually stored — see the note in Login.jsx.
+  const [remember, setRemember] = useState(() => Boolean(rememberedPassword()));
+  const [pwFromStore, setPwFromStore] = useState(() => Boolean(rememberedPassword()));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -117,10 +118,12 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
     setError("");
     if (!email.trim() || !password) { setError("Enter your email and password."); return; }
     setBusy(true);
-    setRememberedEmail(remember ? email : "");
-    setRememberedPassword(remember ? password : "");
     const res = await signIn(email.trim(), password);
     setBusy(false);
+    // Only save credentials the server has accepted — see the note in Login.jsx.
+    if (res.ok || res.mfaRequired || res.totpSetupRequired) {
+      if (remember) setRememberedLogin(email, password); else forgetRememberedLogin();
+    }
     if (res.ok) return;                       // signed straight in (no 2FA on this account)
     if (res.mfaRequired || res.totpSetupRequired) { onNeedSecondStep(res); return; }
     setError(res.error || "Sign in failed.");
@@ -134,16 +137,23 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
       </div>
 
       <Labelled label="Email" Icon={Mail}>
-        <input type="email" name="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy}
+        <input type="email" name="email" value={email} disabled={busy}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            // A stored password belongs to the stored address only.
+            if (pwFromStore && !passwordMatchesEmail(e.target.value)) { setPassword(""); setPwFromStore(false); }
+          }}
           placeholder="name@londonbrookescollege.co.uk" autoComplete="username" autoCapitalize="none" spellCheck={false}
           className={inputClass} style={{ "--tw-ring-color": NAVY }} />
       </Labelled>
 
       <Labelled label="Password" Icon={Lock}>
         <div className="relative">
-          <input type={pw.type} name="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy}
+          <input type={pwFromStore ? "password" : pw.type} name="password" value={password} disabled={busy}
+            onChange={(e) => { setPassword(e.target.value); setPwFromStore(false); }}
             autoComplete="current-password" className={`${inputClass} pr-11`} style={{ "--tw-ring-color": NAVY }} />
-          {pw.button}
+          {/* Withheld while the value came from storage — see Login.jsx. */}
+          {!pwFromStore && pw.button}
         </div>
       </Labelled>
 
@@ -170,8 +180,8 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
         {busy ? <><Loader2 size={16} className="animate-spin" /> Signing in…</> : <><LogIn size={16} /> Sign in</>}
       </button>
 
-      {/* Renders nothing unless a remembered session exists to unlock. */}
-      <BiometricSignIn />
+      {/* Renders nothing unless a remembered session exists for THIS address. */}
+      <BiometricSignIn email={email} />
 
       <button type="button" onClick={() => goForgot(email)} className="press -mt-1 text-center text-xs font-semibold text-slate-400 transition hover:text-slate-600">
         Forgotten your password?

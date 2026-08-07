@@ -6,7 +6,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { isNativeApp } from "./PhoneShell";
 import { getToken } from "./api";
-import { isBiometricEnabled, isBiometricArmed, verifyBiometric, biometricStatus, biometryLabel, enableBiometric, consumeRestored } from "./biometric";
+import { isBiometricEnabled, isBiometricArmed, verifyBiometric, biometricStatus, biometryLabel, enableBiometric, consumeRestored, isVerifyInFlight, resetBiometric } from "./biometric";
 import { Fingerprint, Loader2, LogOut, ShieldCheck, XCircle } from "lucide-react";
 import { useBackHandler } from "./backButton";
 
@@ -55,7 +55,12 @@ export function useAppLock(hasSession) {
       try {
         const { App } = await import("@capacitor/app");
         const handle = await App.addListener("appStateChange", ({ isActive }) => {
-          if (!isBiometricEnabled()) return;
+          // Both handlers now agree on isBiometricArmed() — the native one used to
+          // check isBiometricEnabled(), so on the web the two could disagree about
+          // whether a lock was even possible.
+          if (!isBiometricArmed()) return;
+          // The OS prompt backgrounds the app; that is not the user leaving.
+          if (isVerifyInFlight()) return;
           if (!isActive) {
             backgroundedAt.current = Date.now();
             return;
@@ -75,6 +80,8 @@ export function useAppLock(hasSession) {
     if (isNativeApp() || typeof document === "undefined") return;
     const onVisibility = () => {
       if (!isBiometricArmed()) return;
+      // Windows Hello / Credential Manager can hide the page while it is on screen.
+      if (isVerifyInFlight()) return;
       if (document.visibilityState === "hidden") { backgroundedAt.current = Date.now(); return; }
       const away = backgroundedAt.current ? Date.now() - backgroundedAt.current : 0;
       if (away >= RELOCK_AFTER_MS) setLocked(true);
@@ -83,35 +90,84 @@ export function useAppLock(hasSession) {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
-  return { locked: locked && isBiometricArmed(), unlock: () => setLocked(false), lock: () => setLocked(true) };
+  // Stable identities. These were inline arrows, so every render of App produced a new
+  // onUnlock, which re-ran BiometricGate's effect and fired another checkBiometry()
+  // round-trip — and, while the auto-unlock-on-unavailable branch existed, another
+  // chance to trip it.
+  const unlock = useCallback(() => { backgroundedAt.current = null; setLocked(false); }, []);
+  const lock = useCallback(() => setLocked(true), []);
+
+  return { locked: locked && isBiometricArmed(), unlock, lock };
 }
 
 export default function BiometricGate({ user, onUnlock, logout }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [label, setLabel] = useState("biometric unlock");
+  // Why the sensor can't be used, when it can't. Shown on the gate so an unusable
+  // lock explains itself rather than just failing.
+  const [unavailable, setUnavailable] = useState(null);
   const attempted = useRef(false);
 
+  // Set while a verification is in flight, so the resume listener in useAppLock can
+  // tell "the OS prompt covered us" from "the user really left the app".
+  const verifying = useRef(false);
+
   const attempt = useCallback(async () => {
+    if (verifying.current) return;      // a second tap must not open a second prompt
+    verifying.current = true;
     setBusy(true);
     setError("");
-    const res = await verifyBiometric({ reason: "Unlock Staff Hub" });
+    let res;
+    try {
+      res = await verifyBiometric({ reason: "Unlock Staff Hub" });
+    } catch (e) {
+      res = { ok: false, error: e?.message || "Could not verify. Try again." };
+    }
+    verifying.current = false;
     setBusy(false);
     if (res.ok) { onUnlock(); return; }
-    // A cancel is a choice, not a fault — don't shout at the user.
-    setError(res.cancelled ? "" : (res.error || "Could not verify. Try again."));
+    // A cancel is a choice, not a fault — but it must never leave a BLANK screen with
+    // no explanation, which is what an empty string produced. WebAuthn also reports a
+    // credential the authenticator no longer holds as a "cancel" after a 60s timeout,
+    // so silence here is exactly the case the user most needs words for.
+    setError(res.cancelled
+      ? "Unlock was cancelled. Tap Unlock to try again, or sign out."
+      : (res.error || "Could not verify. Try again."));
   }, [onUnlock]);
 
   useEffect(() => {
+    let alive = true;
     (async () => {
-      const status = await biometricStatus();
+      let status;
+      try {
+        status = await biometricStatus();
+      } catch (e) {
+        // Never leave the gate in an unexplained state if the check itself throws.
+        if (alive) setError("Couldn't check this device's biometrics. Tap Unlock to try again, or sign out.");
+        return;
+      }
+      if (!alive) return;
       setLabel(status.label || biometryLabel(status.biometryType));
-      // If the sensor has become unavailable since the lock was switched on (the
-      // user removed their fingerprints, say), don't strand them behind it.
-      if (!status.available) { onUnlock(); return; }
-      if (!attempted.current) { attempted.current = true; attempt(); }
+      setUnavailable(status.available ? null : (status.reason || "Biometric unlock isn't available on this device right now."));
+
+      // DELIBERATELY NOT auto-unlocking on !available.
+      //
+      // This used to call onUnlock() whenever checkBiometry() reported the sensor
+      // unavailable, to avoid stranding someone who had removed their fingerprints.
+      // But `isAvailable: false` is also what the OS reports during BIOMETRY LOCKOUT —
+      // the temporary block after several failed attempts — so the lock could be
+      // defeated on purpose: fail Face ID five times, reopen the app, and it opened
+      // with no verification at all. The gate is worth nothing if failing it enough
+      // times is the way through.
+      //
+      // Stranding is handled properly instead: verifyBiometric passes
+      // allowDeviceCredential:true, so the device PIN or passcode always works even
+      // when biometry is locked out or unenrolled, and "Sign out" is always offered.
+      if (!attempted.current && status.available) { attempted.current = true; attempt(); }
     })();
-  }, [attempt, onUnlock]);
+    return () => { alive = false; };
+  }, [attempt]);
 
   return (
     <div
@@ -134,9 +190,16 @@ export default function BiometricGate({ user, onUnlock, logout }) {
         {user?.name ? `${user.name.split(/\s+/)[0]}, use ` : "Use "}{label} to continue.
       </p>
 
+      {unavailable && (
+        <div className="pop mt-4 max-w-xs rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold leading-snug text-amber-200 ring-1 ring-white/15">
+          {unavailable}
+          <span className="mt-1 block font-normal text-white/60">Unlock will ask for your device PIN or passcode instead.</span>
+        </div>
+      )}
+
       {error && (
-        <div className="pop mt-4 flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold text-rose-200 ring-1 ring-white/15">
-          <XCircle size={14} /> {error}
+        <div className="pop mt-4 max-w-xs rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold leading-snug text-rose-200 ring-1 ring-white/15">
+          <XCircle size={14} className="mr-1 inline align-[-2px]" />{error}
         </div>
       )}
 
@@ -149,9 +212,20 @@ export default function BiometricGate({ user, onUnlock, logout }) {
         {busy ? <><Loader2 size={18} className="animate-spin" /> Waiting for you…</> : <><ShieldCheck size={18} /> Unlock</>}
       </button>
 
+      {/* The escape hatch for a credential the authenticator no longer holds (a
+          Windows Hello PIN reset, a changed Android screen lock). Every check then
+          fails with a 60-second timeout the browser reports as a "cancel", so without
+          this the gate can never open AND the setting can never be turned off. */}
+      <button
+        onClick={async () => { await resetBiometric(); logout(); }}
+        className="press mt-5 text-xs font-semibold text-white/45 underline transition hover:text-white/75"
+      >
+        Can't unlock? Turn off app lock and sign in with your password
+      </button>
+
       <button
         onClick={logout}
-        className="press mt-4 flex items-center gap-1.5 text-xs font-semibold text-white/50 transition hover:text-white/80"
+        className="press mt-3 flex items-center gap-1.5 text-xs font-semibold text-white/50 transition hover:text-white/80"
       >
         <LogOut size={13} /> Sign out instead
       </button>

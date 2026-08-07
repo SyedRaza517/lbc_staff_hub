@@ -9,6 +9,16 @@ const { requireAuth, requireAnyPage } = require("../auth");
 // (Previously these used requireAdmin, which only checks the ADMIN role — and being
 // granted ANY single page makes an account an ADMIN, so a read-only "executive"
 // admin would have been able to write here.)
+// TWO grants, deliberately separate — they are two checkboxes in the Access grid, so
+// they must not be one authority on the server. Accepting either for every write meant
+// an admin granted only "Students" (to maintain the directory) could delete courses,
+// cohorts and units and rewrite registers, while an admin granted only "Registers"
+// could delete a student and cascade away their attendance, grades and PAT records.
+// A permission grid nobody can trust is worse than a narrow one.
+const requireRegisters = requireAnyPage(["registers"]);      // course structure + registers
+const requireStudentAdmin = requireAnyPage(["students"]);    // the student directory
+// The handful of routes that genuinely serve both screens (enrolments link a student
+// to a unit, so either side may legitimately edit them).
 const requireHndWrite = requireAnyPage(["registers", "students"]);
 const { isStatus, summarise, summariseCounts } = require("../attendance");
 
@@ -65,14 +75,14 @@ async function validateSemester(body, excludeId) {
   return { data: { name, start, end } };
 }
 
-router.post("/semesters", requireAuth, requireHndWrite, async (req, res) => {
+router.post("/semesters", requireAuth, requireRegisters, async (req, res) => {
   const v = await validateSemester(req.body, null);
   if (v.error) return res.status(400).json({ error: v.error });
   const s = await prisma.semester.create({ data: v.data });
   res.status(201).json(sSemester(s));
 });
 
-router.put("/semesters/:id", requireAuth, requireHndWrite, async (req, res) => {
+router.put("/semesters/:id", requireAuth, requireRegisters, async (req, res) => {
   const existing = await prisma.semester.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Semester not found" });
   const v = await validateSemester({ ...existing, ...req.body }, existing.id);
@@ -83,7 +93,7 @@ router.put("/semesters/:id", requireAuth, requireHndWrite, async (req, res) => {
 
 // Deleting a semester never touches sessions or marks — it only changes how
 // they're grouped, so the underlying registers are always safe.
-router.delete("/semesters/:id", requireAuth, requireHndWrite, async (req, res) => {
+router.delete("/semesters/:id", requireAuth, requireRegisters, async (req, res) => {
   try { await prisma.semester.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Semester not found" }); }
 });
@@ -183,7 +193,7 @@ router.get("/courses", requireAuth, async (_req, res) => {
   res.json(rows.map(sCourse));
 });
 
-router.post("/courses", requireAuth, requireHndWrite, async (req, res) => {
+router.post("/courses", requireAuth, requireRegisters, async (req, res) => {
   const name = str(req.body?.name);
   if (!name) return res.status(400).json({ error: "Course name required" });
   const clash = await prisma.course.findFirst({ where: { name: { equals: name } } });
@@ -193,7 +203,7 @@ router.post("/courses", requireAuth, requireHndWrite, async (req, res) => {
   res.status(201).json(sCourse(p));
 });
 
-router.put("/courses/:id", requireAuth, requireHndWrite, async (req, res) => {
+router.put("/courses/:id", requireAuth, requireRegisters, async (req, res) => {
   const existing = await prisma.course.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Course not found" });
   const data = {};
@@ -210,7 +220,7 @@ router.put("/courses/:id", requireAuth, requireHndWrite, async (req, res) => {
 });
 
 // Units are un-assigned (not deleted) when their course goes.
-router.delete("/courses/:id", requireAuth, requireHndWrite, async (req, res) => {
+router.delete("/courses/:id", requireAuth, requireRegisters, async (req, res) => {
   try { await prisma.course.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Course not found" }); }
 });
@@ -226,7 +236,7 @@ router.get("/cohorts", requireAuth, async (req, res) => {
   res.json(rows.map(sCohort));
 });
 
-router.post("/cohorts", requireAuth, requireHndWrite, async (req, res) => {
+router.post("/cohorts", requireAuth, requireRegisters, async (req, res) => {
   const name = str(req.body?.name);
   const courseId = str(req.body?.courseId);
   const startDate = str(req.body?.startDate) || null;
@@ -243,7 +253,7 @@ router.post("/cohorts", requireAuth, requireHndWrite, async (req, res) => {
   } catch (_e) { res.status(400).json({ error: "Could not create the cohort" }); }
 });
 
-router.put("/cohorts/:id", requireAuth, requireHndWrite, async (req, res) => {
+router.put("/cohorts/:id", requireAuth, requireRegisters, async (req, res) => {
   const existing = await prisma.cohort.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Cohort not found" });
   const data = {};
@@ -263,7 +273,7 @@ router.put("/cohorts/:id", requireAuth, requireHndWrite, async (req, res) => {
   res.json(sCohort(c));
 });
 
-router.delete("/cohorts/:id", requireAuth, requireHndWrite, async (req, res) => {
+router.delete("/cohorts/:id", requireAuth, requireRegisters, async (req, res) => {
   try { await prisma.cohort.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Cohort not found" }); }
 });
@@ -284,7 +294,7 @@ router.get("/terms", requireAuth, async (req, res) => {
 
 // Generate the standard 6 terms for a cohort, back-to-back from a start date.
 // Body: { start?, weeksPerTerm? } — start defaults to the cohort's own start date.
-router.post("/cohorts/:id/terms/generate", requireAuth, requireHndWrite, async (req, res) => {
+router.post("/cohorts/:id/terms/generate", requireAuth, requireRegisters, async (req, res) => {
   const cohort = await prisma.cohort.findUnique({ where: { id: req.params.id } });
   if (!cohort) return res.status(404).json({ error: "Cohort not found" });
   const start = str(req.body?.start) || cohort.startDate;
@@ -314,7 +324,7 @@ router.post("/cohorts/:id/terms/generate", requireAuth, requireHndWrite, async (
   res.status(201).json(terms.map(sTerm));
 });
 
-router.put("/terms/:id", requireAuth, requireHndWrite, async (req, res) => {
+router.put("/terms/:id", requireAuth, requireRegisters, async (req, res) => {
   const existing = await prisma.term.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Term not found" });
   const data = {};
@@ -340,7 +350,7 @@ router.put("/terms/:id", requireAuth, requireHndWrite, async (req, res) => {
   res.json({ ...sTerm(t), gaps });
 });
 
-router.delete("/terms/:id", requireAuth, requireHndWrite, async (req, res) => {
+router.delete("/terms/:id", requireAuth, requireRegisters, async (req, res) => {
   try { await prisma.term.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Term not found" }); }
 });
@@ -364,7 +374,7 @@ router.get("/units", requireAuth, async (_req, res) => {
   res.json(rows.map((m) => ({ ...sUnit(m), studentCount: eMap.get(m.id) || 0, sessionCount: sMap.get(m.id) || 0, lastSessionDate: endMap.get(m.id) || null })));
 });
 
-router.post("/units", requireAuth, requireHndWrite, async (req, res) => {
+router.post("/units", requireAuth, requireRegisters, async (req, res) => {
   const code = str(req.body?.code).toUpperCase();
   const name = str(req.body?.name);
   if (!code) return res.status(400).json({ error: "Unit code required" });
@@ -406,7 +416,7 @@ router.post("/units", requireAuth, requireHndWrite, async (req, res) => {
   }
 });
 
-router.put("/units/:id", requireAuth, requireHndWrite, async (req, res) => {
+router.put("/units/:id", requireAuth, requireRegisters, async (req, res) => {
   const existing = await prisma.unit.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Unit not found" });
   const data = {};
@@ -455,8 +465,17 @@ router.put("/units/:id", requireAuth, requireHndWrite, async (req, res) => {
     data.startDate = win.startDate; data.endDate = win.endDate;
   }
   // cohort/term are set together (the UI picks a cohort then its term).
+  //
+  // But an OMITTED termId must mean "leave it alone", not "clear it". It meant the
+  // latter — str(undefined) is "" — so PUT {"cohortId":"..."} on its own silently
+  // nulled termId and permanently unlocked every register on that unit, returning 200
+  // with nothing to say a term link had been dropped. startDate/endDate above already
+  // treat undefined as "unchanged"; this now matches.
   if (req.body?.cohortId !== undefined || req.body?.termId !== undefined) {
-    const ct = await resolveCohortTerm(req.body?.cohortId, req.body?.termId);
+    const ct = await resolveCohortTerm(
+      req.body?.cohortId !== undefined ? req.body.cohortId : existing.cohortId,
+      req.body?.termId !== undefined ? req.body.termId : existing.termId,
+    );
     if (ct.error) return res.status(400).json({ error: ct.error });
     data.cohortId = ct.cohortId; data.termId = ct.termId;
   }
@@ -470,7 +489,7 @@ router.put("/units/:id", requireAuth, requireHndWrite, async (req, res) => {
 });
 
 // Deleting a unit cascades to its sessions, marks and enrolments (schema-level).
-router.delete("/units/:id", requireAuth, requireHndWrite, async (req, res) => {
+router.delete("/units/:id", requireAuth, requireRegisters, async (req, res) => {
   try { await prisma.unit.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Unit not found" }); }
 });
@@ -511,7 +530,7 @@ router.get("/students", requireAuth, async (_req, res) => {
   res.json(rows.map(sStudent));
 });
 
-router.post("/students", requireAuth, requireHndWrite, async (req, res) => {
+router.post("/students", requireAuth, requireStudentAdmin, async (req, res) => {
   const firstName = str(req.body?.firstName);
   const lastName = str(req.body?.lastName);
   const studentRef = str(req.body?.studentRef);
@@ -548,7 +567,7 @@ router.post("/students", requireAuth, requireHndWrite, async (req, res) => {
   res.status(201).json(sStudent(s));
 });
 
-router.put("/students/:id", requireAuth, requireHndWrite, async (req, res) => {
+router.put("/students/:id", requireAuth, requireStudentAdmin, async (req, res) => {
   const existing = await prisma.student.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Student not found" });
 
@@ -594,7 +613,7 @@ router.put("/students/:id", requireAuth, requireHndWrite, async (req, res) => {
   res.json(sStudent(s));
 });
 
-router.delete("/students/:id", requireAuth, requireHndWrite, async (req, res) => {
+router.delete("/students/:id", requireAuth, requireStudentAdmin, async (req, res) => {
   const existing = await prisma.student.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Student not found" });
   try {
@@ -652,7 +671,7 @@ router.get("/sessions", requireAuth, async (req, res) => {
   res.json(rows.map((s) => ({ ...sSession(s), markedCount: cMap.get(s.id) || 0 })));
 });
 
-router.post("/sessions", requireAuth, requireHndWrite, async (req, res) => {
+router.post("/sessions", requireAuth, requireRegisters, async (req, res) => {
   const unitId = str(req.body?.unitId);
   const date = str(req.body?.date);
   const start = str(req.body?.start);
@@ -683,7 +702,7 @@ router.post("/sessions", requireAuth, requireHndWrite, async (req, res) => {
   res.status(201).json(sSession(s));
 });
 
-router.put("/sessions/:id", requireAuth, requireHndWrite, async (req, res) => {
+router.put("/sessions/:id", requireAuth, requireRegisters, async (req, res) => {
   const existing = await prisma.hndSession.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Session not found" });
   const data = {};
@@ -716,8 +735,24 @@ router.put("/sessions/:id", requireAuth, requireHndWrite, async (req, res) => {
   res.json(sSession(s));
 });
 
-router.delete("/sessions/:id", requireAuth, requireHndWrite, async (req, res) => {
-  try { await prisma.hndSession.delete({ where: { id: req.params.id } }); res.json({ ok: true }); }
+router.delete("/sessions/:id", requireAuth, requireRegisters, async (req, res) => {
+  // A closed term's registers are the record an awarding-body or UKVI audit treats as
+  // final. Editing one is gated behind the 423 below; DELETING one — which cascades
+  // away every mark on it — was not gated at all, so the lock protected the marks and
+  // not the register that held them.
+  const existing = await prisma.hndSession.findUnique({
+    where: { id: req.params.id },
+    include: { unit: { include: { term: true } }, _count: { select: { marks: true } } },
+  });
+  if (!existing) return res.status(404).json({ error: "Session not found" });
+  const term = existing.unit?.term;
+  if (term && existing._count.marks > 0 && req.body?.override !== true) {
+    const today = localDate();
+    if (today < term.start || today > term.end) {
+      return res.status(423).json({ error: `${term.name} is ${today > term.end ? "over" : "not open yet"} — this register holds ${existing._count.marks} mark${existing._count.marks === 1 ? "" : "s"} and can't be deleted while the term is closed.`, locked: true });
+    }
+  }
+  try { await prisma.hndSession.delete({ where: { id: existing.id } }); res.json({ ok: true }); }
   catch (_e) { res.status(404).json({ error: "Session not found" }); }
 });
 
@@ -730,7 +765,7 @@ const MAX_WEEKLY_SESSIONS = 60; // ~14 months of weeks — a safety cap, not a l
 // No register can hold more rows than a unit has students; 500 leaves generous room
 // while keeping one save to a transaction the database can finish quickly.
 const MAX_REGISTER_ROWS = 500;
-router.post("/units/:id/sessions/generate", requireAuth, requireHndWrite, async (req, res) => {
+router.post("/units/:id/sessions/generate", requireAuth, requireRegisters, async (req, res) => {
   const mod = await prisma.unit.findUnique({ where: { id: req.params.id } });
   if (!mod) return res.status(404).json({ error: "Unit not found" });
 
@@ -847,7 +882,7 @@ router.get("/sessions/:id/register", requireAuth, async (req, res) => {
 // Save the register. Accepts a partial list — only the students present in the
 // body are written, so a half-finished register can be saved and resumed.
 // A row with status null/"" clears that student's mark.
-router.put("/sessions/:id/register", requireAuth, requireHndWrite, async (req, res) => {
+router.put("/sessions/:id/register", requireAuth, requireRegisters, async (req, res) => {
   const session = await prisma.hndSession.findUnique({ where: { id: req.params.id }, include: { unit: { include: { term: true } } } });
   if (!session) return res.status(404).json({ error: "Session not found" });
 
@@ -904,7 +939,12 @@ router.put("/sessions/:id/register", requireAuth, requireHndWrite, async (req, r
     if (stray.length) return res.status(400).json({ error: `${stray.length} student${stray.length === 1 ? " is" : "s are"} not enrolled on this unit` });
   }
 
-  const takenBy = req.user?.name || null;
+  // Stamp an out-of-term correction so it is identifiable afterwards. A reopened
+  // register was written exactly like an in-term one, so nothing in the data
+  // distinguished a mark taken on the day from one added months after the term closed
+  // — which is the first question an audit asks.
+  const outOfTerm = Boolean(term && req.body?.override === true);
+  const takenBy = req.user?.name ? (outOfTerm ? `${req.user.name} (out-of-term correction)` : req.user.name) : null;
   await prisma.$transaction(rows.map((r) => (
     r.status === null
       ? prisma.attendanceMark.deleteMany({ where: { sessionId: session.id, studentId: r.studentId } })
@@ -1032,12 +1072,25 @@ router.get("/attendance", requireAuth, async (req, res) => {
   ]);
 
   // studentId -> Map(unitId -> {P,L,E,A}); plus per-unit and global totals.
+  //
+  // The totals must obey the SAME leaver rule as the rows below, or the table
+  // contradicts itself. This loop had no enrolment filter while every row skipped
+  // units the student had left, so after any Moodle attendance import — which writes
+  // marks onto a synthetic TUTORIAL unit nobody is enrolled on — every student row
+  // read 100% while the "Cohort average", the "Across all units" donut and the
+  // headline "Overall attendance" card read 75%, with "at risk: 0" beside it.
+  const enrolledPairs = new Set(
+    students.flatMap((s) => s.enrolments.map((e) => `${s.id}|${e.unitId}`))
+  );
   const index = new Map();
   const modTot = new Map();
   const gTot = { P: 0, L: 0, E: 0, A: 0 };
   for (const r of perSM) {
     if (!index.has(r.sid)) index.set(r.sid, new Map());
     index.get(r.sid).set(r.mid, r);
+    // Still indexed above (so the cell renders, flagged enrolled:false), but not
+    // counted into any aggregate.
+    if (!enrolledPairs.has(`${r.sid}|${r.mid}`)) continue;
     const mt = modTot.get(r.mid) || { P: 0, L: 0, E: 0, A: 0 };
     mt.P += r.p; mt.L += r.l; mt.E += r.e; mt.A += r.a; modTot.set(r.mid, mt);
     gTot.P += r.p; gTot.L += r.l; gTot.E += r.e; gTot.A += r.a;

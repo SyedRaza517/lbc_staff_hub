@@ -24,6 +24,13 @@ const lastMondayOf = (year, month) => { const d = mkUTC(year, month + 1, 0); ret
 const substitute = (d) => { const wd = d.getUTCDay(); return wd === 6 ? addDays(d, 2) : wd === 0 ? addDays(d, 1) : d; };
 
 // The 8 England & Wales bank holidays for `year`, as { date: 'YYYY-MM-DD', name }.
+// One-off royal bank holidays — no rule derives these; Parliament grants them. Kept
+// byte-identical in meaning to the server's ONE_OFFS table.
+const ONE_OFFS = {
+  2022: { add: [{ name: "Platinum Jubilee", date: "2022-06-02" }, { name: "Platinum Jubilee holiday", date: "2022-06-03" }], remove: ["2022-05-30"] },
+  2023: { add: [{ name: "Coronation of King Charles III", date: "2023-05-08" }], remove: [] },
+};
+
 export function ukBankHolidays(year) {
   const easter = easterSunday(year);
   // Christmas & Boxing Day substitution interact, so resolve them together.
@@ -43,9 +50,15 @@ export function ukBankHolidays(year) {
     { name: "Christmas Day", date: mkUTC(year, 11, xmasDay) },
     { name: "Boxing Day", date: mkUTC(year, 11, boxDay) },
   ];
-  return list
-    .map((h) => ({ name: h.name, date: iso(h.date) }))
-    .sort((a, b) => a.date.localeCompare(b.date));
+  const dated = list.map((h) => ({ name: h.name, date: iso(h.date) }));
+  // One-off royal holidays, mirroring server/src/bankHolidays.js exactly — the two
+  // must agree on every date or the client quotes a different cost for a booking than
+  // the server stores. Verified against gov.uk.
+  const oneOff = ONE_OFFS[year];
+  const withOneOffs = oneOff
+    ? [...dated.filter((h) => !oneOff.remove.includes(h.date)), ...oneOff.add]
+    : dated;
+  return withOneOffs.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 // Bank holidays across a small span of years, so the calendar can page forwards/back.

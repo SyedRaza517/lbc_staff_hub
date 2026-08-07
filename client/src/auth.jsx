@@ -40,7 +40,15 @@ export function AuthProvider({ children }) {
               // A wrong finger or a cancel leaves them at the password screen, which
               // is the correct outcome — never silently discard the saved session on
               // a cancel, or one mis-tap costs them the convenience entirely.
-              else if (!ok.cancelled && /invalid|lockout|not enrolled/i.test(ok.error || "")) await forgetSession();
+              //
+              // Matched on the machine-readable CODE. This tested the human sentence
+              // for "invalid|lockout|not enrolled", and none of the messages
+              // verifyBiometric can actually produce contain any of those words — so
+              // the branch never ran once, and a session whose sensor was gone for
+              // good was retried on every single launch instead of being cleaned up.
+              // biometryLockout is deliberately absent: it is temporary, and throwing
+              // the session away over it would punish the user for a bad scan.
+              else if (!ok.cancelled && ["biometryNotEnrolled", "biometryNotAvailable", "passcodeNotSet", "noDeviceCredential"].includes(ok.code)) await forgetSession();
             }
           }
         } catch (_) { /* biometrics are a convenience; fall through to the password */ }
@@ -65,11 +73,24 @@ export function AuthProvider({ children }) {
     const onUnauthorized = () => {
       setUser(null);
       // A 401 means the token is dead — expired, or revoked by a password change or
-      // reset bumping tokenVersion. A dead token is worth nothing remembered, and
-      // keeping it means every reopen prompts for a fingerprint, restores the same
-      // dead token and drops the user at the password screen with no explanation.
-      // The lock PREFERENCE stays on, so signing in again re-remembers automatically.
-      import("./biometric").then(({ forgetSession }) => forgetSession()).catch(() => {});
+      // reset bumping tokenVersion.
+      //
+      // Clear the CREDENTIAL and the preference too, not just the session. Clearing
+      // only the session left the previous user's biometric credential armed on the
+      // device: the next person to sign in was silently re-remembered under it, and
+      // the first user could then tap "Sign in with Face ID" and land inside the
+      // second user's session. logout() has always done the full clear; this path is
+      // the one that actually happens on a shared machine.
+      import("./biometric").then(({ clearBiometricPrefs, consumeRestored }) => {
+        clearBiometricPrefs();
+        // Drop any pending "already verified at launch" flag, so it cannot be spent
+        // on the NEXT sign-in and silently skip the app lock.
+        consumeRestored();
+      }).catch(() => {});
+      // A stored password that the server has just rejected is worse than useless —
+      // it prefills the form with a value that will fail again and walk the user into
+      // the login rate-limiter. Keep the address, drop the secret.
+      import("./rememberEmail").then(({ forgetRememberedPassword }) => forgetRememberedPassword()).catch(() => {});
     };
     window.addEventListener("auth:unauthorized", onUnauthorized);
     return () => window.removeEventListener("auth:unauthorized", onUnauthorized);
@@ -91,8 +112,17 @@ export function AuthProvider({ children }) {
     setUser(user);
     // Keep the remembered copy in step with the live one, so unlocking never
     // restores a token that expired weeks ago.
-    import("./biometric").then(({ isBiometricEnabled, rememberSession }) => {
-      if (isBiometricEnabled()) rememberSession(token);
+    // The owner travels with the token. Without it the remembered session was
+    // device-global, so on a shared machine the next person to sign in was silently
+    // re-remembered under the previous user's biometric credential.
+    import("./biometric").then(({ isBiometricEnabled, rememberSession, storedOwner, clearBiometricPrefs }) => {
+      if (!isBiometricEnabled()) return;
+      const owner = String(user?.email || "").trim().toLowerCase();
+      const held = storedOwner();
+      // A different person signing in on this device: the previous owner's lock and
+      // credential are not theirs to inherit, so start clean rather than re-arm.
+      if (held && owner && held !== owner) { clearBiometricPrefs(); return; }
+      rememberSession(token, owner);
     }).catch(() => {});
   };
 
@@ -123,7 +153,11 @@ export function AuthProvider({ children }) {
   // Detach this device from push before the session goes, otherwise a shared or
   // handed-on phone keeps receiving the previous user's leave decisions.
   const logout = async () => {
-    try { await unregisterForPush(); } catch (_) { /* never block signing out */ }
+    // Fire-and-forget. This used to be awaited, which on a weak connection blocked
+    // sign-out for the full 30-second request timeout with no visual feedback — on
+    // the biometric lock screen, where "Sign out instead" is the documented escape
+    // from a stuck lock, that made the one working exit look broken.
+    try { unregisterForPush().catch(() => {}); } catch (_) { /* never block signing out */ }
     // The app-lock preference is stored per DEVICE, so clear it on the way out —
     // otherwise the next account to sign in on this phone inherits it.
     try { clearBiometricPrefs(); } catch (_) {}

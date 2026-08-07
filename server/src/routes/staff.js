@@ -1,8 +1,9 @@
 const router = require("express").Router();
 const prisma = require("../db");
 const { sStaff } = require("../serializers");
-const { requireAuth, requireAdmin, requireSuperAdmin, requireAnyPage, hasPage, hashPassword } = require("../auth");
+const { requireAuth, requireAdmin, requireSuperAdmin, requireAnyPage, hasPage, hashPassword, blockedByRank } = require("../auth");
 const { notifyStaff } = require("../notify");
+const { sendEmail } = require("../email");
 const { isInt32, MAX_ALLOWANCE_DAYS, isString, isNonEmptyString, isHomeSite, ADMIN_PAGES } = require("../validate");
 const { sendInvite, unguessablePassword } = require("../invite");
 
@@ -35,7 +36,12 @@ router.get("/", requireAuth, async (req, res) => {
   // behalf — without it the client computed 0 for everyone, showed negative remaining
   // days, and disabled the booking button entirely. It is an entitlement figure, not
   // the personal data (email, 2FA state, admin pages) this shape exists to withhold.
-  const leaveAdmin = hasPage(u, ["balances", "calendar", "requests", "approvals"]);
+  // "overview" and "kpi" belong here too. Both already receive everyone's leave
+  // (leave.js LEAVE_READ_PAGES) and everyone's adjustments (adjustments.js), but were
+  // left off this list — so the client got `allowance: undefined`, coerced it to 0,
+  // and the KPI table read "12/0d", the drill-down "12 of 0 days", the CSV "12/0",
+  // and the Balances screen showed −12 days remaining in green.
+  const leaveAdmin = hasPage(u, ["balances", "calendar", "requests", "approvals", "overview", "kpi"]);
   res.json(staff.map((s) => s.id === u.id
     ? sStaff(s)
     : {
@@ -96,10 +102,10 @@ router.post("/", requireAuth, requireAnyPage(["staff", "settings"]), async (req,
 // this, an admin holding only the "staff" page could point the Super Admin's email at
 // their own inbox, run a password reset, and take the account over — or simply delete
 // it and freeze all access management for good. Only another Super Admin may act on one.
+// Now a RANK check, not a Super-Admin-only one — see blockedByRank in ../auth.js for
+// why protecting a single row was not enough.
 function guardSuperAdmin(target, req) {
-  if (!target?.isSuperAdmin) return null;
-  if (req.user?.isSuperAdmin) return null;
-  return "Only a Super Admin can change or remove the Super Admin account";
+  return blockedByRank(req.user, target);
 }
 
 // PUT /api/staff/:id  (admin)
@@ -130,8 +136,24 @@ router.put("/:id", requireAuth, requireAnyPage(["staff", "settings"]), async (re
     if (!isValidAllowance(allowance)) return res.status(400).json({ error: `Allowance must be a whole number between 0 and ${MAX_ALLOWANCE_DAYS}` });
     data.allowance = Number(allowance);
   }
+  // Changing someone's email points their password-reset link at a new mailbox, so it
+  // is an account-transfer, not an edit. Treat it like one: end their sessions, kill
+  // any reset link already in flight, and tell the OLD address — otherwise this was a
+  // silent first step in taking an account over.
+  const emailChanging = Boolean(data.email && data.email !== target.email);
+  if (emailChanging) data.tokenVersion = { increment: 1 };
   try {
     const staff = await prisma.staff.update({ where: { id: req.params.id }, data });
+    if (emailChanging) {
+      await prisma.passwordReset.updateMany({ where: { staffId: staff.id, usedAt: null }, data: { usedAt: new Date() } });
+      notifyStaff(staff.id, {
+        type: "warning",
+        message: `${req.user.name} changed the email address on your account from ${target.email} to ${staff.email}. If you weren't expecting this, tell the college office straight away.`,
+      });
+      sendEmail(target.email, "Your Staff Hub email address was changed",
+        `Hello ${target.name},\n\n${req.user.name} changed the email address on your London Brookes College Staff Hub account to ${staff.email}.\n\nIf you did not expect this, contact the college office immediately — whoever holds the new address can now request a password reset for your account.`
+      ).catch(() => {});
+    }
     res.json(sStaff(staff));
   } catch (e) {
     if (e.code === "P2002") return res.status(400).json({ error: "Email already in use" });
