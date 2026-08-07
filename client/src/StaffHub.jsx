@@ -1352,6 +1352,214 @@ function TimesheetForm({ store, me, month, entry, onDone }) {
   );
 }
 
+/* ----- Timesheet: month grid + day editor ----- */
+// The paper timesheet the college already uses is a month calendar with "Present" and
+// the hours written in each day. This is that, made editable: tap a day, pick the shift
+// you worked, save. The session list underneath is unchanged — it stays the place to
+// see and delete individual entries.
+
+// The shifts that actually recur on the paper sheets, so a normal day is two taps.
+const SHIFT_PRESETS = [
+  { label: "10:00 – 17:00", shifts: [["10:00", "17:00"]] },
+  { label: "09:00 – 17:00", shifts: [["09:00", "17:00"]] },
+  { label: "18:00 – 21:00", shifts: [["18:00", "21:00"]] },
+  { label: "09:00 – 15:00 + 18:00 – 21:00", shifts: [["09:00", "15:00"], ["18:00", "21:00"]] },
+];
+
+const minutesBetween = (a, b) => {
+  const [sh, sm] = String(a).split(":").map(Number);
+  const [eh, em] = String(b).split(":").map(Number);
+  return (eh * 60 + em) - (sh * 60 + sm);
+};
+// "09:00" -> "9", "09:30" -> "9:30". The paper sheet writes "10 to 5", not "10:00".
+const shortTime = (t) => {
+  const [h, m] = String(t).split(":");
+  return m === "00" ? String(Number(h)) : `${Number(h)}:${m}`;
+};
+
+function TimesheetMonthGrid({ month, byDate, onPick }) {
+  const [y, m] = month.split("-").map(Number);
+  const startPad = (new Date(y, m - 1, 1).getDay() + 6) % 7;   // Monday-first, like the holiday calendar
+  const days = lastDayOfMonth(month);
+  const today = todayISO();
+
+  return (
+    <Card className="!p-3">
+      <div className="grid grid-cols-7 gap-1 text-center text-[9px] font-bold uppercase text-slate-400">
+        {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => <div key={i} className="py-0.5">{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {Array.from({ length: startPad }).map((_, i) => <div key={"p" + i} />)}
+        {Array.from({ length: days }).map((_, i) => {
+          const d = i + 1;
+          const iso = `${month}-${String(d).padStart(2, "0")}`;
+          const list = (byDate[iso] || []).slice().sort((a, b) => a.start.localeCompare(b.start));
+          const mins = list.reduce((t, e) => t + e.minutes, 0);
+          const isToday = iso === today;
+          // A day holding anything already sent or approved cannot be edited here —
+          // the same rule the per-entry buttons follow.
+          const locked = list.some(e => e.status !== "draft" && e.status !== "changes_requested");
+          const label = list.length
+            ? `${fmtDate(iso)} — ${list.map(e => `${e.start}–${e.end}`).join(", ")}`
+            : `${fmtDate(iso)} — nothing logged`;
+          return (
+            <button key={d} type="button" onClick={() => onPick(iso)} title={label} aria-label={label}
+              className={`press min-h-[62px] rounded-lg border p-1 text-left transition ${
+                list.length ? "border-transparent" : isToday ? "border-blue-300 bg-blue-50/50" : "border-slate-100 hover:border-blue-200 hover:bg-blue-50/30"}`}
+              style={list.length ? { background: locked ? "#f1f5f9" : "#eef2ff" } : {}}>
+              <span className={`block text-[10px] font-bold ${isToday ? "text-blue-700" : "text-slate-400"}`}>{d}</span>
+              {list.length > 0 && (
+                <>
+                  <span className={`block text-[8px] font-bold uppercase ${locked ? "text-slate-500" : "text-indigo-600"}`}>Present</span>
+                  {list.slice(0, 2).map(e => (
+                    <span key={e.id} className="block truncate text-[8px] font-semibold leading-tight text-slate-500">{shortTime(e.start)}–{shortTime(e.end)}</span>
+                  ))}
+                  {list.length > 2 && <span className="block text-[8px] text-slate-400">+{list.length - 2}</span>}
+                  <span className="block text-[8px] font-bold text-slate-400">{fmtHours(mins)}h</span>
+                </>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-2 px-0.5 text-[10px] text-slate-400">Tap any day to record the hours you worked.</p>
+    </Card>
+  );
+}
+
+function TimesheetDayModal({ store, date, entries, onClose, onSaved }) {
+  // Only entries the staff still holds can be changed; anything sent or approved is
+  // shown but left alone, so saving a day can never rewrite an approved record.
+  const editable = entries.filter(e => e.status === "draft" || e.status === "changes_requested");
+  const frozen = entries.filter(e => e.status !== "draft" && e.status !== "changes_requested");
+
+  const [shifts, setShifts] = useState(() =>
+    editable.length
+      ? editable.slice().sort((a, b) => a.start.localeCompare(b.start)).map(e => ({ start: e.start, end: e.end, title: e.title, mode: e.mode, note: e.note || "" }))
+      : []);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const setShift = (i, patch) => setShifts(list => list.map((sh, k) => (k === i ? { ...sh, ...patch } : sh)));
+  const addShift = () => setShifts(list => [...list, { start: list.length ? "18:00" : "09:00", end: list.length ? "21:00" : "17:00", title: "", mode: "campus", note: "" }]);
+  const removeShift = (i) => setShifts(list => list.filter((_, k) => k !== i));
+  const applyPreset = (pre) => setShifts(pre.shifts.map(([a, b]) => ({ start: a, end: b, title: "", mode: "campus", note: "" })));
+
+  const total = shifts.reduce((t, sh) => t + Math.max(0, minutesBetween(sh.start, sh.end)), 0);
+  const bad = shifts.find(sh => minutesBetween(sh.start, sh.end) <= 0);
+
+  const sig = (rows) => rows.map(r => `${r.start}-${r.end}`).sort().join("|");
+  const unchanged = sig(shifts) === sig(editable);
+
+  const save = async () => {
+    if (bad) { setErr("Each shift must end after it starts."); return; }
+    if (unchanged) { onClose(); return; }
+    setBusy(true); setErr("");
+    try {
+      // Replace the day wholesale: the shifts on screen ARE the day. Simpler than
+      // matching rows up, and every entry involved is still a draft.
+      for (const e of editable) await store.removeTimesheet(e.id);
+      for (const sh of shifts) {
+        await store.addTimesheet({
+          date, start: sh.start, end: sh.end, mode: sh.mode || "campus",
+          // The paper sheet records presence, not what was taught. Keep whatever a
+          // previous entry said; otherwise a plain default, so nothing must be typed.
+          title: (sh.title || "").trim() || "Teaching",
+          note: sh.note || "",
+        });
+      }
+      onSaved();
+    } catch (e) { setErr(e.message || "Could not save this day."); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Modal open onClose={() => !busy && onClose()} title={prettyDay(date)}>
+      <div className="space-y-3">
+        {frozen.length > 0 && (
+          <div className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-500 ring-1 ring-slate-200">
+            {frozen.length} {frozen.length === 1 ? "entry has" : "entries have"} already been sent and can't be changed here:
+            {" "}{frozen.map(e => `${e.start}–${e.end}`).join(", ")}.
+          </div>
+        )}
+
+        {/* The presets are the point — a normal day is one tap here and Save. They show
+            straight away rather than behind a "Present" toggle, because opening a blank
+            day already says the day is blank. */}
+        <div>
+          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Common shifts</p>
+          <div className="grid grid-cols-2 gap-1.5">
+            {SHIFT_PRESETS.map(pre => {
+              const on = sig(pre.shifts.map(([a, b]) => ({ start: a, end: b }))) === sig(shifts);
+              return (
+                <button key={pre.label} type="button" onClick={() => applyPreset(pre)}
+                  className={`press rounded-xl px-2 py-2.5 text-[11px] font-bold ring-1 transition ${on ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`}
+                  style={on ? { background: NAVY } : {}}>
+                  {pre.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {shifts.length > 0 && (
+          <>
+            <div className="space-y-2">
+              {shifts.map((sh, i) => (
+                <div key={i} className="rounded-xl bg-slate-50 p-2.5 ring-1 ring-slate-200">
+                  <div className="flex items-center gap-2">
+                    <input type="time" value={sh.start} onChange={e => setShift(i, { start: e.target.value })} className={inputCls + " !py-2"} />
+                    <span className="shrink-0 text-xs font-bold text-slate-400">to</span>
+                    <input type="time" value={sh.end} onChange={e => setShift(i, { end: e.target.value })} className={inputCls + " !py-2"} />
+                    <button type="button" onClick={() => removeShift(i)} aria-label="Remove this shift"
+                      className="press flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-rose-400 hover:bg-rose-50 hover:text-rose-600">
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                  <p className={`mt-1 text-[10px] font-semibold ${minutesBetween(sh.start, sh.end) <= 0 ? "text-rose-500" : "text-slate-400"}`}>
+                    {minutesBetween(sh.start, sh.end) <= 0 ? "The end time must be after the start." : `${fmtHours(minutesBetween(sh.start, sh.end))}h`}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200">
+              <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Total</span>
+              <span className="text-sm font-extrabold" style={{ color: NAVY }}>{fmtHours(total)}h</span>
+            </div>
+          </>
+        )}
+
+        <div className="grid grid-cols-2 gap-2">
+          {shifts.length < 4 && (
+            <button type="button" onClick={addShift}
+              className="press flex items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-slate-300 py-2.5 text-xs font-bold text-slate-500 hover:border-slate-400">
+              <Plus size={14} /> {shifts.length ? "Add another shift" : "Custom times"}
+            </button>
+          )}
+          {shifts.length > 0 && (
+            <button type="button" onClick={() => setShifts([])}
+              className="press rounded-xl border-2 border-slate-200 py-2.5 text-xs font-bold text-slate-500 transition hover:bg-slate-50">
+              Not working
+            </button>
+          )}
+        </div>
+
+        {shifts.length === 0 && editable.length > 0 && (
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200">
+            Saving will remove the {editable.length} {editable.length === 1 ? "entry" : "entries"} logged on this day.
+          </p>
+        )}
+        {err && <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-600">{err}</p>}
+
+        <PrimaryBtn onClick={save} disabled={busy || !!bad} className="w-full">
+          {busy ? <><Loader size={16} /> Saving…</> : <><Save size={16} /> Save day</>}
+        </PrimaryBtn>
+      </div>
+    </Modal>
+  );
+}
+
 function TimesheetScreen({ store, me }) {
   const [month, setMonth] = useState(() => monthOf(todayISO()));
   const [entries, setEntries] = useState(null); // null = loading
@@ -1359,6 +1567,7 @@ function TimesheetScreen({ store, me }) {
   const [modal, setModal] = useState(null);      // {} = add, { entry } = edit, null = closed
   const [confirmSend, setConfirmSend] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [dayOpen, setDayOpen] = useState(null);   // ISO date whose editor is open
 
   // Blank to the loading state ONLY when the month changes (a deliberate switch),
   // never on a background refresh.
@@ -1441,6 +1650,11 @@ function TimesheetScreen({ store, me }) {
         </div>
       )}
 
+      {/* The month at a glance, matching the paper sheet, and the quickest way in. */}
+      <div className="mb-3">
+        <TimesheetMonthGrid month={month} byDate={byDate} onPick={setDayOpen} />
+      </div>
+
       <button onClick={() => setModal({})} className="press shine mb-3 flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-white py-3 text-sm font-bold text-slate-600 transition hover:border-slate-400 hover:text-slate-800"><Plus size={16} /> Add a session</button>
 
       {/* Entries grouped by day */}
@@ -1486,6 +1700,11 @@ function TimesheetScreen({ store, me }) {
         <button onClick={() => setConfirmSend(true)} className="press shine mt-2 flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-sm font-bold text-white shadow-lg" style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}>
           <Send size={17} /> {monthStatus === "changes" ? "Re-send" : "Send"} timesheet — {sendable.length} session{sendable.length === 1 ? "" : "s"}, {fmtHours(sendable.reduce((s, e) => s + e.minutes, 0))}h
         </button>
+      )}
+
+      {dayOpen && (
+        <TimesheetDayModal store={store} date={dayOpen} entries={byDate[dayOpen] || []}
+          onClose={() => setDayOpen(null)} onSaved={() => { setDayOpen(null); reload(); }} />
       )}
 
       <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.entry ? "Edit session" : "Add session"}>
@@ -2885,7 +3104,7 @@ function AdminSignups({ store }) {
       const was = k === "jobTitle" ? (modal.req.role || "") : (modal.req[k] || "");
       if (v.trim() !== was) changed[k] = v.trim();
     }
-    if (!Object.keys(changed).length) { setModal(null); return; }
+    if (!Object.keys(changed).length) { store.notify("Nothing changed"); setModal(null); return; }
     setBusy(true);
     try {
       // store.updateSignup refetches the queue and toasts on its own.
@@ -2981,8 +3200,12 @@ function AdminSignups({ store }) {
                       </>}
                   <p className="flex items-center gap-1.5 text-slate-400"><Clock3 size={12} /> Requested {fmtDate(String(r.requestedAt).slice(0, 10))}</p>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button onClick={() => open(r, "rejected")} className="flex items-center justify-center gap-1.5 rounded-xl border-2 border-rose-200 py-2.5 text-sm font-bold text-rose-600 transition hover:bg-rose-50">
+                <button onClick={() => open(r, "edit")}
+                  className="press mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50">
+                  <Edit3 size={15} /> Edit details
+                </button>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button onClick={() => open(r, "rejected")} className="press flex items-center justify-center gap-1.5 rounded-xl border-2 border-rose-200 py-2.5 text-sm font-bold text-rose-600 transition hover:bg-rose-50">
                     <XCircle size={16} /> Decline
                   </button>
                   <PrimaryBtn colour="#059669" onClick={() => open(r, "approved")} className="!py-2.5">
@@ -3023,12 +3246,12 @@ function AdminSignups({ store }) {
         </div>
       </div>
 
-      <Modal open={!!modal} onClose={() => !busy && setModal(null)} title={modal?.action === "approved" ? "Approve sign-up" : "Decline sign-up"}>
+      <Modal open={!!modal} onClose={() => !busy && setModal(null)} title={modal?.action === "edit" ? "Edit sign-up request" : modal?.action === "approved" ? "Approve sign-up" : "Decline sign-up"}>
         <div className="space-y-3">
-          {modal?.action === "approved" ? (
+          {modal?.action !== "rejected" ? (
             <div className="space-y-2.5 rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
               <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                What they submitted — correct anything before approving
+                {modal?.action === "edit" ? "What they submitted — correct anything and save" : "What they submitted — correct anything before approving"}
               </p>
               <Field label="Full name">
                 <input value={edit?.name || ""} onChange={e => setEdit(v => ({ ...v, name: e.target.value }))} className={inputCls} />
@@ -3072,7 +3295,7 @@ function AdminSignups({ store }) {
             </div>
           )}
 
-          {modal?.action === "approved" ? (
+          {modal?.action === "edit" ? null : modal?.action === "approved" ? (
             modal?.req.kind === "student" ? (
               <p className="flex items-start gap-1.5 rounded-xl bg-violet-50 px-3 py-2 text-[11px] text-violet-700 ring-1 ring-violet-100">
                 <GraduationCap size={13} className="mt-px shrink-0" />
@@ -3098,14 +3321,23 @@ function AdminSignups({ store }) {
             </Field>
           )}
 
+          {modal?.action === "edit" && (
+            <p className="flex items-start gap-1.5 rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200">
+              <Info size={13} className="mt-px shrink-0" />
+              Saving leaves the request pending — you can still approve or decline it afterwards.
+            </p>
+          )}
           {modal?.action === "approved" && (
             <button onClick={saveEditsOnly} disabled={busy}
               className="press w-full rounded-xl border-2 border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40">
               <Save size={15} className="mr-1.5 inline" /> Save changes without deciding
             </button>
           )}
-          <PrimaryBtn colour={modal?.action === "approved" ? "#059669" : MAROON} onClick={confirm} disabled={busy} className="w-full">
-            {modal?.action === "approved" ? <><CheckCircle2 size={16} /> {modal?.req.kind === "student" ? "Approve & activate student" : "Approve & create account"}</> : <><XCircle size={16} /> Confirm decline</>}
+          <PrimaryBtn colour={modal?.action === "edit" ? NAVY : modal?.action === "approved" ? "#059669" : MAROON}
+            onClick={modal?.action === "edit" ? saveEditsOnly : confirm} disabled={busy} className="w-full">
+            {modal?.action === "edit" ? <><Save size={16} /> {busy ? "Saving…" : "Save changes"}</>
+              : modal?.action === "approved" ? <><CheckCircle2 size={16} /> {modal?.req.kind === "student" ? "Approve & activate student" : "Approve & create account"}</>
+              : <><XCircle size={16} /> Confirm decline</>}
           </PrimaryBtn>
         </div>
       </Modal>
@@ -3949,6 +4181,8 @@ function HndPercentages({ store }) {
   const { attendance } = store;
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("name"); // name | overall
+  const [courseId, setCourseId] = useState("");   // "" = every course
+  const [showTutorial, setShowTutorial] = useState(false);
   // Everything derived here runs BEFORE the loading guard below, because usePaged is a
   // hook: skipping it on the first (attendance === null) render and calling it once the
   // data arrived changed the hook count between renders, which React rejects outright
@@ -3956,6 +4190,37 @@ function HndPercentages({ store }) {
   const { units = [], rows = [], unitTotals = {}, overall = {} } = attendance || {};
   const ql = query.trim().toLowerCase();
   let list = rows.filter(r => !ql || r.student.name.toLowerCase().includes(ql) || r.student.studentRef.includes(ql) || r.student.email.toLowerCase().includes(ql));
+
+  // Every unit in the college as a column made this table unreadable: a row was mostly
+  // "not enrolled", and the one figure that mattered was somewhere off to the right.
+  //
+  // Columns are now the units that the people ON SCREEN are actually enrolled on,
+  // within the chosen course. Searching for one student therefore narrows the table to
+  // that student's own units, which is the "as per course and student" the register is
+  // for. The synthetic TUTORIAL units — one per course, holding imported tutorial and
+  // seminar attendance — stay hidden unless asked for; four identical "TUTORIAL"
+  // headings told nobody anything.
+  const enrolledUnitIds = useMemo(() => {
+    const seen = new Set();
+    list.forEach(r => Object.keys(r.units || {}).forEach(id => { if (r.units[id]?.possible > 0) seen.add(id); }));
+    return seen;
+  }, [list]);
+
+  const visibleUnits = useMemo(() => {
+    const notTutorial = (m) => showTutorial || m.code !== "TUTORIAL";
+    const pick = (useCourse) => units.filter(m => {
+      if (!notTutorial(m)) return false;
+      if (useCourse && courseId && m.courseId !== courseId) return false;
+      // With a search running, keep only the columns those students actually sit.
+      if (ql && !enrolledUnitIds.has(m.id)) return false;
+      return true;
+    });
+    const scoped = pick(true);
+    // Searching a student who isn't on the chosen course left the table with no unit
+    // columns at all, which reads as "no data" rather than "wrong filter". The student
+    // is the narrower, more deliberate choice, so their own units win.
+    return (ql && scoped.length === 0) ? pick(false) : scoped;
+  }, [units, courseId, showTutorial, ql, enrolledUnitIds]);
   list = sort === "overall"
     ? [...list].sort((a, b) => (a.overall.pct ?? 101) - (b.overall.pct ?? 101)) // lowest first — those needing chasing
     : list;
@@ -3968,11 +4233,11 @@ function HndPercentages({ store }) {
   const exportCSV = () => {
     downloadCSV(`hnd-attendance-${slug}.csv`, [
       { key: "name", label: "Student" }, { key: "ref", label: "Student number" }, { key: "email", label: "Email" },
-      ...units.map(m => ({ key: m.id, label: `${m.code} %` })),
+      ...visibleUnits.map(m => ({ key: m.id, label: `${m.code} %` })),
       { key: "overall", label: "Overall %" }, { key: "present", label: "Present" }, { key: "late", label: "Late" }, { key: "excused", label: "Excused" }, { key: "absent", label: "Absent" },
     ], rows.map(r => ({
       name: r.student.name, ref: r.student.studentRef, email: r.student.email,
-      ...Object.fromEntries(units.map(m => [m.id, r.units[m.id] ? r.units[m.id].pct : ""])),
+      ...Object.fromEntries(visibleUnits.map(m => [m.id, r.units[m.id] ? r.units[m.id].pct : ""])),
       overall: r.overall.pct ?? "", present: r.overall.P, late: r.overall.L, excused: r.overall.E, absent: r.overall.A,
     })));
     store.notify(`Exported attendance CSV — ${scopeName}`);
@@ -4000,13 +4265,13 @@ function HndPercentages({ store }) {
         <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 fade-up lg:col-span-2">
           <p className="mb-3 text-sm font-bold text-slate-700">Attendance by unit</p>
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={units.map(m => ({ code: m.code, pct: unitTotals[m.id]?.pct ?? 0 }))}>
+            <BarChart data={visibleUnits.map(m => ({ code: m.code, pct: unitTotals[m.id]?.pct ?? 0 }))}>
               <CartesianGrid stroke={GRID} vertical={false} />
               <XAxis dataKey="code" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
               <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 13 }} formatter={(v) => [`${v}%`, "Attendance"]} />
               <Bar dataKey="pct" radius={[6, 6, 0, 0]}>
-                {units.map(m => <Cell key={m.id} fill={pctTone(unitTotals[m.id]?.pct ?? null).colour} />)}
+                {visibleUnits.map(m => <Cell key={m.id} fill={pctTone(unitTotals[m.id]?.pct ?? null).colour} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -4049,6 +4314,17 @@ function HndPercentages({ store }) {
           ))}
         </div>
         {atRisk > 0 && <span className="flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={13} /> {atRisk} below 70%</span>}
+        <select value={courseId} onChange={e => setCourseId(e.target.value)}
+          className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 outline-none focus:border-blue-400">
+          <option value="">All courses</option>
+          {(store.courses || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <button type="button" onClick={() => setShowTutorial(v => !v)}
+          title="Tutorial and seminar attendance imported from Moodle, held on a synthetic unit per course"
+          className={`press rounded-xl px-3 py-1.5 text-xs font-bold ring-1 transition ${showTutorial ? "text-white ring-transparent" : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50"}`}
+          style={showTutorial ? { background: NAVY } : {}}>
+          Tutorials
+        </button>
         <ExportBtn className="ml-auto" onClick={exportCSV} label="Export attendance" />
       </div>
 
@@ -4058,7 +4334,7 @@ function HndPercentages({ store }) {
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
               <tr>
                 <th className="px-5 py-3">Student</th>
-                {units.map(m => <th key={m.id} className="px-4 py-3 text-center" title={m.name}>{m.code}</th>)}
+                {visibleUnits.map(m => <th key={m.id} className="px-4 py-3 text-center" title={m.name}>{m.code}</th>)}
                 <th className="px-5 py-3 text-center">Overall</th>
               </tr>
             </thead>
@@ -4071,7 +4347,7 @@ function HndPercentages({ store }) {
                       <div><p className="font-semibold text-slate-700">{r.student.name}</p><p className="text-[11px] text-slate-400">{r.student.studentRef}</p></div>
                     </div>
                   </td>
-                  {units.map(m => {
+                  {visibleUnits.map(m => {
                     const cell = r.units[m.id];
                     if (!cell) return <td key={m.id} className="px-4 py-3 text-center text-xs text-slate-300">not enrolled</td>;
                     const tone = pctTone(cell.pct);
@@ -8247,7 +8523,7 @@ function StudentCombo({ students, value, onChange }) {
 
 function AdminPAT({ store }) {
   const { refreshHnd, refreshInteractions, interactionsLoaded } = store;
-  const blank = () => ({ studentId: "", date: todayISO(), time: nowHM(), queryType: "", summary: "", followUpActions: "", followUpRequired: false, tutor: "" });
+  const blank = () => ({ studentId: "", date: todayISO(), time: nowHM(), queryType: "", summary: "", followUpActions: "", followUpRequired: false, followUpDate: "", tutor: "" });
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
   const [form, setForm] = useState(blank());
@@ -8270,7 +8546,7 @@ function AdminPAT({ store }) {
   };
 
   const openAdd = () => { setEdit(null); setForm(blank()); setModal(true); };
-  const openEdit = (it) => { setEdit(it); setForm({ studentId: it.studentId, date: it.date, time: it.time, queryType: it.queryType, summary: it.summary || "", followUpActions: it.followUpActions || "", followUpRequired: !!it.followUpRequired, tutor: it.tutor || "" }); setModal(true); };
+  const openEdit = (it) => { setEdit(it); setForm({ studentId: it.studentId, date: it.date, time: it.time, queryType: it.queryType, summary: it.summary || "", followUpActions: it.followUpActions || "", followUpRequired: !!it.followUpRequired, followUpDate: it.followUpDate || "", tutor: it.tutor || "" }); setModal(true); };
   const save = async () => {
     setBusy(true);
     try {
@@ -8307,16 +8583,20 @@ function AdminPAT({ store }) {
       { key: "ref", label: "Student reference" }, { key: "name", label: "Student name" }, { key: "course", label: "Course" },
       { key: "date", label: "Interaction date" }, { key: "time", label: "Time" }, { key: "type", label: "Query type" },
       { key: "summary", label: "Interaction summary" }, { key: "actions", label: "Follow up actions" },
-      { key: "followUp", label: "Follow up required" }, { key: "tutor", label: "Tutor" }, { key: "loggedBy", label: "Logged by" },
+      { key: "followUp", label: "Follow up required" }, { key: "followUpDate", label: "Follow up date" },
+      { key: "tutor", label: "Tutor" }, { key: "loggedBy", label: "Logged by" },
     ], list.map(it => ({
       ref: it.student?.studentRef || "", name: it.student?.name || "", course: courseOf(it.studentId),
       date: it.date, time: it.time, type: it.queryType, summary: it.summary, actions: it.followUpActions,
-      followUp: it.followUpRequired ? "Yes" : "No", tutor: it.tutor || "", loggedBy: it.loggedBy || "",
+      followUp: it.followUpRequired ? "Yes" : "No", followUpDate: it.followUpRequired ? (it.followUpDate || "") : "",
+      tutor: it.tutor || "", loggedBy: it.loggedBy || "",
     })));
     store.notify("Exported interactions CSV");
   };
 
-  const formValid = form.studentId && form.date && form.time && form.queryType;
+  // A follow-up with no date is the thing that goes missing, so it is required.
+  const formValid = form.studentId && form.date && form.time && form.queryType
+    && (!form.followUpRequired || !!form.followUpDate);
 
   if (!interactionsLoaded) {
     return (<><AdminHeader title="PAT — Student Interactions" subtitle="Loading the interaction log…" Icon={MessageSquare} /><div className="space-y-3">{[0, 1, 2].map(i => <div key={i} className="skeleton h-16 rounded-2xl" />)}</div></>);
@@ -8362,7 +8642,8 @@ function AdminPAT({ store }) {
               <tr>
                 <th className="px-5 py-3">Student</th><th className="px-5 py-3">Course</th><th className="px-5 py-3 whitespace-nowrap">Date / time</th>
                 <th className="px-5 py-3">Query type</th><th className="px-5 py-3">Summary</th><th className="px-5 py-3">Follow-up actions</th>
-                <th className="px-5 py-3 text-center whitespace-nowrap">Follow-up?</th><th className="px-5 py-3 text-right">Actions</th>
+                <th className="px-5 py-3 text-center whitespace-nowrap">Follow-up?</th>
+                <th className="px-5 py-3 whitespace-nowrap">Follow-up date</th><th className="px-5 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -8385,6 +8666,17 @@ function AdminPAT({ store }) {
                       {it.followUpRequired
                         ? <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700">Yes</span>
                         : <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-400">No</span>}
+                    </td>
+                    <td className="px-5 py-3 whitespace-nowrap">
+                      {it.followUpRequired && it.followUpDate ? (
+                        // A follow-up whose date has passed is the one worth seeing.
+                        <span className={`text-[13px] font-semibold ${it.followUpDate < todayISO() ? "text-rose-600" : "text-slate-600"}`}>
+                          {fmtDate(it.followUpDate)}
+                          {it.followUpDate < todayISO() && <span className="ml-1.5 rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">Overdue</span>}
+                        </span>
+                      ) : it.followUpRequired ? (
+                        <span className="text-[11px] font-semibold text-amber-600">No date set</span>
+                      ) : <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1 whitespace-nowrap">
@@ -8426,10 +8718,21 @@ function AdminPAT({ store }) {
           <Field label="Follow up required?">
             <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
               {[{ v: false, l: "No" }, { v: true, l: "Yes" }].map(o => (
-                <button key={String(o.v)} type="button" onClick={() => setForm(f => ({ ...f, followUpRequired: o.v }))} className={`press flex-1 rounded-lg py-2 text-xs font-bold transition ${form.followUpRequired === o.v ? (o.v ? "bg-amber-500 text-white shadow-sm" : "bg-white text-slate-700 shadow-sm") : "text-slate-400"}`}>{o.l}</button>
+                <button key={String(o.v)} type="button"
+                  onClick={() => setForm(f => ({ ...f, followUpRequired: o.v, followUpDate: o.v ? f.followUpDate : "" }))}
+                  className={`press flex-1 rounded-lg py-2 text-xs font-bold transition ${form.followUpRequired === o.v ? (o.v ? "bg-amber-500 text-white shadow-sm" : "bg-white text-slate-700 shadow-sm") : "text-slate-400"}`}>{o.l}</button>
               ))}
             </div>
           </Field>
+          {/* Only asked for when a follow-up is required — a date on an interaction
+              that needs no follow-up would be noise in the log and the export. */}
+          {form.followUpRequired && (
+            <Field label="Follow up date *">
+              <input type="date" value={form.followUpDate} min={form.date}
+                onChange={e => setForm(f => ({ ...f, followUpDate: e.target.value }))} className={inputCls} />
+              {!form.followUpDate && <p className="mt-1 text-[11px] font-semibold text-amber-600">Set the date the follow-up is due.</p>}
+            </Field>
+          )}
           {edit?.loggedBy && <p className="text-[11px] text-slate-400">Logged by {edit.loggedBy}.</p>}
           <PrimaryBtn onClick={save} disabled={busy || !formValid} className="w-full">{busy ? <><Loader size={16} /> Saving…</> : <><Save size={16} /> {edit ? "Save changes" : "Log interaction"}</>}</PrimaryBtn>
         </div>

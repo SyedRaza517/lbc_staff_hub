@@ -66,6 +66,16 @@ async function validate(body, partial) {
     if (typeof body.followUpRequired !== "boolean") return { error: "followUpRequired must be true or false" };
     data.followUpRequired = body.followUpRequired;
   }
+  if (body?.followUpDate !== undefined) {
+    const d = str(body.followUpDate);
+    if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) return { error: "followUpDate must be a date (YYYY-MM-DD)" };
+    data.followUpDate = d || null;
+  }
+  // A date without a follow-up is meaningless, so switching the follow-up off clears
+  // it. Read the incoming value when there is one, otherwise the stored one — checking
+  // only the body made PUT {followUpDate} on an existing follow-up wipe what it set.
+  const wantsFollowUp = data.followUpRequired !== undefined ? data.followUpRequired : undefined;
+  if (wantsFollowUp === false) data.followUpDate = null;
   if (body?.tutor !== undefined) data.tutor = str(body.tutor).slice(0, 200);
   return { data };
 }

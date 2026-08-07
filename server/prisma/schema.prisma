@@ -477,6 +477,7 @@ model Interaction {
   summary          String   @default("")
   followUpActions  String   @default("")
   followUpRequired Boolean  @default(false)
+  followUpDate     String?  // YYYY-MM-DD, only meaningful when followUpRequired
   tutor            String   @default("")  // staff member who conducted the meeting
   loggedBy         String?                // who recorded the interaction
   createdAt        DateTime @default(now())
