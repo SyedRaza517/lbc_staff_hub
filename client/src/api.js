@@ -237,6 +237,8 @@ export const api = {
   // Student reviews — a lecturer's record of a progress conversation. The scope is
   // decided by the server from the token: staff see their own, students see the ones
   // about them, admins see everything.
+  // A lecturer's teaching load: their units, attendance, marking outstanding.
+  staffTeaching: (id) => request(`/hnd/staff/${id}/teaching`),
   studentReviewOptions: () => request("/student-reviews/options"),
   // The student/unit pickers. Deliberately NOT listStudents()/listUnits(): those live on
   // /api/hnd, which is gated on page grants an ordinary lecturer doesn't hold, so the

@@ -443,7 +443,7 @@ async function syncFromMoodle({ dryRun = false } = {}) {
           }
         } else if (existing.marks !== marks || existing.submittedAt !== stamps.submittedAt || existing.gradedOn !== stamps.gradedOn) {
           summary.gradesUpdated++;
-          if (!dryRun) await prisma.assessmentGrade.update({ where: { id: existing.id }, data: { marks, source: "moodle", feedback: clean(item.feedback).slice(0, 2000), ...stamps } });
+          if (!dryRun) await prisma.assessmentGrade.update({ where: { id: existing.id }, data: { marks, source: "moodle", feedback: clean(item.feedback).slice(0, 2000), gradedAt: new Date(), ...stamps } });
         }
       }
     }

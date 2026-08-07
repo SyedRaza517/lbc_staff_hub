@@ -58,6 +58,12 @@ const sUnit = (m) => ({
   // The teaching window, which decides whether the unit is running, finished or
   // still to come. Set in Staff Hub; never overwritten by the Moodle sync.
   startDate: m.startDate ?? null, endDate: m.endDate ?? null,
+  // When work is due in — shown on the unit in both Registers and Assessments.
+  submissionDate: m.submissionDate ?? null,
+  // The staff account teaching this unit, when one is linked. `tutor` above stays as
+  // the display name, so a unit assigned before this existed still shows a name.
+  tutorStaffId: m.tutorStaffId ?? null,
+  tutorName: m.tutorStaff?.name ?? m.tutor ?? "",
   cohortId: m.cohortId ?? null, termId: m.termId ?? null,
   // Present only when the query asked Prisma to count relations.
   ...(m._count ? { sessionCount: m._count.sessions, studentCount: m._count.enrolments } : {}),

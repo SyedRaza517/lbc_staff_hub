@@ -80,6 +80,7 @@ model Staff {
   timesheetEntries TimesheetEntry[]
   staffReviews     StaffReview[]
   studentReviews   StudentReview[]
+  unitsTaught      Unit[]          @relation("UnitTutor")
 }
 
 // A phone (or browser) registered to receive push notifications.
@@ -335,6 +336,14 @@ model Unit {
   // current nor past, rather than being guessed at.
   startDate   String?
   endDate     String?
+  // When work for this unit is due in. Separate from endDate: teaching finishes, then
+  // students have a window to submit, and the two are rarely the same day.
+  submissionDate String?
+  // The staff member who teaches this unit. `tutor` above stays as free text, for a
+  // visiting lecturer with no account and for units assigned before this existed.
+  // SetNull, so removing a staff member never deletes the units they taught.
+  tutorStaff   Staff?     @relation("UnitTutor", fields: [tutorStaffId], references: [id], onDelete: SetNull)
+  tutorStaffId String?
   // A unit can belong to a specific cohort + dated term (the intake and teaching term
   // it runs in). Nullable so existing units and the "just a unit" case still work;
   // set-null on delete keeps registers if a cohort/term is removed.

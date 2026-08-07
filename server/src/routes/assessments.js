@@ -180,7 +180,15 @@ router.get("/:id/grades", requireAuth, async (req, res) => {
       // source tells the marker whether this mark is protected from the Moodle sync
       // ("manual") or will be refreshed by it ("moodle"). Without it, that guarantee
       // was only observable on the flat /assessments/grades list.
-      return { student: sStudent(s), marks: g ? g.marks : null, grade: bandOf(pct), pct, source: g ? (g.source ?? "manual") : null, gradedBy: g ? g.gradedBy : null, enrolled: enrolments.some((e) => e.studentId === s.id) };
+      return {
+        student: sStudent(s), marks: g ? g.marks : null, grade: bandOf(pct), pct,
+        source: g ? (g.source ?? "manual") : null, gradedBy: g ? g.gradedBy : null,
+        // When this mark last changed here — a full timestamp, so a marker can tell a
+        // figure that arrived in this morning's sync from one entered weeks ago.
+        // gradedOn is Moodle's own grading date and can be much older, so both travel.
+        gradedAt: g ? g.gradedAt : null, gradedOn: g ? (g.gradedOn ?? null) : null,
+        enrolled: enrolments.some((e) => e.studentId === s.id),
+      };
     }),
   });
 });

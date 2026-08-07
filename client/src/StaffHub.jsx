@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { createPortal } from "react-dom";
 import {
   Clock, Check, Calendar, Plus, FileText, ThumbsUp, UserPlus, ArrowRight,
-  LogIn, LogOut, ChevronLeft, ChevronRight, X, Bell, BellRing, Search,
+  LogIn, LogOut, ChevronLeft, ChevronRight, X, Bell, BellRing, Search, CalendarClock,
   LayoutDashboard, Users, CalendarDays, Inbox, BarChart3, Settings, Download,
   CheckCircle2, XCircle, Clock3, MapPin, Mail, Briefcase, AlertCircle,
   Smartphone, Monitor, Coffee, Plane, Heart, Stethoscope, GraduationCap,
@@ -1586,6 +1586,35 @@ function ChartTip({ active, payload, label, unit = "%", name }) {
 // or a projection when they are only a grid.
 const GRID = "#eef1f6";
 const AXIS_TICK = { fontSize: 11, fill: "#94a3b8" };
+
+// "7 Aug, 11:15" — date AND time, because several marks can arrive in one sync and a
+// marker needs to tell this morning's import from one entered weeks ago. Falls back to
+// Moodle's own grading date when the row has never been touched here.
+// Who teaches a unit and when its work is due — the two facts people were opening the
+// unit to find. Renders nothing when neither is set, so an unassigned unit stays clean.
+function UnitFacts({ unit, className = "" }) {
+  const tutor = unit?.tutorName || unit?.tutor || "";
+  const due = unit?.submissionDate;
+  if (!tutor && !due) return null;
+  return (
+    <p className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 ${className}`}>
+      {tutor && <span className="inline-flex items-center gap-1"><UserCheck size={11} className="text-slate-400" /> {tutor}</span>}
+      {due && <span className="inline-flex items-center gap-1"><CalendarClock size={11} className="text-slate-400" /> Due {fmtDate(due)}</span>}
+    </p>
+  );
+}
+
+function markStamp(gradedAt, gradedOn) {
+  const raw = gradedAt || gradedOn;
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (isNaN(d)) return null;
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleString("en-GB", {
+    day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }),
+    hour: "2-digit", minute: "2-digit",
+  }).replace(",", "");
+}
 
 function ChartCard({ title, children, className = "", accent = NAVY }) {
   return (
@@ -6458,7 +6487,7 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
   const [modal, setModal] = useState(false);
   const [step, setStep] = useState("details");       // details -> schedule (new courses only)
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ code: "", unitNumber: "", name: "", tutor: "", courseId: "", cohortId: "", termId: "", year: "", termNumber: "", startDate: "", endDate: "" });
+  const [form, setForm] = useState({ code: "", unitNumber: "", name: "", tutor: "", tutorStaffId: "", courseId: "", cohortId: "", termId: "", year: "", termNumber: "", startDate: "", endDate: "", submissionDate: "" });
   const [yearFilter, setYearFilter] = useState("");   // "" = any year, "none" = not classified
   const [termFilter, setTermFilter] = useState("");   // "" = any term
   const [statusFilter, setStatusFilter] = useState(""); // "" | current | past | future | unscheduled
@@ -6480,14 +6509,14 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
     setEdit(null); setStep("details"); setSavedId(null); setPicked([]); setPickQuery("");
     // A new unit lands in whichever year/term is being filtered, so adding one while
     // looking at "Year 1 · Term 2" files it there without re-picking.
-    setForm({ code: "", unitNumber: "", name: "", tutor: "", courseId: defaultCourse, cohortId: "", termId: "",
+    setForm({ code: "", unitNumber: "", name: "", tutor: "", tutorStaffId: "", submissionDate: "", courseId: defaultCourse, cohortId: "", termId: "",
       year: yearFilter && yearFilter !== "none" ? yearFilter : "", termNumber: yearFilter && yearFilter !== "none" ? termFilter : "", startDate: "", endDate: "" });
     setSched({ start: todayISO(), end: "", hours: 3 });
     setModal(true);
   };
   const openEdit = (m) => {
     setEdit(m); setStep("details"); setSavedId(m.id); setPicked(enrolledIds(m.id)); setPickQuery("");
-    setForm({ code: m.code, unitNumber: m.unitNumber || "", name: m.name, tutor: m.tutor || "", courseId: m.courseId || "", cohortId: m.cohortId || "", termId: m.termId || "",
+    setForm({ code: m.code, unitNumber: m.unitNumber || "", name: m.name, tutor: m.tutor || "", tutorStaffId: m.tutorStaffId || "", submissionDate: m.submissionDate || "", courseId: m.courseId || "", cohortId: m.cohortId || "", termId: m.termId || "",
       year: m.year ?? "", termNumber: m.termNumber ?? "", startDate: m.startDate || "", endDate: m.endDate || "" });
     setModal(true);
   };
@@ -6647,6 +6676,7 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
                   {uTerm && <span className={`rounded px-1.5 py-0.5 ${uState === "current" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{uTerm.name.replace("Year ", "Y").replace(" · Term ", "T")}{uState === "current" ? " · Current" : uState === "past" ? " · Ended" : " · Upcoming"}</span>}
                 </p>
                 <h3 className="text-[15px] font-extrabold leading-snug" style={{ color: NAVY_DARK }} title={m.name}>{m.name}</h3>
+                <UnitFacts unit={m} className="mt-1.5" />
 
                 {/* Attendance figures kept — this is a register system, after all */}
                 <div className="mt-3 grid grid-cols-3 gap-1.5 text-center">
@@ -6698,6 +6728,9 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Start date"><input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} className={inputCls} /></Field>
                 <Field label="End date"><input type="date" value={form.endDate} min={form.startDate || undefined} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} className={inputCls} /></Field>
+                {/* Independent of the teaching window: work is usually due after
+                    teaching ends, so this is not simply the end date. */}
+                <Field label="Submission date"><input type="date" value={form.submissionDate} onChange={e => setForm(f => ({ ...f, submissionDate: e.target.value }))} className={inputCls} /></Field>
               </div>
               {form.startDate && form.endDate && form.endDate < form.startDate
                 ? <p className="mt-2 flex items-center gap-1.5 text-[10px] font-semibold text-rose-600"><AlertCircle size={12} /> The end date is before the start date.</p>
@@ -6726,7 +6759,12 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
             <div className="grid grid-cols-3 gap-3">
               <Field label="Unit number"><input value={form.unitNumber} onChange={e => setForm(f => ({ ...f, unitNumber: e.target.value }))} placeholder="e.g. 1" className={inputCls} /></Field>
               <Field label="Unit code"><input value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))} placeholder="e.g. OBM" className={inputCls} /></Field>
-              <Field label="Tutor"><select value={form.tutor} onChange={e => setForm(f => ({ ...f, tutor: e.target.value }))} className={inputCls}><option value="">— none —</option>{store.staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></Field>
+              {/* Stores the staff id, not the name: a lecturer can then be shown their
+                  own units, and renaming an account cannot silently break the link.
+                  Units assigned before this still show their old free-text name. */}
+              <Field label="Tutor"><select value={form.tutorStaffId} onChange={e => setForm(f => ({ ...f, tutorStaffId: e.target.value }))} className={inputCls}><option value="">— unassigned —</option>{store.staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+                {!form.tutorStaffId && form.tutor && <p className="mt-1 text-[11px] text-slate-400">Currently shown as "{form.tutor}" — pick a staff member to link it properly.</p>}
+              </Field>
             </div>
             <Field label="Unit name"><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Organisational Behaviour Management" className={inputCls} /></Field>
 
@@ -7135,6 +7173,7 @@ function AssessmentUnits({ store, courseFilter, setCourseFilter, onView }) {
                 <span className="flex h-9 w-12 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{u.code.slice(0, 5)}</span>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-extrabold" style={{ color: NAVY_DARK }} title={u.name}>{u.name}</p>
+                  <UnitFacts unit={u} className="mt-1" />
                   <p className="truncate text-[11px] text-slate-400">
                     {isPlaced(u) && <span className="mr-1 rounded px-1 py-0.5 text-[10px] font-bold" style={{ background: `${NAVY}14`, color: NAVY }}>{placeShort(u)}</span>}
                     {u.unitNumber ? `Unit ${u.unitNumber} · ` : ""}{course ? course.name : "No course"} · {u.studentCount ?? 0} students
@@ -7520,7 +7559,7 @@ function GradeEntry({ store, assessment, onBack }) {
       <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 fade-up">
         <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
           <table className="w-full min-w-[560px] text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400"><tr><th className="px-5 py-3">Student</th><th className="px-5 py-3 whitespace-nowrap">Marks (/{max})</th><th className="px-5 py-3 text-center">%</th><th className="px-5 py-3 text-center">Grade</th></tr></thead>
+            <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400"><tr><th className="px-5 py-3">Student</th><th className="px-5 py-3 whitespace-nowrap">Last updated</th><th className="px-5 py-3 whitespace-nowrap">Marks (/{max})</th><th className="px-5 py-3 text-center">%</th><th className="px-5 py-3 text-center">Grade</th></tr></thead>
             <tbody>
               {paged.slice.map(r => {
                 const v = draft[r.student.id] ?? "";
@@ -7532,13 +7571,19 @@ function GradeEntry({ store, assessment, onBack }) {
                 return (
                   <tr key={r.student.id} className="border-t border-slate-100 transition-colors hover:bg-blue-50/30">
                     <td className="px-5 py-2.5"><div className="flex items-center gap-2.5"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-sm" style={{ background: r.student.colour }}>{r.student.initials}</span><div><p className="font-semibold" style={{ color: NAVY }}>{r.student.name}</p><p className="text-[11px] text-slate-400">{r.student.studentRef}{!r.enrolled && <span className="ml-1.5 rounded bg-slate-100 px-1 py-0.5 text-[9px] font-bold text-slate-500">NOT ENROLLED</span>}</p></div></div></td>
+                    <td className="px-5 py-2.5 whitespace-nowrap">
+                      {markStamp(r.gradedAt, r.gradedOn)
+                        ? <><span className="text-[11px] font-semibold text-slate-500">{markStamp(r.gradedAt, r.gradedOn)}</span>
+                            {r.source === "moodle" && <span className="ml-1.5 rounded bg-violet-50 px-1 py-0.5 text-[9px] font-bold text-violet-600 ring-1 ring-violet-100">MOODLE</span>}</>
+                        : <span className="text-[11px] text-slate-300">—</span>}
+                    </td>
                     <td className="px-5 py-2.5"><input inputMode="numeric" value={v} onChange={e => setMark(r.student.id, e.target.value)} placeholder="—" className={`w-24 rounded-lg border px-2.5 py-1.5 text-sm outline-none transition focus:ring-2 ${bad ? "border-rose-300 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-blue-400 focus:ring-blue-100"}`} /></td>
                     <td className="px-5 py-2.5 text-center tabular-nums text-slate-500">{pct == null ? "—" : `${pct}%`}</td>
                     <td className="px-5 py-2.5 text-center">{band ? <span className={`rounded-lg px-2 py-1 text-[11px] font-extrabold ${gt.bg} ${gt.text}`}>{band}</span> : <span className="text-slate-300">—</span>}</td>
                   </tr>
                 );
               })}
-              {paged.slice.length === 0 && <tr><td colSpan={4} className="px-5 py-10"><EmptyState Icon={Users} title={rows.length === 0 ? "No students enrolled" : "No students match"} msg={rows.length === 0 ? "Enrol students onto this unit first." : "Try a different search."} /></td></tr>}
+              {paged.slice.length === 0 && <tr><td colSpan={5} className="px-5 py-10"><EmptyState Icon={Users} title={rows.length === 0 ? "No students enrolled" : "No students match"} msg={rows.length === 0 ? "Enrol students onto this unit first." : "Try a different search."} /></td></tr>}
             </tbody>
           </table>
         </div>
@@ -8246,7 +8291,97 @@ function StaffKpiDetail({ k, store }) {
    Dashboard: Staff — a directory of every staff member with a
    department filter, stats and full CRUD. Its own top-level tab.
    ============================================================ */
+// The teaching mirror of the student dashboard: what this lecturer teaches, how
+// attendance is running, and what marking and registers are still owed. Opened from
+// the Staff list, alongside Edit.
+function StaffTeachingModal({ staffMember, onClose }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    if (!staffMember) return;
+    setData(null); setErr("");
+    api.staffTeaching(staffMember.id)
+      .then(d => { if (alive) setData(d); })
+      .catch(e => { if (alive) setErr(e.message || "Could not load this teaching summary"); });
+    return () => { alive = false; };
+  }, [staffMember]);
+
+  const t = data?.totals;
+  const Tile = ({ label, value, sub, tone = NAVY }) => (
+    <div className="rounded-xl bg-white p-3 text-center shadow-sm ring-1 ring-slate-200/70">
+      <p className="text-xl font-extrabold leading-none" style={{ color: tone }}>{value}</p>
+      <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+      {sub && <p className="text-[10px] text-slate-400">{sub}</p>}
+    </div>
+  );
+
+  return (
+    <Modal open={!!staffMember} onClose={onClose} title="Staff dashboard">
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm" style={{ background: staffMember?.colour || NAVY }}>{staffMember?.initials}</span>
+          <div className="min-w-0">
+            <p className="truncate text-base font-extrabold" style={{ color: NAVY }}>{staffMember?.name}</p>
+            <p className="truncate text-[11px] text-slate-400">{staffMember?.role}{staffMember?.dept ? ` · ${staffMember.dept}` : ""}</p>
+          </div>
+        </div>
+
+        {err && <div className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 ring-1 ring-rose-200">{err}</div>}
+        {!data && !err && <div className="skeleton h-24 rounded-xl" />}
+
+        {data && (
+          <>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <Tile label="Units taught" value={t.units} />
+              <Tile label="Students" value={t.students} />
+              <Tile label="Attendance" value={t.attendance?.pct == null ? "—" : `${t.attendance.pct}%`} tone={pctColour(t.attendance?.pct)} />
+              {/* The number that prompts action, so it is red only when there is one. */}
+              <Tile label="Registers due" value={t.registersDue} tone={t.registersDue ? MAROON : "#0d7a5f"} />
+            </div>
+
+            {data.units.length === 0 ? (
+              <div className="rounded-xl bg-slate-50 px-3 py-6 text-center text-xs text-slate-400 ring-1 ring-slate-200">
+                No units are assigned to {staffMember?.name} yet.
+                <span className="mt-1 block">Assign one in <b>Registers → Units → Edit → Tutor</b>.</span>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Units taught</p>
+                {data.units.map(u => {
+                  const tone = pctTone(u.attendance?.pct);
+                  return (
+                    <div key={u.id} className="rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200/70">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-extrabold" style={{ color: NAVY_DARK }}>{u.code} — {u.name}</p>
+                          <p className="truncate text-[11px] text-slate-400">{u.course?.name || "No course"}</p>
+                        </div>
+                        <span className={`shrink-0 rounded-lg px-2 py-1 text-[11px] font-extrabold ${tone.bg} ${tone.text}`}>{u.attendance?.pct == null ? "—" : `${u.attendance.pct}%`}</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                        <span>{u.students} students</span>
+                        <span>Registers {u.registersTaken}/{u.sessions}{u.registersDue ? <b className="ml-1" style={{ color: MAROON }}>· {u.registersDue} due</b> : null}</span>
+                        <span>Marks {u.graded}/{u.expectedGrades}</span>
+                        {u.endDate && <span>Ends {fmtDate(u.endDate)}</span>}
+                        {u.submissionDate && <span className="font-semibold text-slate-600">Due {fmtDate(u.submissionDate)}</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function AdminStaff({ store }) {
+  // Which staff member's teaching dashboard is open, mirroring the Students tab.
+  const [teachingFor, setTeachingFor] = useState(null);
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
   const [form, setForm] = useState({ name: "", role: "", dept: "", email: "", allowance: 28, site: "" });
@@ -8410,6 +8545,7 @@ function AdminStaff({ store }) {
                   <td className="px-5 py-3 font-medium tabular-nums text-slate-600">{s.allowance}d</td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-1 whitespace-nowrap">
+                      <button onClick={() => setTeachingFor(s)} title="Teaching dashboard" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"><BarChart3 size={15} /></button>
                       <button onClick={() => openEdit(s)} title="Edit staff" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button>
                       <button onClick={() => setDeleteTarget(s)} title="Remove staff" className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button>
                     </div>
@@ -8423,6 +8559,7 @@ function AdminStaff({ store }) {
       </div>
       <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
 
+      <StaffTeachingModal staffMember={teachingFor} onClose={() => setTeachingFor(null)} />
       <Modal open={modal} onClose={() => setModal(false)} title={edit ? "Edit staff" : "Add staff"}>
         <div className="space-y-3">
           <Field label="Full name"><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Jane Doe" className={inputCls} /></Field>

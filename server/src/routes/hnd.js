@@ -138,6 +138,32 @@ function placeFromBody(body) {
 
 // The unit's teaching window. Both dates or neither: a start with no end can't say
 // whether the unit has finished, which is the whole point of holding them.
+// The submission deadline and the teaching staff. Both optional and independent of
+// each other, so a unit can have a tutor with no deadline set, or the reverse.
+// Returns { submissionDate, tutorStaffId, tutor } or { error }.
+async function teachingFromBody(body, current = {}) {
+  const out = {};
+  if (body?.submissionDate !== undefined) {
+    const d = str(body.submissionDate);
+    if (!d) out.submissionDate = null;
+    else if (!isDate(d)) return { error: "The submission date must be a real calendar date (YYYY-MM-DD)" };
+    else out.submissionDate = d;
+  }
+  if (body?.tutorStaffId !== undefined) {
+    const id = str(body.tutorStaffId);
+    if (!id) { out.tutorStaffId = null; }
+    else {
+      const staff = await prisma.staff.findUnique({ where: { id }, select: { id: true, name: true } });
+      if (!staff) return { error: "Unknown staff member" };
+      out.tutorStaffId = staff.id;
+      // Mirror the name into the free-text field, so anything still reading `tutor`
+      // keeps working and the name survives if the account is later removed.
+      out.tutor = staff.name;
+    }
+  }
+  return out;
+}
+
 // Returns { startDate, endDate } or { error }.
 function windowFromBody(body) {
   const blank = (v) => v === undefined || v === null || v === "";
@@ -360,6 +386,8 @@ router.post("/units", requireAuth, requireHndWrite, async (req, res) => {
   if (place.error) return res.status(400).json({ error: place.error });
   const win = windowFromBody(req.body);
   if (win.error) return res.status(400).json({ error: win.error });
+  const teach = await teachingFromBody(req.body);
+  if (teach.error) return res.status(400).json({ error: teach.error });
   try {
     const m = await prisma.unit.create({
       data: {
@@ -367,6 +395,7 @@ router.post("/units", requireAuth, requireHndWrite, async (req, res) => {
         year: place.year, termNumber: place.termNumber,
         startDate: win.startDate, endDate: win.endDate,
         cohortId: ct.cohortId, termId: ct.termId,
+        ...teach,
       },
     });
     res.status(201).json(sUnit(m));
@@ -403,6 +432,9 @@ router.put("/units/:id", requireAuth, requireHndWrite, async (req, res) => {
   }
   if (req.body?.tutor !== undefined) data.tutor = str(req.body.tutor);
   if (req.body?.unitNumber !== undefined) data.unitNumber = str(req.body.unitNumber);
+  const teach = await teachingFromBody(req.body, existing);
+  if (teach.error) return res.status(400).json({ error: teach.error });
+  Object.assign(data, teach);
   // Year/term travel together — "Year 1" with no term is not a placement.
   if (req.body?.year !== undefined || req.body?.termNumber !== undefined) {
     const place = placeFromBody({
@@ -1049,6 +1081,63 @@ router.get("/attendance", requireAuth, async (req, res) => {
     unitTotals,
     overall: summariseCounts(gTot.P, gTot.L, gTot.E, gTot.A),
     scope: { semesterId: semesterId || "", sessionCount: scopedSessionTotal },
+  });
+});
+
+
+// GET /api/hnd/staff/:id/teaching — a lecturer's teaching load.
+//
+// The mirror of the student dashboard: for the staff member, the units they teach,
+// how attendance is running on each, how much marking is outstanding, and the dates
+// that matter. Answers "how are my units doing" without opening four screens.
+router.get("/staff/:id/teaching", requireAuth, async (req, res) => {
+  const staff = await prisma.staff.findUnique({ where: { id: req.params.id }, select: { id: true, name: true, jobTitle: true, dept: true, email: true, initials: true, colour: true } });
+  if (!staff) return res.status(404).json({ error: "Staff member not found" });
+
+  const units = await prisma.unit.findMany({
+    where: { tutorStaffId: staff.id },
+    include: {
+      course: { select: { id: true, name: true } },
+      sessions: { select: { id: true, date: true, marks: { select: { status: true } } } },
+      enrolments: { select: { studentId: true } },
+      assessments: { select: { id: true, maxMarks: true, grades: { select: { marks: true } } } },
+    },
+    orderBy: { code: "asc" },
+  });
+
+  const today = localDate();
+  const rows = units.map((u) => {
+    const marks = u.sessions.flatMap((x) => x.marks);
+    const att = summarise(marks);
+    // A register counts as taken once it has any mark on it; the gap is what the
+    // lecturer still owes.
+    const taken = u.sessions.filter((x) => x.marks.length).length;
+    const graded = u.assessments.reduce((n, a) => n + a.grades.length, 0);
+    const expected = u.assessments.length * u.enrolments.length;
+    return {
+      id: u.id, code: u.code, name: u.name,
+      course: u.course ? { id: u.course.id, name: u.course.name } : null,
+      startDate: u.startDate ?? null, endDate: u.endDate ?? null, submissionDate: u.submissionDate ?? null,
+      students: u.enrolments.length,
+      sessions: u.sessions.length, registersTaken: taken, registersDue: u.sessions.length - taken,
+      attendance: att,
+      assessments: u.assessments.length, graded, expectedGrades: expected,
+      finished: !!(u.endDate && u.endDate < today),
+    };
+  });
+
+  const allMarks = units.flatMap((u) => u.sessions.flatMap((x) => x.marks));
+  res.json({
+    staff,
+    units: rows,
+    totals: {
+      units: rows.length,
+      students: new Set(units.flatMap((u) => u.enrolments.map((e) => e.studentId))).size,
+      registersDue: rows.reduce((n, r) => n + r.registersDue, 0),
+      graded: rows.reduce((n, r) => n + r.graded, 0),
+      expectedGrades: rows.reduce((n, r) => n + r.expectedGrades, 0),
+      attendance: summarise(allMarks),
+    },
   });
 });
 
