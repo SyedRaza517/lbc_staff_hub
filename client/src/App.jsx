@@ -294,6 +294,10 @@ export default function App() {
       <div className="w-full" style={{ height: "100dvh", minHeight: "100dvh" }}>
         <StudentApp user={user} logout={logout} />
       </div>
+      {/* Students reach the lock gate above like everyone else, but this return sits
+          before the staff one, so they never saw the offer to switch it on — the
+          protection existed and nobody could reach it. */}
+      <BiometricSetupPrompt />
     </>
   );
 

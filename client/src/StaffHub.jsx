@@ -1134,7 +1134,7 @@ function SummaryScreen({ store, me }) {
 
 // App-lock toggle. Renders nothing on the web (no sensor), and explains itself when
 // the device has biometrics but the user hasn't enrolled any.
-function BiometricSetting() {
+export function BiometricSetting() {
   const [status, setStatus] = useState(null);
   const [on, setOn] = useState(isBiometricEnabled());
   const [busy, setBusy] = useState(false);

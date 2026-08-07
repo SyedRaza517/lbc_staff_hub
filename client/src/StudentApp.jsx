@@ -4,6 +4,9 @@ import { BrandMark } from "./Brand";
 import ConfirmDialog from "./ConfirmDialog";
 import { useBackHandler } from "./backButton";
 import { api, setToken } from "./api";
+// The same Face ID / fingerprint control the staff app uses, so both halves behave
+// identically and there is one implementation to keep correct.
+import { BiometricSetting } from "./StaffHub";
 import {
   Percent, Award, MessageSquare, LogOut, ChevronLeft, ChevronRight,
   Loader2, Send, CheckCircle2, Info, ArrowRight, RefreshCw,
@@ -842,6 +845,8 @@ function MoreScreen({ user, logout, setScreen }) {
 
       {/* Settings rows */}
       <Card className="!p-0 overflow-hidden">
+        {/* Renders nothing on the web or on a device with no enrolled biometrics. */}
+        <BiometricSetting />
         <Row Icon={KeyRound} label="Change password" sub="Update your sign-in password" onClick={() => setOpenPw(v => !v)} open={openPw} />
         {openPw && (
           <div className="space-y-2.5 border-t border-slate-100 bg-slate-50 p-3.5">
