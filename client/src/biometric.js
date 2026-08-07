@@ -10,6 +10,54 @@
 import { isNativeApp } from "./PhoneShell";
 
 const ENABLED_KEY = "lbc_biometric_enabled";
+// Where the remembered session lives. Capacitor Preferences is app-private storage
+// (Android SharedPreferences / iOS UserDefaults) — another app cannot read it, though
+// it is not the Keychain, which is why the token is only ever put there when the user
+// has switched biometric unlock ON and is only ever taken out after a successful check.
+const SESSION_KEY = "lbc_remembered_session";
+
+async function prefs() {
+  if (!isNativeApp()) return null;
+  try { return (await import("@capacitor/preferences")).Preferences || null; } catch (_) { return null; }
+}
+
+/**
+ * Remember the signed-in session so reopening the app asks for a face or a finger
+ * instead of a password.
+ *
+ * Without this the token sits in sessionStorage, which the OS wipes when the app
+ * process ends — so every genuine app restart forced a full sign-in. That is the
+ * behaviour people were complaining about, and it pushed them towards short, reused
+ * passwords, which is worse than storing a short-lived token behind a biometric.
+ *
+ * The JWT already expires on its own, and the server can revoke it by bumping
+ * tokenVersion, so a remembered session cannot outlive either.
+ */
+export async function rememberSession(token) {
+  const P = await prefs();
+  if (!P || !token) return false;
+  try { await P.set({ key: SESSION_KEY, value: token }); return true; } catch (_) { return false; }
+}
+
+export async function storedSession() {
+  const P = await prefs();
+  if (!P) return null;
+  try { return (await P.get({ key: SESSION_KEY }))?.value || null; } catch (_) { return null; }
+}
+
+// Set when a session was just restored by a biometric check at launch, so the app
+// lock knows not to ask again. Without it the user verifies twice in a row: once to
+// unlock the saved session, then again because a session "appeared", which the lock
+// cannot otherwise tell apart from a fresh password sign-in.
+let restoredFlag = false;
+export const markRestored = () => { restoredFlag = true; };
+export const consumeRestored = () => { const v = restoredFlag; restoredFlag = false; return v; };
+
+export async function forgetSession() {
+  const P = await prefs();
+  if (!P) return;
+  try { await P.remove({ key: SESSION_KEY }); } catch (_) {}
+}
 
 async function plugin() {
   if (!isNativeApp()) return null;
@@ -100,6 +148,8 @@ export const clearBiometricPrefs = () => {
     localStorage.removeItem(ENABLED_KEY);
     localStorage.removeItem("lbc_biometric_prompt_dismissed");
   } catch (_) {}
+  // Fire-and-forget: the caller is signing out and must not wait on storage.
+  forgetSession();
 };
 
 /**
@@ -112,6 +162,13 @@ export async function enableBiometric() {
   const res = await verifyBiometric({ reason: "Confirm it's you to turn on app lock" });
   if (!res.ok) return { ok: false, reason: res.cancelled ? "cancelled" : res.error };
   setBiometricEnabled(true);
+  // Remember the CURRENT session, so the next cold start can be unlocked by face or
+  // finger. Imported lazily to avoid a cycle: api.js has no knowledge of biometrics.
+  try {
+    const { getToken } = await import("./api");
+    const t = getToken();
+    if (t) await rememberSession(t);
+  } catch (_) { /* remembering is a convenience, never a reason to fail the toggle */ }
   return { ok: true, biometryType: status.biometryType };
 }
 
@@ -121,5 +178,6 @@ export async function disableBiometric() {
   const res = await verifyBiometric({ reason: "Confirm it's you to turn off app lock" });
   if (!res.ok) return { ok: false, reason: res.cancelled ? "cancelled" : res.error };
   setBiometricEnabled(false);
+  await forgetSession();
   return { ok: true };
 }

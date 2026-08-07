@@ -22,6 +22,29 @@ export function AuthProvider({ children }) {
   // auth:unauthorized on a genuine 401, so a real rejection is still handled.
   useEffect(() => {
     (async () => {
+      // No live token, but the user asked to be remembered? Offer the sensor.
+      //
+      // On the packaged app the token lives in sessionStorage, which the OS wipes
+      // when the app process ends — so every genuine restart used to demand the
+      // password again. That is the friction people complained about, and it pushes
+      // users towards short, reused passwords. A session is only ever restored after
+      // the device has verified the person, and only if they switched the lock on.
+      if (!getToken()) {
+        try {
+          const { isBiometricEnabled, storedSession, verifyBiometric, forgetSession, markRestored } = await import("./biometric");
+          if (isBiometricEnabled()) {
+            const saved = await storedSession();
+            if (saved) {
+              const ok = await verifyBiometric({ reason: "Unlock Staff Hub" });
+              if (ok.ok) { setToken(saved); markRestored(); }
+              // A wrong finger or a cancel leaves them at the password screen, which
+              // is the correct outcome — never silently discard the saved session on
+              // a cancel, or one mis-tap costs them the convenience entirely.
+              else if (!ok.cancelled && /invalid|lockout|not enrolled/i.test(ok.error || "")) await forgetSession();
+            }
+          }
+        } catch (_) { /* biometrics are a convenience; fall through to the password */ }
+      }
       if (getToken()) {
         try {
           setUser(await api.me());
@@ -55,7 +78,15 @@ export function AuthProvider({ children }) {
   }, [user?.id]);
 
   // Turn a successful auth response into a live session.
-  const applySession = ({ token, user }) => { setToken(token); setUser(user); };
+  const applySession = ({ token, user }) => {
+    setToken(token);
+    setUser(user);
+    // Keep the remembered copy in step with the live one, so unlocking never
+    // restores a token that expired weeks ago.
+    import("./biometric").then(({ isBiometricEnabled, rememberSession }) => {
+      if (isBiometricEnabled()) rememberSession(token);
+    }).catch(() => {});
+  };
 
   // Step one of signing in. The password may not be enough: an account with an
   // authenticator (or one that still owes us enrolment) gets a challenge token

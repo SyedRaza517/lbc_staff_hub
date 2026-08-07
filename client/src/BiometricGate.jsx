@@ -6,7 +6,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { isNativeApp } from "./PhoneShell";
 import { getToken } from "./api";
-import { isBiometricEnabled, verifyBiometric, biometricStatus, biometryLabel, enableBiometric } from "./biometric";
+import { isBiometricEnabled, verifyBiometric, biometricStatus, biometryLabel, enableBiometric, consumeRestored } from "./biometric";
 import { Fingerprint, Loader2, LogOut, ShieldCheck, XCircle } from "lucide-react";
 import { useBackHandler } from "./backButton";
 
@@ -41,7 +41,9 @@ export function useAppLock(hasSession) {
   // is still the account's second factor, so a missing sensor can't trap anyone.
   useEffect(() => {
     if (isNativeApp() && isBiometricEnabled() && hasSession && !prevSession.current) {
-      setLocked(true);
+      // A session restored by the launch unlock has ALREADY been verified — locking
+      // again would ask for the same finger twice in a row.
+      if (!consumeRestored()) setLocked(true);
     }
     prevSession.current = hasSession;
   }, [hasSession]);
