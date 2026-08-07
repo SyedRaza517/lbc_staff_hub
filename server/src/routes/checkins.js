@@ -27,6 +27,53 @@ router.get("/", requireAuth, async (req, res) => {
   res.json(rows.map(sCheckin));
 });
 
+// GET /api/checkins/on-site — who is in today, for EVERY member of staff.
+//
+// Deliberately open to any signed-in staff member, unlike GET / above: knowing who
+// else is in the building today is the point of the feature, and it is the sort of
+// thing a wall board would show. It therefore returns only what a wall board would:
+// name, initials, job title, home site and the clock-in time. No email, no notes, no
+// check-out — nothing that turns a presence list into a timesheet on someone else.
+//
+// `site` is the staff member's HOME site, recorded when they signed up (HND / FE /
+// SL), which is what "filter by building" means here. The check-in row carries its
+// own optional site for where that particular clock-in happened; it is returned as
+// `checkedInAt` so the two are never confused.
+router.get("/on-site", requireAuth, async (req, res) => {
+  const date = req.query.date ? String(req.query.date) : today();
+  if (!isRealDate(date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+
+  const rows = await prisma.checkIn.findMany({
+    where: { date },
+    include: {
+      staff: {
+        select: { id: true, name: true, initials: true, colour: true, jobTitle: true, dept: true, site: true },
+      },
+    },
+  });
+
+  res.json({
+    date,
+    people: rows
+      .filter((r) => r.staff)
+      .map((r) => ({
+        id: r.id,
+        staffId: r.staff.id,
+        name: r.staff.name,
+        initials: r.staff.initials,
+        colour: r.staff.colour,
+        jobTitle: r.staff.jobTitle,
+        dept: r.staff.dept,
+        site: r.staff.site || null,       // home site, from sign-up — what the filter uses
+        checkedInAt: r.site || null,       // where this clock-in happened, when recorded
+        timeIn: r.timeIn,
+        timeOut: r.timeOut || null,
+      }))
+      // Earliest arrival first: the list reads as the order people came in.
+      .sort((a, b) => String(a.timeIn).localeCompare(String(b.timeIn))),
+  });
+});
+
 // POST /api/checkins/check-in  — self, for today. Optional `site` (HND | FE | Online)
 // records where this clock-in happened.
 router.post("/check-in", requireAuth, async (req, res) => {

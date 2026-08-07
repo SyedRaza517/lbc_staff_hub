@@ -423,6 +423,7 @@ export function useApiStore(notify, user) {
     studentAssessments: (id) => api.adminStudentAssessments(id),
     // timesheets (month-scoped; screens fetch their own month and reload after writes)
     listTimesheets: (params) => api.listTimesheets(params),
+    staffOnSite: (date) => api.staffOnSite(date),
     addTimesheet: runTs((data) => api.addTimesheet(data), "Timesheet entry added"),
     updateTimesheet: runTs((id, data) => api.updateTimesheet(id, data), "Entry updated"),
     removeTimesheet: runTs((id) => api.removeTimesheet(id), "Entry removed", "info"),

@@ -469,6 +469,7 @@ export function StaffApp({ store, currentStaffId, setCurrentStaffId, logout, onC
       {screen === "documents" && <DocumentsScreen store={store} me={me} />}
       {screen === "approval" && <ApprovalScreen store={store} me={me} />}
       {screen === "summary" && <SummaryScreen store={store} me={me} />}
+      {screen === "onsite" && <StaffOnSiteScreen store={store} me={me} />}
       {screen === "timesheet" && <TimesheetScreen store={store} me={me} />}
       {screen === "reflection" && <SelfReflectionScreen store={store} me={me} />}
       {screen === "studentreview" && <StudentReviewScreen store={store} me={me} />}
@@ -496,7 +497,7 @@ function StatusBar() {
 }
 
 function AppHeader({ me, staff, setCurrentStaffId, screen, setScreen, store, showNotes, setShowNotes }) {
-  const title = { home: "Staff Hub", checkin: "Daily Check-In", balance: "Holiday Balance", calendar: "Holiday Calendar", request: "Request Leave", documents: "Documents", approval: "Manager Approval", summary: "Daily Summary", timesheet: "My Timesheet", reflection: "Self-Reflection", studentreview: "Student Review", more: "More" }[screen];
+  const title = { home: "Staff Hub", checkin: "Daily Check-In", balance: "Holiday Balance", calendar: "Holiday Calendar", request: "Request Leave", documents: "Documents", approval: "Manager Approval", summary: "Daily Summary", onsite: "Staff on Site", timesheet: "My Timesheet", reflection: "Self-Reflection", studentreview: "Student Review", more: "More" }[screen];
   const unread = store.notes.length;
   const greet = greetingFor();
   const Greet = greet.Icon;
@@ -579,6 +580,7 @@ const TILES = [
   { key: "documents", label: "Documents", Icon: FileText, sub: "Policies & forms" },
   { key: "approval", label: "Manager Approval", Icon: ThumbsUp, sub: "Review requests" },
   { key: "summary", label: "Staff Daily Summary", Icon: UserPlus, sub: "Log your day" },
+  { key: "onsite", label: "Staff on Site", Icon: Users, sub: "Who's in today" },
   { key: "timesheet", label: "Send Timesheet", Icon: ClipboardList, sub: "Log hours & submit" },
   { key: "reflection", label: "Self-Reflection", Icon: Award, sub: "Strategic lecturer review" },
   { key: "studentreview", label: "Student Review", Icon: MessageSquare, sub: "Review a student's progress" },
@@ -860,6 +862,112 @@ function LeaveRow({ l, i = 0, store }) {
       </div>
       {l.note && l.status !== "pending" && <p className="mt-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] italic text-slate-500">Manager: "{l.note}"</p>}
     </Card>
+  );
+}
+
+/* ----- Staff on Site ----- */
+// Who is in the building today. Open to every member of staff, not just admins —
+// the point is that a lecturer arriving can see who else is around.
+//
+// "Building" is the site recorded when someone signed up (HND / FE / SL), which is
+// what the college means by it. A check-in can also record where that particular
+// clock-in happened; where the two differ, the row says so rather than quietly
+// filing someone under the wrong building.
+const ON_SITE_FILTERS = [
+  { key: "", label: "All" },
+  { key: "HND", label: "HND" },
+  { key: "FE", label: "FE" },
+  { key: "SL", label: "SL" },
+];
+
+function StaffOnSiteScreen({ store, me }) {
+  const [data, setData] = useState(null);   // null = loading
+  const [site, setSite] = useState("");
+  const [err, setErr] = useState("");
+
+  // Refresh on mount and every 60s while the screen is visible: people arrive
+  // through the morning, and a stale list is worse than no list.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => store.staffOnSite()
+      .then(d => { if (!cancelled) { setData(d); setErr(""); } })
+      .catch(e => { if (!cancelled) { setData(prev => prev || { people: [] }); setErr(e.message || "Could not load who's in today."); } });
+    load();
+    const id = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") load();
+    }, 60000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const all = data?.people || [];
+  const shown = site ? all.filter(p => p.site === site) : all;
+  // Counts per building, so the filter says how many are behind each one before
+  // you tap it.
+  const countFor = (k) => (k ? all.filter(p => p.site === k).length : all.length);
+  const noSite = all.filter(p => !p.site).length;
+
+  return (
+    <Screen>
+      <div className="mb-3 flex gap-1.5 overflow-x-auto pb-0.5">
+        {ON_SITE_FILTERS.map(s => (
+          <button key={s.key} type="button" onClick={() => setSite(s.key)}
+            className={`press flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold ring-1 transition ${site === s.key ? "text-white ring-transparent shadow-sm" : "bg-white text-slate-500 ring-slate-200"}`}
+            style={site === s.key ? { background: NAVY } : {}}>
+            {s.label}
+            <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${site === s.key ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>{countFor(s.key)}</span>
+          </button>
+        ))}
+      </div>
+
+      {err && <Card className="mb-3 !p-3"><p className="text-xs font-semibold text-rose-600">{err}</p></Card>}
+
+      {data === null ? (
+        <div className="flex flex-col items-center gap-2 py-12 text-slate-400"><Loader2 size={22} className="animate-spin" /><p className="text-xs font-semibold">Loading who's in…</p></div>
+      ) : shown.length === 0 ? (
+        <Card><EmptyState Icon={Users} title={site ? `Nobody from ${site} yet` : "Nobody has checked in yet"}
+          msg={site ? "Try another building, or All." : "Check-ins appear here as people arrive."} /></Card>
+      ) : (
+        <div className="space-y-2">
+          {shown.map((p, i) => (
+            <Card key={p.id} className="flex items-center gap-3 !p-3 fade-up" style={{ animationDelay: `${Math.min(i, 10) * 40}ms` }}>
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm" style={{ background: p.colour || NAVY }}>{p.initials}</span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-bold text-slate-700">
+                  {p.name}{p.staffId === me?.id && <span className="ml-1.5 text-[10px] font-bold text-slate-400">(you)</span>}
+                </p>
+                <p className="truncate text-[11px] text-slate-400">{[p.jobTitle, p.dept].filter(Boolean).join(" · ") || "Staff"}</p>
+                {/* The check-in records Onsite/Online, which is a different question
+                    from which building someone belongs to. Only "Online" is worth
+                    saying — it means they are not in the building at all. */}
+                {/Online/i.test(p.checkedInAt || "") && (
+                  <p className="truncate text-[10px] font-semibold text-emerald-600">Working online</p>
+                )}
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-sm font-extrabold tabular-nums" style={{ color: NAVY }}>{p.timeIn}</p>
+                {p.site
+                  ? <span className="mt-0.5 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">{p.site}</span>
+                  : <span className="mt-0.5 inline-block rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-600">No site</span>}
+                {p.timeOut && <p className="mt-0.5 text-[10px] text-slate-400">Left {p.timeOut}</p>}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {data !== null && (
+        <Card className="mt-3 !p-3 text-center">
+          <p className="text-sm font-bold text-slate-600">
+            Checked in today{site ? ` (${site})` : ""}: <span style={{ color: NAVY }}>{shown.length}</span>
+          </p>
+          {!site && noSite > 0 && (
+            <p className="mt-1 text-[11px] text-slate-400">
+              {noSite} {noSite === 1 ? "person has" : "people have"} no building on their record — set it on their staff profile.
+            </p>
+          )}
+        </Card>
+      )}
+    </Screen>
   );
 }
 

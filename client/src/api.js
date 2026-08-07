@@ -270,6 +270,8 @@ export const api = {
   removeStaffReview: (id) => request(`/staff-reviews/${id}`, { method: "DELETE" }),
   // timesheets
   listTimesheets: (params = {}) => { const q = new URLSearchParams(params).toString(); return request(`/timesheets${q ? `?${q}` : ""}`); },
+  // Who is in today, across the whole college — open to any member of staff.
+  staffOnSite: (date) => request(`/checkins/on-site${date ? `?date=${date}` : ""}`),
   timesheetPendingCount: () => request("/timesheets/pending-count"),
   addTimesheet: (data) => request("/timesheets", { method: "POST", body: data }),
   updateTimesheet: (id, data) => request(`/timesheets/${id}`, { method: "PUT", body: data }),
