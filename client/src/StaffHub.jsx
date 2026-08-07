@@ -620,7 +620,7 @@ function HomeGrid({ setScreen, store, me }) {
       </div>
       <p className="mb-3 text-center text-sm font-semibold italic text-slate-500" style={{ fontFamily: "'Lora', serif" }}>Please select one of the buttons below</p>
       <div className="grid grid-cols-2 gap-3">
-        {TILES.filter(t => t.key !== "approval" || store.isAdmin).map((t, i) => {
+        {TILES.filter(t => (t.key !== "approval" || store.isAdmin) && (t.key !== "onsite" || canSeeOnSite(me, store))).map((t, i) => {
           const badge = t.key === "approval" ? store.leave.filter(l => l.status === "pending").length : t.key === "request" ? pending : 0;
           return (
             <button key={t.key} onClick={() => setScreen(t.key)} className="shine hover-lift group relative flex flex-col items-center justify-center gap-2.5 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:shadow-xl hover:ring-blue-200 active:scale-95 pop" style={{ animationDelay: `${i * 60}ms` }}>
@@ -873,6 +873,16 @@ function LeaveRow({ l, i = 0, store }) {
 // what the college means by it. A check-in can also record where that particular
 // clock-in happened; where the two differ, the row says so rather than quietly
 // filing someone under the wrong building.
+// Same rule as the server's /checkins/on-site: the Administration department, plus
+// anyone holding Check-In or Daily Summaries. Kept next to the screen it guards so the
+// two cannot drift — the server is what actually enforces it, this only hides the tile
+// so nobody taps into a 403.
+const ADMIN_DEPTS = ["administration", "admin"];
+const canSeeOnSite = (me, store) =>
+  ADMIN_DEPTS.includes(String(me?.dept || "").trim().toLowerCase()) ||
+  canAccessPage(me, "checkin") || canAccessPage(me, "summaries") ||
+  !!store?.isAdmin;
+
 const ON_SITE_FILTERS = [
   { key: "", label: "All" },
   { key: "HND", label: "HND" },

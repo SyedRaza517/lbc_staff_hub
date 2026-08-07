@@ -29,9 +29,9 @@ router.get("/", requireAuth, async (req, res) => {
 
 // GET /api/checkins/on-site — who is in today, for EVERY member of staff.
 //
-// Deliberately open to any signed-in staff member, unlike GET / above: knowing who
-// else is in the building today is the point of the feature, and it is the sort of
-// thing a wall board would show. It therefore returns only what a wall board would:
+// Restricted to the Administration department (plus admins who already hold Check-In
+// or Daily Summaries). It is a wall board for the office, not for the whole college.
+// It therefore returns only what a wall board would:
 // name, initials, job title, home site and the clock-in time. No email, no notes, no
 // check-out — nothing that turns a presence list into a timesheet on someone else.
 //
@@ -39,7 +39,18 @@ router.get("/", requireAuth, async (req, res) => {
 // SL), which is what "filter by building" means here. The check-in row carries its
 // own optional site for where that particular clock-in happened; it is returned as
 // `checkedInAt` so the two are never confused.
+// Who may see it: the Administration department, plus anyone who already holds the
+// Check-In or Daily Summaries page. Those admins can read every check-in through
+// GET / above, so refusing them here would protect nothing and only confuse.
+const ADMIN_DEPTS = ["administration", "admin"];
+const canSeeOnSite = (user) =>
+  ADMIN_DEPTS.includes(String(user?.dept || "").trim().toLowerCase()) ||
+  hasPage(user, ["checkin", "summaries"]);
+
 router.get("/on-site", requireAuth, async (req, res) => {
+  if (!canSeeOnSite(req.user)) {
+    return res.status(403).json({ error: "Only the Administration team can see who is in today" });
+  }
   const date = req.query.date ? String(req.query.date) : today();
   if (!isRealDate(date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
 
