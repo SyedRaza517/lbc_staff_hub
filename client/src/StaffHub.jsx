@@ -2725,17 +2725,41 @@ function AdminSignups({ store }) {
   const [note, setNote] = useState("");
   const [allowance, setAllowance] = useState(28);
   const [busy, setBusy] = useState(false);
+  // What the applicant typed, editable before approving. People mistype their own
+  // name, department and college ID, and the only remedy used to be approving and
+  // then correcting the account — or rejecting and making them start over.
+  const [edit, setEdit] = useState(null);
 
   const rows = store.signups || [];
   const pending = rows.filter(r => r.status === "pending");
   const history = rows.filter(r => r.status !== "pending");
 
-  const open = (req, action) => { setModal({ req, action }); setNote(""); setAllowance(28); };
+  const open = (req, action) => {
+    setModal({ req, action });
+    setNote("");
+    setAllowance(28);
+    setEdit({
+      name: req.name || "", email: req.email || "",
+      jobTitle: req.role || "", dept: req.dept || "",
+      site: req.site || "", collegeId: req.collegeId || "",
+    });
+  };
 
   const confirm = async () => {
     setBusy(true);
     try {
-      await store.decideSignup(modal.req.id, modal.action, note, modal.action === "approved" && modal.req.kind !== "student" ? Number(allowance) : undefined);
+      // Send only what actually changed, so an untouched request is decided exactly
+      // as it was and the audit trail does not show phantom edits.
+      const changed = {};
+      for (const [k, v] of Object.entries(edit || {})) {
+        const was = k === "jobTitle" ? (modal.req.role || "") : (modal.req[k] || "");
+        if (v.trim() !== was) changed[k] = v.trim();
+      }
+      await store.decideSignup(
+        modal.req.id, modal.action, note,
+        modal.action === "approved" && modal.req.kind !== "student" ? Number(allowance) : undefined,
+        changed,
+      );
       setModal(null);
     } catch (_) {
       // The store already surfaced the error as a toast and refetched, so the
@@ -2850,11 +2874,52 @@ function AdminSignups({ store }) {
 
       <Modal open={!!modal} onClose={() => !busy && setModal(null)} title={modal?.action === "approved" ? "Approve sign-up" : "Decline sign-up"}>
         <div className="space-y-3">
-          <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600 ring-1 ring-slate-200">
-            <p className="text-sm font-bold text-slate-700">{modal?.req.name}</p>
-            <p>{modal?.req.email}</p>
-            <p>{modal?.req.kind === "student" ? `Student${modal?.req.collegeId ? ` · College ID ${modal.req.collegeId}` : ""}` : `${modal?.req.role} · ${modal?.req.dept}`}</p>
-          </div>
+          {modal?.action === "approved" ? (
+            <div className="space-y-2.5 rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                What they submitted — correct anything before approving
+              </p>
+              <Field label="Full name">
+                <input value={edit?.name || ""} onChange={e => setEdit(v => ({ ...v, name: e.target.value }))} className={inputCls} />
+              </Field>
+              <Field label="Email">
+                <input type="email" value={edit?.email || ""} onChange={e => setEdit(v => ({ ...v, email: e.target.value }))} className={inputCls} />
+              </Field>
+              {modal?.req.kind === "student" ? (
+                <Field label="College ID / student reference">
+                  <input value={edit?.collegeId || ""} onChange={e => setEdit(v => ({ ...v, collegeId: e.target.value }))} className={inputCls} />
+                </Field>
+              ) : (
+                <div className="grid gap-2.5 sm:grid-cols-2">
+                  <Field label="Position">
+                    <input value={edit?.jobTitle || ""} onChange={e => setEdit(v => ({ ...v, jobTitle: e.target.value }))} className={inputCls} />
+                  </Field>
+                  <Field label="Department">
+                    <input value={edit?.dept || ""} onChange={e => setEdit(v => ({ ...v, dept: e.target.value }))} className={inputCls} />
+                  </Field>
+                  <Field label="Home site">
+                    <select value={edit?.site || ""} onChange={e => setEdit(v => ({ ...v, site: e.target.value }))} className={inputCls}>
+                      <option value="">— none —</option>
+                      <option value="HND">HND</option>
+                      <option value="FE">FE</option>
+                      <option value="SL">SL</option>
+                    </select>
+                  </Field>
+                </div>
+              )}
+              {/* The password is stored hashed and is never shown or changed here — the
+                  applicant must still be able to sign in with the one they chose. */}
+              <p className="text-[11px] text-slate-400">
+                Their password is not shown and cannot be changed — they keep the one they chose.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600 ring-1 ring-slate-200">
+              <p className="text-sm font-bold text-slate-700">{modal?.req.name}</p>
+              <p>{modal?.req.email}</p>
+              <p>{modal?.req.kind === "student" ? `Student${modal?.req.collegeId ? ` · College ID ${modal.req.collegeId}` : ""}` : `${modal?.req.role} · ${modal?.req.dept}`}</p>
+            </div>
+          )}
 
           {modal?.action === "approved" ? (
             modal?.req.kind === "student" ? (
@@ -3766,11 +3831,41 @@ function HndStudents({ store }) {
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
   const [form, setForm] = useState({ firstName: "", lastName: "", studentRef: "", email: "", cohortId: "", unitIds: [] });
+  // Which course's units the picker shows. Only 4 of 136 students have a cohort, so
+  // the course is worked out from the units they are ALREADY enrolled on, which is
+  // unambiguous for almost all of them; the dropdown lets an admin set or change it.
+  const [courseId, setCourseId] = useState("");
   const [query, setQuery] = useState("");
 
-  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", cohortId: "", unitIds: [] }); setModal(true); };
-  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, cohortId: s.cohortId || "", unitIds: s.unitIds || [] }); setModal(true); };
+  // The course a student belongs to: their cohort if one is set, else the course
+  // their existing units all belong to. Returns "" when it genuinely cannot be told.
+  const courseOf = (s) => {
+    const viaCohort = store.cohorts.find(c => c.id === s?.cohortId)?.courseId;
+    if (viaCohort) return viaCohort;
+    const ids = new Set((s?.unitIds || []).map(id => store.units.find(u => u.id === id)?.courseId).filter(Boolean));
+    return ids.size === 1 ? [...ids][0] : "";
+  };
+
+  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", cohortId: "", unitIds: [] }); setCourseId(""); setModal(true); };
+  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, cohortId: s.cohortId || "", unitIds: s.unitIds || [] }); setCourseId(courseOf(s)); setModal(true); };
   const toggleUnit = (id) => setForm(f => ({ ...f, unitIds: f.unitIds.includes(id) ? f.unitIds.filter(x => x !== id) : [...f.unitIds, id] }));
+
+  // What the picker offers: this course's units only, and never the synthetic
+  // "Tutorial / Seminar" units. Those exist to hold tutorial and seminar attendance
+  // imported from Moodle, not as units a student is enrolled on one at a time — and
+  // with one per course they appeared four times over as identical "TUTORIAL" rows.
+  //
+  // A unit the student is ALREADY on always stays listed even if it sits outside the
+  // chosen course, so narrowing the course can never silently drop an enrolment the
+  // admin cannot see to keep.
+  const pickableUnits = useMemo(() => {
+    const keep = store.units.filter(u => u.code !== "TUTORIAL");
+    const scoped = courseId ? keep.filter(u => u.courseId === courseId) : keep;
+    const shown = new Set(scoped.map(u => u.id));
+    const alsoOn = keep.filter(u => form.unitIds.includes(u.id) && !shown.has(u.id));
+    return [...scoped, ...alsoOn].sort((a, b) =>
+      String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
+  }, [store.units, courseId, form.unitIds]);
   const save = async () => {
     try {
       if (edit) {
@@ -3855,9 +3950,18 @@ function HndStudents({ store }) {
               {store.cohorts.map(c => { const p = store.courses.find(x => x.id === c.courseId); return <option key={c.id} value={c.id}>{p ? `${p.name} — ${c.name}` : c.name}</option>; })}
             </select>
           </Field>
+          <Field label="Course">
+            <select value={courseId} onChange={e => setCourseId(e.target.value)} className={inputCls}>
+              <option value="">— all courses —</option>
+              {store.courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-slate-400">
+              {courseId ? "Only this course's units are listed below." : "Pick a course to narrow the list — every unit in the college is shown."}
+            </p>
+          </Field>
           <Field label="Units">
             <div className="grid grid-cols-2 gap-1.5">
-              {store.units.map(m => (
+              {pickableUnits.map(m => (
                 <button key={m.id} onClick={() => toggleUnit(m.id)} type="button"
                   className={`press flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold ring-1 transition ${form.unitIds.includes(m.id) ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`}
                   style={form.unitIds.includes(m.id) ? { background: NAVY } : {}}>
@@ -3867,7 +3971,7 @@ function HndStudents({ store }) {
                   {m.code}
                 </button>
               ))}
-              {store.units.length === 0 && <p className="col-span-2 text-xs text-slate-400">No units yet — add one on the Units tab.</p>}
+              {pickableUnits.length === 0 && <p className="col-span-2 text-xs text-slate-400">{store.units.length === 0 ? "No units yet — add one on the Units tab." : "This course has no units yet."}</p>}
             </div>
           </Field>
           <PrimaryBtn onClick={save} disabled={!form.firstName.trim() || !form.lastName.trim() || !form.studentRef.trim()} className="w-full">
@@ -3938,6 +4042,23 @@ function AdminStudents({ store }) {
   const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", active: true, cohortId: "", unitIds: [] }); setModal(true); };
   const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, active: s.active !== false, cohortId: s.cohortId || "", unitIds: s.unitIds || [] }); setModal(true); };
   const toggleUnit = (id) => setForm(f => ({ ...f, unitIds: f.unitIds.includes(id) ? f.unitIds.filter(x => x !== id) : [...f.unitIds, id] }));
+
+  // What the picker offers: this course's units only, and never the synthetic
+  // "Tutorial / Seminar" units. Those exist to hold tutorial and seminar attendance
+  // imported from Moodle, not as units a student is enrolled on one at a time — and
+  // with one per course they appeared four times over as identical "TUTORIAL" rows.
+  //
+  // A unit the student is ALREADY on always stays listed even if it sits outside the
+  // chosen course, so narrowing the course can never silently drop an enrolment the
+  // admin cannot see to keep.
+  const pickableUnits = useMemo(() => {
+    const keep = store.units.filter(u => u.code !== "TUTORIAL");
+    const scoped = courseId ? keep.filter(u => u.courseId === courseId) : keep;
+    const shown = new Set(scoped.map(u => u.id));
+    const alsoOn = keep.filter(u => form.unitIds.includes(u.id) && !shown.has(u.id));
+    return [...scoped, ...alsoOn].sort((a, b) =>
+      String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
+  }, [store.units, courseId, form.unitIds]);
   const save = async () => {
     try {
       if (edit) {
@@ -5352,8 +5473,11 @@ function StudentReviewScreen({ store, me }) {
   const [confirmDel, setConfirmDel] = useState(null);
   // The pickers' source data. store.students/units are only filled by the admin
   // registers pages, so on this screen they are normally empty.
-  const [roster, setRoster] = useState({ students: [], units: [] });
+  const [roster, setRoster] = useState({ students: [], units: [], courses: [] });
   const [rosterErr, setRosterErr] = useState("");
+  // Which course the unit list is scoped to. Nothing is offered until one is chosen —
+  // "UNIT 1" exists in four intakes, so an unscoped list invites the wrong pick.
+  const [reviewCourse, setReviewCourse] = useState("");
   const [query, setQuery] = useState("");
   const [progressFilter, setProgressFilter] = useState("all");
 
@@ -5376,8 +5500,8 @@ function StudentReviewScreen({ store, me }) {
         // The review router's own roster, open to any staff member. The /hnd lists are
         // page-gated, so using them here left every ordinary lecturer — the people this
         // screen exists for — with an empty picker and a dead "New review" button.
-        const { students: st, units: un } = await api.studentReviewRoster();
-        if (alive) setRoster({ students: st || [], units: un || [] });
+        const { students: st, units: un, courses: co } = await api.studentReviewRoster();
+        if (alive) setRoster({ students: st || [], units: un || [], courses: co || [] });
       } catch (e) {
         if (!alive) return;
         // They can still read, correct and delete reviews they have already written —
@@ -5393,6 +5517,14 @@ function StudentReviewScreen({ store, me }) {
 
   const students = haveStore ? store.students : roster.students;
   const units = haveStore ? store.units : roster.units;
+  // Course list from whichever source supplied the units.
+  const reviewCourses = haveStore
+    ? store.courses.map(c => ({ id: c.id, name: c.name }))
+    : (roster.courses || []);
+  // Tutorial/Seminar units hold imported attendance; a review is never "about" one.
+  const unitsInCourse = reviewCourse
+    ? units.filter(u => u.courseId === reviewCourse && u.code !== "TUTORIAL")
+    : [];
 
   // The review being edited keeps its own student and unit in the lists even when
   // the roster is unavailable, so an existing review can always be corrected.
@@ -5413,8 +5545,16 @@ function StudentReviewScreen({ store, me }) {
   const concernChoices = options.concerns || [];
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const startNew = () => { setEditing(null); setForm(blankStudentReview()); setFormErr(""); setMode("form"); };
-  const openEdit = (r) => { setEditing(r); setForm(studentReviewForm(r)); setFormErr(""); setMode("form"); };
+  const startNew = () => { setEditing(null); setForm(blankStudentReview()); setReviewCourse(""); setFormErr(""); setMode("form"); };
+  const openEdit = (r) => {
+    setEditing(r);
+    setForm(studentReviewForm(r));
+    // Pre-select the course of the unit already on the review, or its unit dropdown
+    // opens disabled and empty and the unit looks as though it has been cleared.
+    setReviewCourse(units.find(u => u.id === r.unitId)?.courseId || "");
+    setFormErr("");
+    setMode("form");
+  };
   const openView = (r) => { setCurrent(r); setMode("view"); };
 
   const save = async () => {
@@ -5586,10 +5726,24 @@ function StudentReviewScreen({ store, me }) {
                 </select>
               </Field>
 
+              <Field label="Course">
+                <select value={reviewCourse} disabled={busy}
+                  onChange={e => { setReviewCourse(e.target.value); set("unitId", ""); }} className={inputCls}>
+                  <option value="">— choose a course —</option>
+                  {reviewCourses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </Field>
+
               <Field label="Unit">
-                <select value={form.unitId} disabled={busy} onChange={e => set("unitId", e.target.value)} className={inputCls}>
-                  <option value="">— not about a particular unit —</option>
-                  {unitOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                {/* Disabled until a course is chosen: several courses each have a
+                    "UNIT 1", so one flat list of 39 makes the wrong pick easy and
+                    invisible. Changing course clears the unit, so a review can never
+                    keep a unit belonging to a course you have moved away from. */}
+                <select value={form.unitId} disabled={busy || !reviewCourse}
+                  onChange={e => set("unitId", e.target.value)}
+                  className={`${inputCls} disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400`}>
+                  <option value="">{reviewCourse ? "— not about a particular unit —" : "Choose a course first"}</option>
+                  {unitsInCourse.map(u => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
                 </select>
               </Field>
 

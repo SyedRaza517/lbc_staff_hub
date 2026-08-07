@@ -76,14 +76,24 @@ router.get("/roster", async (_req, res) => {
       select: { id: true, firstName: true, lastName: true, studentRef: true, email: true, initials: true, colour: true },
       orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
     }),
-    prisma.unit.findMany({ select: { id: true, code: true, name: true }, orderBy: { code: "asc" } }),
+    // courseId comes too, so the app can ask which course first and then show only
+    // that course's units — otherwise a lecturer scrolls 39 units across four
+    // intakes, several of which are called "UNIT 1".
+    prisma.unit.findMany({
+      select: { id: true, code: true, name: true, courseId: true, course: { select: { id: true, name: true } } },
+      orderBy: { code: "asc" },
+    }),
   ]);
   res.json({
     students: students.map((s) => ({
       id: s.id, name: `${s.firstName} ${s.lastName}`.trim(),
       studentRef: s.studentRef, email: s.email, initials: s.initials, colour: s.colour,
     })),
-    units,
+    // Only units that belong to a course can be offered behind a course picker; a unit
+    // with no course would be unreachable, so it is left in the list unscoped.
+    units: units.map((u) => ({ id: u.id, code: u.code, name: u.name, courseId: u.courseId || null })),
+    courses: [...new Map(units.filter((u) => u.course).map((u) => [u.course.id, u.course])).values()]
+      .sort((a, b) => a.name.localeCompare(b.name)),
   });
 });
 

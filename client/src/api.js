@@ -116,7 +116,8 @@ export const api = {
   // self-service sign-up (public) + admin approval queue
   signUp: (data) => request("/signup", { method: "POST", body: data }),
   listSignups: (status) => request(`/signup${status ? `?status=${status}` : ""}`),
-  decideSignup: (id, status, note, allowance) => request(`/signup/${id}/decision`, { method: "PUT", body: { status, note, allowance } }),
+  // `edits` carries any corrections the admin made to what the applicant typed.
+  decideSignup: (id, status, note, allowance, edits) => request(`/signup/${id}/decision`, { method: "PUT", body: { status, note, allowance, ...(edits || {}) } }),
 
   // student app (each is scoped to the signed-in student on the server)
   studentMe: () => request("/student/me"),

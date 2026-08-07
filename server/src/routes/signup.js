@@ -186,16 +186,57 @@ router.get("/", requireAuth, requirePage("signups"), async (req, res) => {
 
 // PUT /api/signup/:id/decision — admin approves or declines.
 // Approving creates the Staff account; declining leaves the request for the record.
+// Corrections an admin may make to what the applicant typed, at the moment of
+// approving. People mistype their own name and department, and until now the only
+// remedy was to approve the request and then fix the account afterwards — or reject
+// it and make them start again.
+//
+// The password is deliberately NOT here. It is only ever stored hashed, so it cannot
+// be shown or edited, and the applicant must still be able to sign in with what they
+// chose.
+const EDITABLE = ["name", "email", "jobTitle", "dept", "site", "collegeId"];
+
+async function readEdits(body, row) {
+  const patch = {};
+  for (const k of EDITABLE) {
+    if (body?.[k] === undefined) continue;
+    const v = str(body[k]);
+    if (v !== (row[k] || "")) patch[k] = v;
+  }
+  if (!Object.keys(patch).length) return { patch };
+
+  if ("name" in patch && !patch.name) return { error: "Name can't be empty" };
+  if ("email" in patch) {
+    if (!EMAIL_REGEX.test(patch.email)) return { error: "Enter a valid email address" };
+    patch.email = patch.email.toLowerCase();
+    const clash = await prisma.signupRequest.findUnique({ where: { email: patch.email } });
+    if (clash && clash.id !== row.id) return { error: "Another sign-up request already uses that email" };
+  }
+  if ("site" in patch && patch.site && !isHomeSite(patch.site)) return { error: "Unknown site" };
+  if ("jobTitle" in patch && row.kind === "staff" && !patch.jobTitle) return { error: "Position can't be empty" };
+  return { patch };
+}
+
 router.put("/:id/decision", requireAuth, requirePage("signups"), async (req, res) => {
   const { status, note, allowance } = req.body || {};
   if (!["approved", "rejected"].includes(status)) return res.status(400).json({ error: "status must be approved or rejected" });
 
-  const reqRow = await prisma.signupRequest.findUnique({ where: { id: req.params.id } });
+  let reqRow = await prisma.signupRequest.findUnique({ where: { id: req.params.id } });
   if (!reqRow) return res.status(404).json({ error: "Sign-up request not found" });
   // Decide once only — mirrors the leave-decision rule and protects the audit trail.
   if (reqRow.status !== "pending") return res.status(409).json({ error: "This request has already been decided" });
 
-  const decided = { status, note: str(note) || null, decidedBy: req.user.name, decidedAt: today() };
+  // Apply corrections BEFORE anything else reads the row. The student-matching rules
+  // below resolve an account from the college ID and the email, so they must see what
+  // the admin corrected — checking the old values would defeat the very protection
+  // that stops a request claiming somebody else's record.
+  const edits = await readEdits(req.body, reqRow);
+  if (edits.error) return res.status(400).json({ error: edits.error });
+  const patch = edits.patch;
+
+  const decided = { ...patch, status, note: str(note) || null, decidedBy: req.user.name, decidedAt: today() };
+  // Keep the in-memory copy in step, since the rest of this handler reads reqRow.
+  reqRow = { ...reqRow, ...patch };
 
   if (status === "rejected") {
     const updated = await prisma.signupRequest.update({ where: { id: reqRow.id }, data: decided });

@@ -324,7 +324,7 @@ export function useApiStore(notify, user) {
     deleteDoc: run((id) => api.deleteDocument(id), "Document removed", "error"),
     // sign-up requests
     decideSignup: run(
-      (id, status, note, allowance) => api.decideSignup(id, status, note, allowance),
+      (id, status, note, allowance, edits) => api.decideSignup(id, status, note, allowance, edits),
       (id, status) => (status === "approved" ? "Account approved — they can now sign in" : "Sign-up declined"),
       "info",
     ),
