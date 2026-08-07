@@ -6,7 +6,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { isNativeApp } from "./PhoneShell";
 import { getToken } from "./api";
-import { isBiometricEnabled, isBiometricArmed, verifyBiometric, biometricStatus, biometryLabel, enableBiometric, consumeRestored, isVerifyInFlight, resetBiometric } from "./biometric";
+import { isBiometricEnabled, isBiometricArmed, verifyBiometric, biometricStatus, biometryLabel, enableBiometric, consumeRestored, isVerifyInFlight, resetBiometric, BIOMETRICS_ENABLED } from "./biometric";
 import { Fingerprint, Loader2, LogOut, ShieldCheck, XCircle } from "lucide-react";
 import { useBackHandler } from "./backButton";
 
@@ -246,6 +246,9 @@ export default function BiometricGate({ user, onUnlock, logout }) {
  * asks for biometrics (see useAppLock above).
  */
 export function BiometricSetupPrompt() {
+  // Feature parked — see BIOMETRICS_ENABLED in biometric.js. Nothing is offered, so
+  // nobody is invited to switch on a lock that isn't finished.
+  if (!BIOMETRICS_ENABLED) return null;
   const [show, setShow] = useState(false);
   const [label, setLabel] = useState("biometric unlock");
   const [busy, setBusy] = useState(false);

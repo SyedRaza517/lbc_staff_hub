@@ -11,11 +11,15 @@ import React, { useEffect, useState } from "react";
 import { Fingerprint, ScanFace, Loader2, XCircle } from "lucide-react";
 import { useAuth } from "./auth";
 import { api, setToken } from "./api";
-import { biometricSignInStatus, biometricSignIn, forgetSession } from "./biometric";
+import { biometricSignInStatus, biometricSignIn, forgetSession, BIOMETRICS_ENABLED } from "./biometric";
 
 const NAVY = "#1a3a8f";
 
 export default function BiometricSignIn({ className = "", email = "" }) {
+  // Feature parked — see BIOMETRICS_ENABLED in biometric.js. The sign-in screens keep
+  // their email/password form and the "Remember my email and password" tickbox, which
+  // is what covers the convenience for now.
+  if (!BIOMETRICS_ENABLED) return null;
   const { applySession } = useAuth();
   const [offer, setOffer] = useState(null);   // { label, methods, owner } once we know
   const [busy, setBusy] = useState(false);

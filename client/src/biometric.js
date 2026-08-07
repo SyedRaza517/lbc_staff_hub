@@ -23,6 +23,27 @@
 // promote either path to a login step without a server-verified WebAuthn ceremony.
 import { isNativeApp } from "./PhoneShell";
 
+// ============================================================================
+// THE WHOLE FEATURE IS CURRENTLY SWITCHED OFF.
+//
+// "Remember my email and password" covers the convenience for now, so biometric
+// unlock is parked until it can be finished and tested on real handsets.
+//
+// TO TURN IT BACK ON: change this ONE constant to true. Nothing else needs editing.
+//
+// It is a flag rather than commented-out code deliberately — the same approach
+// TOTP_ENFORCED takes in server/src/routes/auth.js. Commenting out spans six files
+// (this one, BiometricGate, BiometricSignIn, StaffHub's BiometricSetting, StudentApp
+// and App), leaves dead imports behind, and makes the diff that restores it a
+// reconstruction job instead of a one-character change. Everything below stays
+// compiled, type-consistent and reviewable; it simply reports "unavailable".
+//
+// Anyone who had already switched the lock on is NOT stranded: isBiometricArmed()
+// returns false while this is off, so useAppLock never locks and they sign in with
+// their password as normal.
+// ============================================================================
+export const BIOMETRICS_ENABLED = false;
+
 const ENABLED_KEY = "lbc_biometric_enabled";
 // The WebAuthn credential id (base64url) created when the lock is switched on in a
 // browser. It identifies which platform credential to ask for later; the private key
@@ -106,10 +127,29 @@ export async function forgetSession() {
   try { await P.remove({ key: SESSION_KEY }); } catch (_) {}
 }
 
+// Nothing here may hang forever.
+//
+// try/catch only rescues a REJECTED promise. A promise that never settles — a
+// Capacitor bridge call the native layer never answers, a dynamic import of a chunk
+// that never arrives, a WebAuthn availability probe a locked-down browser leaves
+// pending — is not an error, so it is never caught, and the caller waits for ever.
+// The settings row then sits on "Checking this device…" indefinitely, which is the
+// same silent failure as a blank row wearing a spinner.
+//
+// Every await that crosses into the platform is therefore raced against a deadline.
+const PROBE_TIMEOUT_MS = 6000;
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} didn't respond within ${Math.round(ms / 1000)}s`)), ms); }),
+  ]);
+}
+
 async function plugin() {
   if (!isNativeApp()) return null;
   try {
-    const mod = await import("@aparajita/capacitor-biometric-auth");
+    const mod = await withTimeout(import("@aparajita/capacitor-biometric-auth"), PROBE_TIMEOUT_MS, "The biometric plugin");
     return mod.BiometricAuth || null;
   } catch (_) {
     return null;
@@ -135,7 +175,9 @@ const webAuthnSupported = () =>
 // the platform authenticator: a security key on a keyring is not an "app lock".
 async function webPlatformAvailable() {
   if (!webAuthnSupported()) return false;
-  try { return await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); }
+  // Raced against a deadline: a browser with WebAuthn disabled by policy, or a page in
+  // a restricted frame, can leave this pending rather than rejecting.
+  try { return await withTimeout(window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(), PROBE_TIMEOUT_MS, "This browser"); }
   catch (_) { return false; }
 }
 
@@ -211,6 +253,12 @@ function webAuthError(e) {
  * BiometricGate, BiometricSetupPrompt), so nothing downstream had to change.
  */
 export async function biometricStatus() {
+  // Feature parked — see BIOMETRICS_ENABLED at the top of this file.
+  // "off" is a state the settings row renders as nothing at all, so no half-built
+  // control is left on screen for staff to find and be confused by.
+  if (!BIOMETRICS_ENABLED) {
+    return { state: "off", available: false, reason: "not-enabled", biometryType: null, label: "biometric unlock", methods: [] };
+  }
   if (!isNativeApp()) {
     const label = webLabel();
     const web = (state, reason) => ({ state, backend: "web", available: false, reason, biometryType: null, label, detail: "" });
@@ -246,7 +294,9 @@ export async function biometricStatus() {
     };
   }
   try {
-    const info = await Bio.checkBiometry();
+    // The Capacitor bridge is the likeliest thing to go quiet — a plugin that failed
+    // to register answers nothing at all rather than erroring.
+    const info = await withTimeout(Bio.checkBiometry(), PROBE_TIMEOUT_MS, "This device");
     const label = biometryLabel(info?.biometryType);
     const base = {
       biometryType: info?.biometryType ?? null,
@@ -410,6 +460,7 @@ async function runVerify(reason) {
 
 /* ---- the user's preference ---- */
 export const isBiometricEnabled = () => {
+  if (!BIOMETRICS_ENABLED) return false;
   try { return localStorage.getItem(ENABLED_KEY) === "1"; } catch (_) { return false; }
 };
 export const setBiometricEnabled = (on) => {
@@ -436,6 +487,7 @@ export const setBiometricEnabled = (on) => {
  * INTERRUPTED — the app killed, the tab closed — never a way around signing out.
  */
 export async function biometricSignInStatus() {
+  if (!BIOMETRICS_ENABLED) return { ok: false };   // no "Sign in with Face ID" button
   if (!isBiometricArmed()) return { ok: false };
   const token = await storedSession();
   if (!token) return { ok: false };
@@ -462,6 +514,9 @@ export async function biometricSignIn() {
 }
 
 export const isBiometricArmed = () => {
+  // Gates useAppLock. False while the feature is parked, so anyone who had already
+  // switched the lock on is not left behind a gate that no longer has a way through.
+  if (!BIOMETRICS_ENABLED) return false;
   if (!isBiometricEnabled()) return false;
   if (isNativeApp()) return true;
   return Boolean(storedCredential());
