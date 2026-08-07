@@ -24,7 +24,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import { useBackHandler } from "./backButton";
 import PhoneShell, { useIsHandset } from "./PhoneShell";
 import DeleteAccount from "./DeleteAccount";
-import { biometricStatus, biometryLabel, isBiometricEnabled, enableBiometric, disableBiometric } from "./biometric";
+import { biometricStatus, biometryLabel, isBiometricEnabled, enableBiometric, disableBiometric, BIOMETRICS_ENABLED } from "./biometric";
 import { api } from "./api";
 import useReveal from "./RevealButton";
 
@@ -332,6 +332,10 @@ function summariseDraft(values) {
 }
 
 const DOC_TYPES = ["Policy", "Payroll", "HR", "Calendar", "Form"];
+// Mirrors server/src/storage.js MAX_BYTES, so an oversized file is refused in the
+// browser with a clear message instead of after a pointless 10MB round-trip.
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const fmtBytes = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const DOC_TYPE_COLOUR = { Policy: "#1a3a8f", Payroll: "#0d7a5f", HR: "#6d28d9", Calendar: "#b45309", Form: "#9e1b32" };
 const docTypeColour = (t) => DOC_TYPE_COLOUR[t] || "#475569";
 const PALETTE = ["#1a3a8f", "#9e1b32", "#0d7a5f", "#b45309", "#6d28d9", "#0e7490", "#be123c"];
@@ -1262,6 +1266,14 @@ function DocumentsScreen({ store, me }) {
   const filtered = visible.filter(d => (filter === "All" || d.type === filter) && d.name.toLowerCase().includes(q.toLowerCase()));
   const iconFor = (t) => ({ Policy: FileText, Payroll: Briefcase, Calendar: CalendarDays, HR: Users, Form: ClipboardList }[t] || FileText);
   const types = ["All", ...Array.from(new Set(visible.map(d => d.type)))];
+  // The link is signed on demand and expires in minutes, so it is fetched at the
+  // moment of tapping rather than held in the list.
+  const openDoc = async (d) => {
+    try {
+      const { url } = await store.documentDownloadUrl(d.id);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e) { store.notify(e.message || "Could not open that document", "error"); }
+  };
   return (
     <Screen>
       <div className="mb-3 flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200"><Search size={16} className="text-slate-400" /><input value={q} onChange={e => setQ(e.target.value)} placeholder="Search documents…" className="w-full bg-transparent text-sm outline-none" /></div>
@@ -1284,7 +1296,15 @@ function DocumentsScreen({ store, me }) {
                 <span className="text-xs text-slate-400">{fmtDate(d.date)}{d.scope === "personal" ? " · Private" : ""}</span>
               </div>
             </div>
-            <button onClick={() => store.notify(`Downloading "${d.name}"…`)} className="rounded-lg p-2 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600 active:scale-90"><Download size={18} /></button>
+            {/* A real download. This used to toast "Downloading…" and do nothing —
+                the file didn't exist to fetch. Disabled, with a reason, when a
+                document has no file attached, rather than failing on tap. */}
+            <button
+              onClick={() => openDoc(d)}
+              disabled={!d.hasFile}
+              title={d.hasFile ? `Open ${d.fileName || d.name}` : "No file has been attached to this document yet"}
+              className="rounded-lg p-2 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600 active:scale-90 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+            ><Download size={18} /></button>
           </Card>
         ); })}
       </div>
@@ -1354,6 +1374,10 @@ function SummaryScreen({ store, me }) {
 // "More" screen, so both sides behave identically and there is one implementation
 // to keep correct.
 export function BiometricSetting({ owner = "" }) {
+  // Feature parked — see BIOMETRICS_ENABLED in biometric.js. Returned before any hook
+  // so the component does nothing at all: no device probe, no timer, no row. It is a
+  // literal constant, so the bundler drops the rest of this component's work too.
+  if (!BIOMETRICS_ENABLED) return null;
   const [status, setStatus] = useState(null);
   const [on, setOn] = useState(isBiometricEnabled());
   const [busy, setBusy] = useState(false);
@@ -1365,19 +1389,38 @@ export function BiometricSetting({ owner = "" }) {
     try {
       setStatus(await biometricStatus());
     } catch (e) {
-      // Without this catch a throw left `status` null for ever and the row rendered
-      // NOTHING — the same blank space this component has produced three times now,
-      // for three different reasons. A failure must be visible.
+      // A THROW is caught here. A promise that never settles is not a throw, so
+      // biometricStatus races every platform call against its own deadline — and the
+      // effect below adds a last-resort timer in case anything new ever doesn't.
       setStatus({ state: "error", available: false, label: "biometric unlock", detail: String(e?.message || e), reason: "Couldn't check this device. Tap Check again." });
     }
     setBusy(false);
   }, []);
-  useEffect(() => { check(); }, [check]);
+
+  useEffect(() => {
+    check();
+    // Belt and braces. "Checking this device…" must never be the final state: if
+    // nothing has answered in 10s, stop waiting and show something actionable. This
+    // component has now failed silently three ways — blank, then blank-with-reason,
+    // then a spinner that never stopped — so the rule is that every path ends in
+    // words plus a button.
+    const t = setTimeout(() => {
+      setStatus((s) => s || {
+        state: "error", available: false, label: "biometric unlock",
+        reason: "This device didn't answer. Tap Check again, or carry on — the app works without it.",
+        detail: "The biometric check timed out.",
+      });
+      setBusy(false);
+    }, 10000);
+    return () => clearTimeout(t);
+  }, [check]);
 
   // NEVER render nothing. Every hidden state this component has had — "not native",
   // "no plugin", "no sensor", "the check threw" — has been reported as "the feature
   // is missing", because an empty space cannot tell you it is empty on purpose.
   // Even the first paint, before the device has answered, says something.
+  // Transient only — the effect above guarantees this resolves within 10 seconds,
+  // one way or the other.
   if (!status) {
     return (
       <div className="flex items-center gap-2 px-4 py-3.5 text-sm font-semibold text-slate-400">
@@ -3225,7 +3268,39 @@ function AdminRequests({ store }) {
 function AdminDocuments({ store }) {
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState({ name: "", type: "Policy", scope: "all", assignedTo: "" });
-  const add = async () => { if (!form.name.trim()) return; await store.addDoc({ name: form.name, type: form.type, scope: form.scope, assignedTo: form.assignedTo }); setModal(false); setForm({ name: "", type: "Policy", scope: "all", assignedTo: "" }); };
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState("");
+  // Create the record, then upload the file against it. Two steps because the file is
+  // stored under the document's id — so the record has to exist first — and because a
+  // document without a file is still a valid record (that is how every existing one
+  // works), so a failed upload must not lose the document the admin just described.
+  const add = async () => {
+    if (!form.name.trim()) return;
+    setUploading(true); setUploadErr("");
+    try {
+      const doc = await store.addDoc({ name: form.name, type: form.type, scope: form.scope, assignedTo: form.assignedTo });
+      if (file && doc?.id) {
+        try { await store.uploadDocumentFile(doc.id, file); }
+        catch (e) {
+          // The document exists; only the file failed. Say exactly that, and leave the
+          // modal open so they can retry rather than silently publishing an empty one.
+          setUploadErr(`"${form.name}" was published, but the file didn't upload: ${e.message}`);
+          setUploading(false);
+          return;
+        }
+      }
+      setModal(false);
+      setForm({ name: "", type: "Policy", scope: "all", assignedTo: "" });
+      setFile(null);
+    } finally { setUploading(false); }
+  };
+  const openDoc = async (d) => {
+    try {
+      const { url } = await store.documentDownloadUrl(d.id);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e) { store.notify(e.message || "Could not open that document", "error"); }
+  };
   const del = (d) => {
     const who = d.scope === "personal" ? "a personal document" : "shared with all staff";
     if (!window.confirm(`Delete "${d.name}"?\n\nThis is ${who} and will be removed for everyone who can see it. This cannot be undone.`)) return;
@@ -3244,8 +3319,14 @@ function AdminDocuments({ store }) {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {store.docs.map((d, i) => { const I = iconFor(d.type); const dc = docTypeColour(d.type); const assignee = d.assignedTo ? store.staff.find(s => s.id === d.assignedTo) : null; return (
           <div key={d.id} className="hover-lift group rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:shadow-lg hover:ring-slate-300/80 fade-up" style={{ animationDelay: `${i * 40}ms` }}>
-            <div className="flex items-start gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-xl shadow-sm transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6" style={{ background: dc + "14" }}><I size={20} style={{ color: dc }} /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-slate-700">{d.name}</p><p className="text-xs text-slate-400">{fmtDate(d.date)}</p></div><button onClick={() => del(d)} className="rounded-lg p-1.5 text-slate-300 opacity-0 transition hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100"><Trash2 size={15} /></button></div>
+            <div className="flex items-start gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-xl shadow-sm transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6" style={{ background: dc + "14" }}><I size={20} style={{ color: dc }} /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-slate-700">{d.name}</p><p className="text-xs text-slate-400">{fmtDate(d.date)}{d.hasFile && d.sizeBytes ? ` · ${fmtBytes(d.sizeBytes)}` : ""}</p></div><button onClick={() => del(d)} className="rounded-lg p-1.5 text-slate-300 opacity-0 transition hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100"><Trash2 size={15} /></button></div>
             <div className="mt-3 flex flex-wrap gap-1.5"><span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: dc + "1a", color: dc }}>{d.type}</span><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${d.scope === "all" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>{d.scope === "all" ? "All staff" : assignee ? `Private · ${assignee.name.split(" ")[0]}` : "Personal template"}</span></div>
+            {/* Only offered when a file actually exists — a button that opens nothing
+                is worse than no button. Records created before uploads existed, and
+                any whose upload failed, simply say so. */}
+            {d.hasFile
+              ? <button onClick={() => openDoc(d)} className="press mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><Download size={14} /> Open file</button>
+              : <p className="mt-3 text-center text-[11px] text-slate-400">No file attached</p>}
           </div>
         ); })}
       </div>
@@ -3255,8 +3336,21 @@ function AdminDocuments({ store }) {
           <Field label="Type"><select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} className={inputCls}>{DOC_TYPES.map(t => <option key={t}>{t}</option>)}</select></Field>
           <Field label="Visibility"><select value={form.scope} onChange={e => setForm(f => ({ ...f, scope: e.target.value }))} className={inputCls}><option value="all">All staff</option><option value="personal">Private (one person)</option></select></Field>
           {form.scope === "personal" && <Field label="Assign to"><select value={form.assignedTo} onChange={e => setForm(f => ({ ...f, assignedTo: e.target.value }))} className={inputCls}><option value="">Select staff…</option>{store.staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>}
-          <div className="rounded-xl border-2 border-dashed border-slate-200 py-6 text-center text-xs text-slate-400"><FileUp size={20} className="mx-auto mb-1 text-slate-300" />Drag a file here (demo — no upload needed)</div>
-          <PrimaryBtn onClick={add} disabled={!form.name.trim()} className="w-full"><Check size={16} /> Publish document</PrimaryBtn>
+          <Field label="File (optional)">
+            <label className={`flex cursor-pointer flex-col items-center gap-1 rounded-xl border-2 border-dashed py-5 text-center text-xs transition ${file ? "border-emerald-300 bg-emerald-50/50 text-emerald-700" : "border-slate-200 text-slate-400 hover:border-slate-300 hover:bg-slate-50"}`}>
+              <input
+                type="file" className="hidden" disabled={uploading}
+                onChange={(e) => { const f = e.target.files?.[0] || null; setUploadErr(""); if (f && f.size > MAX_UPLOAD_BYTES) { setUploadErr(`That file is ${fmtBytes(f.size)} — the limit is ${fmtBytes(MAX_UPLOAD_BYTES)}.`); setFile(null); } else setFile(f); }}
+              />
+              {file
+                ? <><Check size={20} className="text-emerald-600" /><span className="max-w-full truncate px-3 font-semibold">{file.name}</span><span className="text-[10px] opacity-70">{fmtBytes(file.size)} · click to change</span></>
+                : <><FileUp size={20} className="text-slate-300" /><span>Choose a file to upload</span><span className="text-[10px]">PDF, Word, Excel or image · up to {fmtBytes(MAX_UPLOAD_BYTES)}</span></>}
+            </label>
+          </Field>
+          {uploadErr && <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600">{uploadErr}</p>}
+          <PrimaryBtn onClick={add} disabled={!form.name.trim() || uploading} className="w-full">
+            {uploading ? <><Loader size={16} /> {file ? "Uploading…" : "Publishing…"}</> : <><Check size={16} /> Publish document</>}
+          </PrimaryBtn>
         </div>
       </Modal>
     </>

@@ -217,6 +217,21 @@ model Document {
   scope        String  @default("all") // all | personal
   assignedTo   Staff?  @relation("AssignedDocs", fields: [assignedToId], references: [id], onDelete: SetNull)
   assignedToId String?
+
+  // --- The actual file, in Supabase Storage ---
+  // All nullable: a Document is a record first and a file second. Rows created before
+  // uploads existed stay valid and simply have nothing to open, and an admin can still
+  // register a document whose file arrives later.
+  //
+  // filePath is the key INSIDE the private bucket, never a URL — a stored URL would
+  // either be public (wrong for payroll and HR files assigned to one person) or expire
+  // and rot in the database. Readable links are signed on demand, after the API has
+  // checked the caller may see this document.
+  filePath     String?
+  fileName     String?   // what the uploader called it, for display and download
+  mimeType     String?
+  sizeBytes    Int?
+  uploadedAt   DateTime?
 }
 
 // ============================================================

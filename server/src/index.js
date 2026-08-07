@@ -108,6 +108,7 @@ app.listen(PORT, () => {
   // notification that never arrives.
   console.log(`Email: ${require("./email").describeEmail()}`);
   console.log(`Push:  ${require("./push").describePush()}`);
+  console.log(`Files: ${require("./storage").describeStorage()}`);
   startKeepAlive();
   require("./scheduler").startScheduler();
 });

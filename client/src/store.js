@@ -365,6 +365,11 @@ export function useApiStore(notify, user) {
     // documents
     addDoc: run((data) => api.addDocument(data), (d) => `"${d.name}" published`),
     deleteDoc: run((id) => api.deleteDocument(id), "Document removed", "error"),
+    // Not wrapped in run(): the caller reports its own outcome, because a failed
+    // upload leaves a document that DID publish — a generic "Action failed" toast
+    // would be actively misleading about what happened.
+    uploadDocumentFile: async (id, file) => { const r = await api.uploadDocumentFile(id, file); refresh().catch(() => {}); return r; },
+    documentDownloadUrl: (id) => api.documentDownloadUrl(id),
     // sign-up requests
     updateSignup: run((id, edits) => api.updateSignup(id, edits), "Sign-up request updated"),
     decideSignup: run(

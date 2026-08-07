@@ -177,6 +177,27 @@ export const api = {
   listDocuments: () => request("/documents"),
   addDocument: (data) => request("/documents", { method: "POST", body: data }),
   deleteDocument: (id) => request(`/documents/${id}`, { method: "DELETE" }),
+  // Upload the RAW file. Deliberately not the JSON `request` helper: that would
+  // JSON.stringify a File into "{}", and base64-in-JSON would inflate every upload by
+  // a third. The filename travels in a header because the body is the file itself.
+  uploadDocumentFile: async (id, file) => {
+    const token = getToken();
+    const res = await fetch(`${BASE}/documents/${id}/file`, {
+      method: "POST",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        "Content-Type": file.type || "application/octet-stream",
+        // Header values must be latin-1, and a filename can be anything at all.
+        "X-File-Name": encodeURIComponent(file.name),
+      },
+      body: file,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { const e = new Error(data?.error || `Upload failed (${res.status})`); e.status = res.status; e.body = data; throw e; }
+    return data;
+  },
+  // A short-lived signed link. The server checks access BEFORE it signs.
+  documentDownloadUrl: (id) => request(`/documents/${id}/download`),
   // HND attendance registers
   listSemesters: () => request("/hnd/semesters"),
   addSemester: (data) => request("/hnd/semesters", { method: "POST", body: data }),

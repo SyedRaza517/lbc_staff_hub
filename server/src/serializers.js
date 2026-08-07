@@ -51,7 +51,17 @@ const sLeave = (l) => ({
   id: l.id, staffId: l.staffId, type: l.type, start: l.start, end: l.end, days: l.days, reason: l.reason,
   status: l.status, requestedAt: l.requestedAt, decidedBy: l.decidedBy, decidedAt: l.decidedAt, note: l.note,
 });
-const sDoc = (d) => ({ id: d.id, name: d.name, type: d.type, date: d.date, scope: d.scope, assignedTo: d.assignedToId });
+const sDoc = (d) => ({
+  id: d.id, name: d.name, type: d.type, date: d.date, scope: d.scope, assignedTo: d.assignedToId,
+  // hasFile drives whether the UI offers to open it. filePath itself is deliberately
+  // NOT sent: it is a key inside a private bucket, and the client has no use for it —
+  // downloads go through /documents/:id/download, which checks access before signing.
+  hasFile: Boolean(d.filePath),
+  fileName: d.fileName ?? null,
+  mimeType: d.mimeType ?? null,
+  sizeBytes: d.sizeBytes ?? null,
+  uploadedAt: d.uploadedAt ?? null,
+});
 const sAdj = (a) => ({ id: a.id, staffId: a.staffId, days: a.days, note: a.note, date: a.date });
 
 /* ---------- HND attendance registers ---------- */
