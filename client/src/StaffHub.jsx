@@ -864,8 +864,102 @@ function LeaveRow({ l, i = 0, store }) {
 }
 
 /* ----- Calendar ----- */
-function MonthGrid({ store, big }) {
+// First name plus a last initial. The month cell is ~130px wide, so a full name would
+// be cut mid-word; this keeps the person recognisable at a glance, and the tooltip and
+// the day popup both carry the whole thing.
+const shortName = (full) => {
+  const parts = String(full || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+};
+
+// Everything about one day, opened by clicking its cell. The grid can only ever show
+// initials and a colour, which answers "is anyone off?" but not "who, and why?" —
+// this answers the second question without making the admin cross-reference the
+// requests list by hand.
+function DayDetail({ store, iso, onClose, showPending }) {
+  if (!iso) return null;
+  const bh = store.bankHolidaySet.get(iso);
+  const onDay = (l) => iso >= l.start && iso <= l.end;
+  const approved = store.leave.filter(l => l.status === "approved" && onDay(l));
+  // Pending sits on the admin calendar only. A pending request is a decision waiting
+  // to be made, so an admin looking at a day needs to see what might land on it;
+  // it isn't the whole college's business until it's approved.
+  const pending = showPending ? store.leave.filter(l => l.status === "pending" && onDay(l)) : [];
+
+  const heading = new Date(iso + "T12:00:00").toLocaleDateString("en-GB", {
+    weekday: "long", day: "numeric", month: "long", year: "numeric",
+  });
+
+  const Person = ({ l }) => {
+    const p = store.staff.find(x => x.id === l.staffId);
+    const t = leaveTypeMeta(l.type);
+    const T = t.icon;
+    const span = daysBetween(l.start, l.end);           // calendar length of the leave
+    const charged = store.chargeableDays(l.start, l.end); // working days actually taken
+    // Which day of their leave this one is — "day 2 of 5" tells you whether they are
+    // just off or midway through a fortnight, which the date range alone doesn't.
+    const nth = daysBetween(l.start, iso);
+    return (
+      <div className="rounded-xl bg-white p-3 ring-1 ring-slate-200">
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm" style={{ background: p?.colour || NAVY }}>{p?.initials}</span>
+          {/* Wraps rather than truncates: the whole point of the popup is the full
+              name and the full address, and a long one would be cut on a phone. */}
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-extrabold leading-snug" style={{ color: NAVY }}>{p?.name || "Unknown staff member"}</p>
+            {(p?.role || p?.dept) && <p className="text-[11px] leading-snug text-slate-500">{[p.role, p.dept].filter(Boolean).join(" · ")}</p>}
+            {p?.email && <p className="break-all text-[11px] leading-snug text-slate-400">{p.email}</p>}
+          </div>
+          <span className="flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: t.colour + "1a", color: t.colour }}><T size={11} /> {t.label}</span>
+        </div>
+        <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-slate-100 pt-2.5 text-[11px]">
+          <div><span className="text-slate-400">Away</span><p className="font-semibold text-slate-600">{fmtDate(l.start)}{l.end !== l.start && ` → ${fmtDate(l.end)}`}</p></div>
+          <div><span className="text-slate-400">This day</span><p className="font-semibold text-slate-600">{span === 1 ? "Single day" : `Day ${nth} of ${span}`}</p></div>
+          <div><span className="text-slate-400">Working days charged</span><p className="font-semibold text-slate-600">{NON_ALLOWANCE_TYPES.includes(l.type) ? `${charged} (unpaid — no allowance used)` : `${charged} day${charged === 1 ? "" : "s"}`}</p></div>
+          <div><span className="text-slate-400">Status</span><p className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${statusBadge(l.status)}`}>{l.status}</p></div>
+        </div>
+        {l.reason && <p className="mt-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500"><span className="font-semibold text-slate-400">Reason: </span>{l.reason}</p>}
+        {l.note && <p className="mt-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] italic text-slate-500">Manager: "{l.note}"</p>}
+      </div>
+    );
+  };
+
+  return (
+    <Modal open onClose={onClose} title={heading} width={540}>
+      <div className="space-y-3">
+        {bh && (
+          <div className="flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-xs font-bold text-amber-800 ring-1 ring-amber-200">
+            <span className="text-base leading-none">🏛</span>
+            <span>{bh} — a bank holiday. Nobody's allowance is charged for this day.</span>
+          </div>
+        )}
+
+        <div>
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+            {approved.length === 0 ? "Nobody on leave" : `On leave · ${approved.length}`}
+          </p>
+          {approved.length === 0
+            ? <p className="rounded-xl bg-slate-50 px-3 py-4 text-center text-xs text-slate-400">{bh ? "The college is closed, and no leave is booked on top of it." : "Everyone is in on this day."}</p>
+            : <div className="space-y-2">{approved.map(l => <Person key={l.id} l={l} />)}</div>}
+        </div>
+
+        {pending.length > 0 && (
+          <div className="border-t border-slate-100 pt-3">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">Awaiting a decision · {pending.length}</p>
+            <div className="space-y-2">{pending.map(l => <Person key={l.id} l={l} />)}</div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function MonthGrid({ store, big, showPending }) {
   const [cursor, setCursor] = useState(new Date());
+  // Which day's popup is open, as an ISO date. Null when none is.
+  const [dayOpen, setDayOpen] = useState(null);
   const year = cursor.getFullYear(), month = cursor.getMonth();
   const startPad = (new Date(year, month, 1).getDay() + 6) % 7;
   const days = new Date(year, month + 1, 0).getDate();
@@ -886,20 +980,27 @@ function MonthGrid({ store, big }) {
           const d = i + 1; const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
           const isToday = iso === todayISO(); const evts = approved.filter(l => iso >= l.start && iso <= l.end);
           const bh = store.bankHolidaySet.get(iso); // bank holiday name, or undefined
+          // The whole cell is the hit target, so a day can be opened without aiming at
+          // one of the name chips inside it.
+          const dayLabel = `${fmtDate(iso)}${bh ? ` — ${bh}` : ""}${evts.length ? ` — ${evts.length} on leave` : ""}`;
           if (big) return (
-            <div key={d} title={bh || undefined} className={`min-h-[78px] rounded-xl border p-1.5 transition-all duration-200 hover:shadow-sm ${bh ? "border-amber-300 bg-amber-50" : isToday ? "border-blue-300 bg-blue-50/40 glow-pulse" : "border-slate-100 hover:border-blue-200 hover:bg-blue-50/30"}`}>
-              <p className={`text-xs font-bold ${isToday ? "text-blue-700" : bh ? "text-amber-700" : "text-slate-400"}`}>{d}</p>
-              {bh && <div className="mt-0.5 truncate rounded bg-amber-400 px-1 py-0.5 text-[8px] font-bold text-white">🏛 {bh}</div>}
-              <div className="mt-1 space-y-0.5">{evts.slice(0, 3).map(e => { const p = store.staff.find(s => s.id === e.staffId); const t = LEAVE_TYPES.find(x => x.key === e.type); return <div key={e.id} className="truncate rounded px-1 py-0.5 text-[9px] font-bold text-white" style={{ background: t.colour }}>{p?.initials} {t.label.split(" ")[0]}</div>; })}{evts.length > 3 && <p className="text-[9px] text-slate-400">+{evts.length - 3}</p>}</div>
-            </div>
+            <button key={d} type="button" onClick={() => setDayOpen(iso)} title={dayLabel} aria-label={dayLabel}
+              className={`press min-h-[78px] rounded-xl border p-1.5 text-left transition-all duration-200 hover:shadow-sm ${bh ? "border-amber-300 bg-amber-50 hover:border-amber-400" : isToday ? "border-blue-300 bg-blue-50/40 glow-pulse" : "border-slate-100 hover:border-blue-200 hover:bg-blue-50/30"}`}>
+              {/* spans, not p/div: a <button> may only contain phrasing content, and
+                  the cell itself is the hit target. */}
+              <span className={`block text-xs font-bold ${isToday ? "text-blue-700" : bh ? "text-amber-700" : "text-slate-400"}`}>{d}</span>
+              {bh && <span className="mt-0.5 block truncate rounded bg-amber-400 px-1 py-0.5 text-[8px] font-bold text-white">🏛 {bh}</span>}
+              <span className="mt-1 block space-y-0.5">{evts.slice(0, 3).map(e => { const p = store.staff.find(s => s.id === e.staffId); const t = LEAVE_TYPES.find(x => x.key === e.type); return <span key={e.id} title={`${p?.name || "Unknown"} — ${t.label}`} className="block truncate rounded px-1 py-0.5 text-[9px] font-bold text-white" style={{ background: t.colour }}>{shortName(p?.name) || p?.initials}</span>; })}{evts.length > 3 && <span className="block text-[9px] font-semibold text-slate-400">+{evts.length - 3} more</span>}</span>
+            </button>
           );
           return (
-            <div key={d} title={bh || undefined} className={`relative flex h-9 flex-col items-center justify-center rounded-lg text-[13px] transition-all duration-200 ${isToday ? "font-bold text-white glow-pulse" : bh ? "bg-amber-100 font-semibold text-amber-700" : "text-slate-600 hover:bg-slate-100"}`} style={isToday ? { background: NAVY } : {}}>
-              {d}{(evts.length > 0 || bh) && <div className="absolute bottom-1 flex gap-0.5">{bh && <span className="h-1 w-1 rounded-full bg-amber-500" />}{evts.slice(0, 2).map((e, k) => <span key={k} className="h-1 w-1 rounded-full" style={{ background: LEAVE_TYPES.find(t => t.key === e.type).colour }} />)}</div>}
-            </div>
+            <button key={d} type="button" onClick={() => setDayOpen(iso)} title={dayLabel} aria-label={dayLabel} className={`press relative flex h-9 flex-col items-center justify-center rounded-lg text-[13px] transition-all duration-200 ${isToday ? "font-bold text-white glow-pulse" : bh ? "bg-amber-100 font-semibold text-amber-700" : "text-slate-600 hover:bg-slate-100"}`} style={isToday ? { background: NAVY } : {}}>
+              {d}{(evts.length > 0 || bh) && <span className="absolute bottom-1 flex gap-0.5">{bh && <span className="h-1 w-1 rounded-full bg-amber-500" />}{evts.slice(0, 2).map((e, k) => <span key={k} className="h-1 w-1 rounded-full" style={{ background: LEAVE_TYPES.find(t => t.key === e.type).colour }} />)}</span>}
+            </button>
           );
         })}
       </div>
+      <DayDetail store={store} iso={dayOpen} onClose={() => setDayOpen(null)} showPending={showPending} />
     </div>
   );
 }
@@ -2562,10 +2663,10 @@ function AdminCalendar({ store }) {
 
   return (
     <>
-      <AdminHeader title="Holiday Calendar" subtitle="Organisation-wide view of approved absences" Icon={CalendarDays}
+      <AdminHeader title="Holiday Calendar" subtitle="Organisation-wide view of approved absences — click any day to see who is off" Icon={CalendarDays}
         action={<PrimaryBtn onClick={openAdd}><Plus size={16} /> Add holiday</PrimaryBtn>} />
       <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 fade-up">
-        <MonthGrid store={store} big />
+        <MonthGrid store={store} big showPending />
         <div className="mt-4 border-t border-slate-100 pt-4"><p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">Leave types</p><LeaveLegend />
           <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-400" /> Bank holiday — a fixed day off for all staff, separate from the bookable allowance</div>
         </div>
