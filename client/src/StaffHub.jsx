@@ -4146,14 +4146,23 @@ function HndStudents({ store }) {
   // A unit the student is ALREADY on always stays listed even if it sits outside the
   // chosen course, so narrowing the course can never silently drop an enrolment the
   // admin cannot see to keep.
+  const byCode = (a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true });
   const pickableUnits = useMemo(() => {
     const keep = store.units.filter(u => u.code !== "TUTORIAL");
-    const scoped = courseId ? keep.filter(u => u.courseId === courseId) : keep;
-    const shown = new Set(scoped.map(u => u.id));
-    const alsoOn = keep.filter(u => form.unitIds.includes(u.id) && !shown.has(u.id));
-    return [...scoped, ...alsoOn].sort((a, b) =>
-      String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
-  }, [store.units, courseId, form.unitIds]);
+    return (courseId ? keep.filter(u => u.courseId === courseId) : keep).slice().sort(byCode);
+  }, [store.units, courseId]);
+  // Units the student is already on that sit OUTSIDE the chosen course. They are kept
+  // — narrowing the course must never silently drop an enrolment the admin cannot see
+  // to keep — but listed apart and named by their course. Merged into one grid they
+  // rendered as a second identical "UNIT 1" chip next to the course's own, with
+  // nothing to tell the two apart.
+  const otherCourseUnits = useMemo(() => {
+    if (!courseId) return [];
+    const shown = new Set(pickableUnits.map(u => u.id));
+    return store.units
+      .filter(u => form.unitIds.includes(u.id) && !shown.has(u.id) && u.code !== "TUTORIAL")
+      .slice().sort(byCode);
+  }, [store.units, courseId, form.unitIds, pickableUnits]);
   const save = async () => {
     try {
       if (edit) {
@@ -4261,6 +4270,24 @@ function HndStudents({ store }) {
               ))}
               {pickableUnits.length === 0 && <p className="col-span-2 text-xs text-slate-400">{store.units.length === 0 ? "No units yet — add one on the Units tab." : "This course has no units yet."}</p>}
             </div>
+            {otherCourseUnits.length > 0 && (
+              <div className="mt-2.5 rounded-xl bg-amber-50/60 p-2.5 ring-1 ring-amber-200">
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">Also enrolled on · from another course</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {otherCourseUnits.map(m => { const c = store.courses.find(x => x.id === m.courseId); return (
+                    <button key={m.id} onClick={() => toggleUnit(m.id)} type="button" title={`${m.name}${c ? ` — ${c.name}` : ""}`}
+                      className={`press flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold ring-1 transition ${form.unitIds.includes(m.id) ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`}
+                      style={form.unitIds.includes(m.id) ? { background: NAVY } : {}}>
+                      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 ${form.unitIds.includes(m.id) ? "border-white bg-white/20" : "border-slate-300"}`}>
+                        {form.unitIds.includes(m.id) && <Check size={10} className="text-white" />}
+                      </span>
+                      <span className="min-w-0"><span className="block">{m.code}</span><span className={`block truncate text-[9px] font-semibold ${form.unitIds.includes(m.id) ? "text-white/70" : "text-slate-400"}`}>{shortCourse(c?.name) || "Other course"}</span></span>
+                    </button>
+                  ); })}
+                </div>
+                <p className="mt-1.5 text-[10px] text-amber-700">Untick to remove one — otherwise these stay as they are.</p>
+              </div>
+            )}
           </Field>
           <PrimaryBtn onClick={save} disabled={!form.firstName.trim() || !form.lastName.trim() || !form.studentRef.trim()} className="w-full">
             <Save size={16} /> {edit ? "Save changes" : "Add student"}
@@ -4286,6 +4313,19 @@ function AdminStudents({ store }) {
   const [statusFilter, setStatusFilter] = useState("all");  // all | active | inactive
   const [riskFilter, setRiskFilter] = useState("all");  // all | High Risk | Monitor | Good | Excellent | Perfect
   const [attnFor, setAttnFor] = useState(null);             // student whose breakdown is open
+  // Which course's units the picker shows. Only 4 of 136 students have a cohort, so
+  // the course is worked out from the units they are ALREADY enrolled on, which is
+  // unambiguous for almost all of them; the dropdown lets an admin set or change it.
+  const [courseId, setCourseId] = useState("");
+
+  // The course a student belongs to: their cohort if one is set, else the course
+  // their existing units all belong to. Returns "" when it genuinely cannot be told.
+  const courseOf = (s) => {
+    const viaCohort = store.cohorts.find(c => c.id === s?.cohortId)?.courseId;
+    if (viaCohort) return viaCohort;
+    const ids = new Set((s?.unitIds || []).map(id => store.units.find(u => u.id === id)?.courseId).filter(Boolean));
+    return ids.size === 1 ? [...ids][0] : "";
+  };
 
   // The Students tab can be opened without visiting Registers first, so pull the
   // HND collections in on mount (refreshHnd is a no-op cost if already loaded).
@@ -4327,8 +4367,8 @@ function AdminStudents({ store }) {
     return possible > 0 ? Math.round((earned / possible) * 1000) / 10 : null;
   };
 
-  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", active: true, cohortId: "", unitIds: [] }); setModal(true); };
-  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, active: s.active !== false, cohortId: s.cohortId || "", unitIds: s.unitIds || [] }); setModal(true); };
+  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", active: true, cohortId: "", unitIds: [] }); setCourseId(""); setModal(true); };
+  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, active: s.active !== false, cohortId: s.cohortId || "", unitIds: s.unitIds || [] }); setCourseId(courseOf(s)); setModal(true); };
   const toggleUnit = (id) => setForm(f => ({ ...f, unitIds: f.unitIds.includes(id) ? f.unitIds.filter(x => x !== id) : [...f.unitIds, id] }));
 
   // What the picker offers: this course's units only, and never the synthetic
@@ -4339,14 +4379,23 @@ function AdminStudents({ store }) {
   // A unit the student is ALREADY on always stays listed even if it sits outside the
   // chosen course, so narrowing the course can never silently drop an enrolment the
   // admin cannot see to keep.
+  const byCode = (a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true });
   const pickableUnits = useMemo(() => {
     const keep = store.units.filter(u => u.code !== "TUTORIAL");
-    const scoped = courseId ? keep.filter(u => u.courseId === courseId) : keep;
-    const shown = new Set(scoped.map(u => u.id));
-    const alsoOn = keep.filter(u => form.unitIds.includes(u.id) && !shown.has(u.id));
-    return [...scoped, ...alsoOn].sort((a, b) =>
-      String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
-  }, [store.units, courseId, form.unitIds]);
+    return (courseId ? keep.filter(u => u.courseId === courseId) : keep).slice().sort(byCode);
+  }, [store.units, courseId]);
+  // Units the student is already on that sit OUTSIDE the chosen course. They are kept
+  // — narrowing the course must never silently drop an enrolment the admin cannot see
+  // to keep — but listed apart and named by their course. Merged into one grid they
+  // rendered as a second identical "UNIT 1" chip next to the course's own, with
+  // nothing to tell the two apart.
+  const otherCourseUnits = useMemo(() => {
+    if (!courseId) return [];
+    const shown = new Set(pickableUnits.map(u => u.id));
+    return store.units
+      .filter(u => form.unitIds.includes(u.id) && !shown.has(u.id) && u.code !== "TUTORIAL")
+      .slice().sort(byCode);
+  }, [store.units, courseId, form.unitIds, pickableUnits]);
   const save = async () => {
     try {
       if (edit) {
@@ -4550,9 +4599,18 @@ function AdminStudents({ store }) {
               </div>
             </Field>
           )}
+          <Field label="Course">
+            <select value={courseId} onChange={e => setCourseId(e.target.value)} className={inputCls}>
+              <option value="">— all courses —</option>
+              {store.courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-slate-400">
+              {courseId ? "Only this course's units are listed below." : "Pick a course to narrow the list — every unit in the college is shown."}
+            </p>
+          </Field>
           <Field label={`Units${form.unitIds.length ? ` · ${form.unitIds.length} selected` : ""}`}>
             <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-              {store.units.map(m => (
+              {pickableUnits.map(m => (
                 <button key={m.id} onClick={() => toggleUnit(m.id)} type="button"
                   className={`press flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold ring-1 transition ${form.unitIds.includes(m.id) ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`}
                   style={form.unitIds.includes(m.id) ? { background: NAVY } : {}} title={m.name}>
@@ -4562,8 +4620,26 @@ function AdminStudents({ store }) {
                   {m.code}
                 </button>
               ))}
-              {store.units.length === 0 && <p className="col-span-2 text-xs text-slate-400 sm:col-span-3">No units yet — add one on the Units tab.</p>}
+              {pickableUnits.length === 0 && <p className="col-span-2 text-xs text-slate-400 sm:col-span-3">{store.units.length === 0 ? "No units yet — add one on the Units tab." : "This course has no units yet."}</p>}
             </div>
+            {otherCourseUnits.length > 0 && (
+              <div className="mt-2.5 rounded-xl bg-amber-50/60 p-2.5 ring-1 ring-amber-200">
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">Also enrolled on · from another course</p>
+                <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                  {otherCourseUnits.map(m => { const c = store.courses.find(x => x.id === m.courseId); return (
+                    <button key={m.id} onClick={() => toggleUnit(m.id)} type="button" title={`${m.name}${c ? ` — ${c.name}` : ""}`}
+                      className={`press flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold ring-1 transition ${form.unitIds.includes(m.id) ? "text-white ring-transparent" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`}
+                      style={form.unitIds.includes(m.id) ? { background: NAVY } : {}}>
+                      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 ${form.unitIds.includes(m.id) ? "border-white bg-white/20" : "border-slate-300"}`}>
+                        {form.unitIds.includes(m.id) && <Check size={10} className="text-white" />}
+                      </span>
+                      <span className="min-w-0"><span className="block">{m.code}</span><span className={`block truncate text-[9px] font-semibold ${form.unitIds.includes(m.id) ? "text-white/70" : "text-slate-400"}`}>{shortCourse(c?.name) || "Other course"}</span></span>
+                    </button>
+                  ); })}
+                </div>
+                <p className="mt-1.5 text-[10px] text-amber-700">Untick to remove one — otherwise these stay as they are.</p>
+              </div>
+            )}
           </Field>
           <PrimaryBtn onClick={save} disabled={!form.firstName.trim() || !form.lastName.trim() || !form.studentRef.trim()} className="w-full">
             <Save size={16} /> {edit ? "Save changes" : "Add student"}
