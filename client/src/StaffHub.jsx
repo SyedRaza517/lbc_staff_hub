@@ -10016,7 +10016,6 @@ function AdminTimetable({ store }) {
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState(null);    // null | slot-being-edited | "new"
   const [form, setForm] = useState({ day: 2, start: "10:00", end: "13:00", title: "", lecturer: "", room: "", unitId: "" });
-  const [unitLecturers, setUnitLecturers] = useState({});   // unitId -> lecturer being typed in the units panel
 
   useEffect(() => {
     api.timetableCourses().then(cs => {
@@ -10063,27 +10062,38 @@ function AdminTimetable({ store }) {
     } catch (e) { notify?.(e.message || "Auto-fill failed", "error"); }
     setBusy(false);
   };
-  // Add ONE unit to the timetable, with the lecturer typed inline. Day/time come from the
-  // unit's registers; the slot lands on the unit's own year+term so students see it.
-  const addUnit = async (u) => {
-    setBusy(true);
-    try {
-      const lecturer = (unitLecturers[u.id] ?? u.tutor ?? "").trim();
-      const r = await api.timetableAutofill({ courseId, unitId: u.id, lecturer });
-      if (r.created > 0) notify?.(`Added ${u.code} — ${r.created} session${r.created === 1 ? "" : "s"}`, "success");
-      else notify?.(`${u.code}: ${(r.skipped?.[0]?.reason) || "nothing to add"}`, "info");
-      await load();
-    } catch (e) { notify?.(e.message || "Couldn't add the unit", "error"); }
-    setBusy(false);
-  };
   const fmtDate = (d) => { if (!d) return ""; const dt = new Date(d + "T00:00:00"); return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-GB", { day: "numeric", month: "short" }); };
-  const openNew = () => { setForm({ day: 2, start: "10:00", end: "13:00", title: "", lecturer: "", room: "", unitId: "" }); setModal("new"); };
-  const openEdit = (s) => { setForm({ day: s.day, start: s.start, end: s.end, title: s.title, lecturer: s.lecturer || "", room: s.room || "", unitId: s.unitId || "" }); setModal(s); };
+  // Best starting stage for a hand-added row: the specific year/term in view, else the
+  // course's first real stage — so a row is student-reachable even from an "all" view.
+  const firstStage = stages[0] || null;
+  const targetYear = year || (firstStage ? String(firstStage.year) : null);
+  const targetTerm = term || (firstStage ? String(firstStage.termNumber) : null);
+  const openNew = () => { setForm({ day: 2, start: "10:00", end: "13:00", title: "", lecturer: "", room: "", unitId: "", year: targetYear, termNumber: targetTerm }); setModal("new"); };
+  // Add a unit: open the form so the admin DECIDES the day/time and room, pre-filled with
+  // the unit's name, its tutor, and the day/time suggested by its registers (all editable).
+  // The row lands on the unit's own year+term, so students on that stage see it.
+  const openUnit = (u) => {
+    const s = (u.schedule || [])[0];
+    setForm({
+      day: s ? s.day : 2,
+      start: s ? s.start : "09:00",
+      end: s ? s.end : "12:00",
+      title: u.name,
+      lecturer: u.tutor || "",
+      room: "",
+      unitId: u.id,
+      year: u.year ?? targetYear,
+      termNumber: u.termNumber ?? targetTerm,
+    });
+    setModal("new");
+  };
+  const openEdit = (s) => { setForm({ day: s.day, start: s.start, end: s.end, title: s.title, lecturer: s.lecturer || "", room: s.room || "", unitId: s.unitId || "", year: s.year ?? targetYear, termNumber: s.termNumber ?? targetTerm }); setModal(s); };
   const saveSlot = async () => {
     if (!form.title.trim()) { notify?.("Give the session a title", "error"); return; }
+    if (form.end <= form.start) { notify?.("End time must be after the start time", "error"); return; }
     setBusy(true);
     try {
-      if (modal === "new") await api.addTimetableSlot({ ...scoped, ...form, day: Number(form.day) });
+      if (modal === "new") await api.addTimetableSlot({ courseId, year: form.year ?? null, termNumber: form.termNumber ?? null, day: Number(form.day), start: form.start, end: form.end, title: form.title, lecturer: form.lecturer, room: form.room, unitId: form.unitId || undefined });
       else await api.updateTimetableSlot(modal.id, { day: Number(form.day), start: form.start, end: form.end, title: form.title, lecturer: form.lecturer, room: form.room });
       setModal(null); await load();
       notify?.("Timetable saved", "success");
@@ -10141,12 +10151,11 @@ function AdminTimetable({ store }) {
       {!loading && data.units.length > 0 && (
         <div className="mb-4 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
           <div className="border-b border-slate-100 bg-slate-50 px-4 py-2.5">
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Units in {term ? "this term" : year ? "this year" : "this course"} — set the lecturer, then add each to the timetable</p>
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Units in {term ? "this term" : year ? "this year" : "this course"} — add each, then set its day, time, room and lecturer</p>
           </div>
           <div className="divide-y divide-slate-100">
             {data.units.map(u => {
               const inTT = u.slotCount > 0;
-              const noReg = u.sessionCount === 0;
               return (
                 <div key={u.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                   <div className="min-w-[220px] flex-1">
@@ -10154,15 +10163,16 @@ function AdminTimetable({ store }) {
                     <p className="mt-0.5 text-[11px] text-slate-500">
                       {u.year != null && `Year ${u.year} · `}{u.termNumber != null && `Term ${u.termNumber}`}
                       {(u.startDate || u.endDate) && <> · {fmtDate(u.startDate)}–{fmtDate(u.endDate)}</>}
+                      {u.tutor && <> · {u.tutor}</>}
                     </p>
                     {u.schedule?.length > 0
-                      ? <p className="mt-0.5 text-[11px] text-slate-400">{u.schedule.map(s => `${TT_DAY_SHORT[s.day]} ${s.start}–${s.end}${String(s.kind || "").toLowerCase() === "seminar" ? " (Tutorial)" : ""}`).join(" · ")}</p>
-                      : <p className="mt-0.5 text-[11px] text-amber-600">No registers yet — add registers to this unit to read its days and times.</p>}
+                      ? <p className="mt-0.5 text-[11px] text-slate-400">Registers suggest: {u.schedule.map(s => `${TT_DAY_SHORT[s.day]} ${s.start}–${s.end}${String(s.kind || "").toLowerCase() === "seminar" ? " (Tutorial)" : ""}`).join(" · ")}</p>
+                      : <p className="mt-0.5 text-[11px] text-slate-400">No registers — you set the day and time when you add it.</p>}
                   </div>
-                  <div className="w-44"><input value={unitLecturers[u.id] ?? u.tutor ?? ""} onChange={e => setUnitLecturers(m => ({ ...m, [u.id]: e.target.value }))} placeholder="Lecturer name" className={inputCls} disabled={inTT} /></div>
-                  {inTT
-                    ? <span className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200"><Check size={14} /> In timetable</span>
-                    : <button onClick={() => addUnit(u)} disabled={busy || noReg} title={noReg ? "This unit has no registers to read days/times from" : ""} className="press inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-bold text-white transition hover:bg-blue-700 disabled:opacity-50"><Plus size={14} /> Add</button>}
+                  <div className="flex items-center gap-2">
+                    {inTT && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200"><Check size={12} /> In timetable</span>}
+                    <button onClick={() => openUnit(u)} disabled={busy} className="press inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-bold text-white transition hover:bg-blue-700 disabled:opacity-50"><Plus size={14} /> {inTT ? "Add another" : "Add to timetable"}</button>
+                  </div>
                 </div>
               );
             })}
@@ -10230,6 +10240,10 @@ function AdminTimetable({ store }) {
       {/* Add / edit row */}
       <Modal open={!!modal} onClose={() => setModal(null)} title={modal === "new" ? "Add timetable row" : "Edit timetable row"}>
         <div className="space-y-3">
+          {modal === "new" && (form.year || form.termNumber) && (
+            <p className="rounded-lg bg-blue-50 px-3 py-2 text-[11px] font-semibold text-blue-700">Adds to {[form.year ? `Year ${form.year}` : null, form.termNumber ? `Term ${form.termNumber}` : null].filter(Boolean).join(" · ")} — the stage students on it will see.</p>
+          )}
+          <p className="text-[11px] font-semibold text-slate-400">When it runs each week — pick the day and start/end time.</p>
           <div className="grid grid-cols-3 gap-2">
             <Field label="Day"><select value={form.day} onChange={e => setForm(f => ({ ...f, day: e.target.value }))} className={inputCls}>{[1, 2, 3, 4, 5, 6, 7].map(d => <option key={d} value={d}>{TT_DAYS[d]}</option>)}</select></Field>
             <Field label="Start"><input type="time" value={form.start} onChange={e => setForm(f => ({ ...f, start: e.target.value }))} className={inputCls} /></Field>
@@ -10239,7 +10253,7 @@ function AdminTimetable({ store }) {
           <Field label="Lecturer"><input value={form.lecturer} onChange={e => setForm(f => ({ ...f, lecturer: e.target.value }))} placeholder="e.g. Dr Funke Ogunjimi" className={inputCls} /></Field>
           <Field label="Venue / room"><input value={form.room} onChange={e => setForm(f => ({ ...f, room: e.target.value }))} placeholder="e.g. Room 101, Online, Study Room 1st Floor" className={inputCls} /></Field>
           {modal === "new" && (
-            <Field label="Link to a unit (optional)"><select value={form.unitId} onChange={e => { const u = data.units.find(x => x.id === e.target.value); setForm(f => ({ ...f, unitId: e.target.value, title: f.title || (u?.name || ""), lecturer: f.lecturer || (u?.tutor || "") })); }} className={inputCls}><option value="">Not a taught unit (workshop / support)</option>{data.units.map(u => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}</select></Field>
+            <Field label="Link to a unit (optional)"><select value={form.unitId} onChange={e => { const u = data.units.find(x => x.id === e.target.value); setForm(f => ({ ...f, unitId: e.target.value, title: f.title || (u?.name || ""), lecturer: f.lecturer || (u?.tutor || ""), year: u ? (u.year ?? f.year) : f.year, termNumber: u ? (u.termNumber ?? f.termNumber) : f.termNumber })); }} className={inputCls}><option value="">Not a taught unit (workshop / support)</option>{data.units.map(u => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}</select></Field>
           )}
           <PrimaryBtn onClick={saveSlot} disabled={busy || !form.title.trim()} className="w-full">{busy ? <><Loader2 size={16} className="animate-spin" /> Saving…</> : <><Check size={16} /> Save row</>}</PrimaryBtn>
         </div>
