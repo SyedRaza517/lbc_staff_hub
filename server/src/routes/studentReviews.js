@@ -104,7 +104,9 @@ router.get("/roster", async (_req, res) => {
       const fromUnits = [...new Set(s.enrolments.map((e) => e.unit?.courseId).filter(Boolean))];
       return {
         id: s.id, name: `${s.firstName} ${s.lastName}`.trim(),
-        studentRef: s.studentRef, email: s.email, initials: s.initials, colour: s.colour,
+        // No email — it isn't selected above (contact details are withheld from this
+        // roster). Emitting the undefined field was harmless but misleading.
+        studentRef: s.studentRef, initials: s.initials, colour: s.colour,
         courseId: s.cohort?.courseId || (fromUnits.length === 1 ? fromUnits[0] : null),
       };
     }),

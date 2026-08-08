@@ -1282,7 +1282,10 @@ function DocumentsScreen({ store, me }) {
   const openDoc = async (d) => {
     try {
       const { url } = await store.documentDownloadUrl(d.id);
-      window.open(url, "_blank", "noopener,noreferrer");
+      // "_system" on native hands the signed URL to the OS browser/downloader instead
+      // of loading it inside the Capacitor WebView — matches TwoFactor.jsx's convention.
+      const native = typeof window !== "undefined" && window.Capacitor?.isNativePlatform?.() === true;
+      window.open(url, native ? "_system" : "_blank", "noopener,noreferrer");
     } catch (e) { store.notify(e.message || "Could not open that document", "error"); }
   };
   return (
@@ -1358,6 +1361,12 @@ function SummaryScreen({ store, me }) {
   const today = todayISO();
   const rec = store.checkins.find(c => c.staffId === me.id && c.date === today);
   const [text, setText] = useState(rec?.summary || "");
+  const [touched, setTouched] = useState(false);
+  // Seed the box once check-ins have loaded. Opening this screen before the initial
+  // load finished left an existing summary showing as an empty box (useState ran with
+  // no data). Only sync while the user hasn't started typing, so it can't clobber an
+  // unsaved edit.
+  useEffect(() => { if (!touched && rec?.summary) setText(rec.summary); }, [rec?.summary, rec?.id, touched]);
   const [saved, setSaved] = useState(false);
   const save = async () => {
     await store.saveSummary(today, text);
@@ -1368,7 +1377,7 @@ function SummaryScreen({ store, me }) {
       <Card>
         <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{fmtDay(today)}</p>
         <p className="mb-3 text-lg font-extrabold" style={{ color: NAVY }}>What did you work on today?</p>
-        <textarea value={text} onChange={e => setText(e.target.value)} rows={6} placeholder="e.g. Taught Y12 Maths, marked mock papers, met admissions about September intake…" className={inputCls + " resize-none"} />
+        <textarea value={text} onChange={e => { setTouched(true); setText(e.target.value); }} rows={6} placeholder="e.g. Taught Y12 Maths, marked mock papers, met admissions about September intake…" className={inputCls + " resize-none"} />
         <PrimaryBtn onClick={save} colour={saved ? "#059669" : NAVY} className="mt-3 w-full !py-3">{saved ? <><Check size={18} /> Saved & shared</> : "Save Daily Summary"}</PrimaryBtn>
       </Card>
       <p className="mb-2 mt-5 px-1 text-xs font-bold uppercase tracking-wide text-slate-400">Recent summaries</p>
@@ -3283,6 +3292,9 @@ function AdminDocuments({ store }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState("");
+  // The document created on this modal's first Publish click. Held so a retry after a
+  // failed upload re-uploads against it instead of creating a duplicate record.
+  const [publishedId, setPublishedId] = useState(null);
   // Create the record, then upload the file against it. Two steps because the file is
   // stored under the document's id — so the record has to exist first — and because a
   // document without a file is still a valid record (that is how every existing one
@@ -3291,27 +3303,49 @@ function AdminDocuments({ store }) {
     if (!form.name.trim()) return;
     setUploading(true); setUploadErr("");
     try {
-      const doc = await store.addDoc({ name: form.name, type: form.type, scope: form.scope, assignedTo: form.assignedTo });
-      if (file && doc?.id) {
-        try { await store.uploadDocumentFile(doc.id, file); }
+      // If the record was already created on a previous attempt (the file upload failed
+      // and the modal stayed open to retry), do NOT create a second one — re-upload
+      // against the existing id. Creating on every click left a duplicate: doc #1 with
+      // no file, doc #2 with the file.
+      let docId = publishedId;
+      if (!docId) {
+        const doc = await store.addDoc({ name: form.name, type: form.type, scope: form.scope, assignedTo: form.assignedTo });
+        docId = doc?.id;
+        if (docId) setPublishedId(docId);
+      }
+      if (file && docId) {
+        try { await store.uploadDocumentFile(docId, file); }
         catch (e) {
-          // The document exists; only the file failed. Say exactly that, and leave the
-          // modal open so they can retry rather than silently publishing an empty one.
-          setUploadErr(`"${form.name}" was published, but the file didn't upload: ${e.message}`);
+          // The document exists; only the file failed. Say exactly that and leave the
+          // modal open — the next click retries the UPLOAD (publishedId is set), it
+          // does not publish a second document.
+          setUploadErr(`"${form.name}" was published, but the file didn't upload: ${e.message}. Tap Publish again to retry the upload.`);
           setUploading(false);
           return;
         }
       }
       setModal(false);
       setForm({ name: "", type: "Policy", scope: "all", assignedTo: "" });
-      setFile(null);
+      setFile(null); setPublishedId(null);
     } finally { setUploading(false); }
   };
   const openDoc = async (d) => {
     try {
       const { url } = await store.documentDownloadUrl(d.id);
-      window.open(url, "_blank", "noopener,noreferrer");
+      // "_system" on native so the OS browser/downloader gets the signed URL, rather
+      // than it loading inside the Capacitor WebView — matches the app's own
+      // external-open convention (see TwoFactor.jsx).
+      const native = typeof window !== "undefined" && window.Capacitor?.isNativePlatform?.() === true;
+      window.open(url, native ? "_system" : "_blank", "noopener,noreferrer");
     } catch (e) { store.notify(e.message || "Could not open that document", "error"); }
+  };
+  // Attach (or replace) a file on an EXISTING document, from its card. Without this the
+  // only way to give a fileless document a file was delete-and-recreate.
+  const attachFile = async (d, f) => {
+    if (!f) return;
+    if (f.size > MAX_UPLOAD_BYTES) { store.notify(`That file is ${fmtBytes(f.size)} — the limit is ${fmtBytes(MAX_UPLOAD_BYTES)}.`, "error"); return; }
+    try { await store.uploadDocumentFile(d.id, f); store.notify(`File attached to "${d.name}"`, "success"); }
+    catch (e) { store.notify(e.message || "Could not attach the file", "error"); }
   };
   const del = (d) => {
     const who = d.scope === "personal" ? "a personal document" : "shared with all staff";
@@ -3321,7 +3355,7 @@ function AdminDocuments({ store }) {
   const iconFor = (t) => ({ Policy: FileText, Payroll: Briefcase, Calendar: CalendarDays, HR: Users, Form: ClipboardList }[t] || FileText);
   return (
     <>
-      <AdminHeader title="Documents" subtitle="Publish documents to all staff or assign privately" Icon={FileText} action={<PrimaryBtn onClick={() => setModal(true)}><FileUp size={16} /> Upload</PrimaryBtn>} />
+      <AdminHeader title="Documents" subtitle="Publish documents to all staff or assign privately" Icon={FileText} action={<PrimaryBtn onClick={() => { setForm({ name: "", type: "Policy", scope: "all", assignedTo: "" }); setFile(null); setPublishedId(null); setUploadErr(""); setModal(true); }}><FileUp size={16} /> Upload</PrimaryBtn>} />
       <div className="mb-4 flex flex-wrap gap-2">
         <span className="flex items-center gap-1.5 rounded-full bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600 ring-1 ring-slate-200"><Layers size={13} /> {store.docs.length} total</span>
         <span className="flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 ring-1 ring-blue-200"><Users size={13} /> {store.docs.filter(d => d.scope === "all").length} all-staff</span>
@@ -3333,16 +3367,27 @@ function AdminDocuments({ store }) {
           <div key={d.id} className="hover-lift group rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:shadow-lg hover:ring-slate-300/80 fade-up" style={{ animationDelay: `${i * 40}ms` }}>
             <div className="flex items-start gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-xl shadow-sm transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6" style={{ background: dc + "14" }}><I size={20} style={{ color: dc }} /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-slate-700">{d.name}</p><p className="text-xs text-slate-400">{fmtDate(d.date)}{d.hasFile && d.sizeBytes ? ` · ${fmtBytes(d.sizeBytes)}` : ""}</p></div><button onClick={() => del(d)} className="rounded-lg p-1.5 text-slate-300 opacity-0 transition hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100"><Trash2 size={15} /></button></div>
             <div className="mt-3 flex flex-wrap gap-1.5"><span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: dc + "1a", color: dc }}>{d.type}</span><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${d.scope === "all" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>{d.scope === "all" ? "All staff" : assignee ? `Private · ${assignee.name.split(" ")[0]}` : "Personal template"}</span></div>
-            {/* Only offered when a file actually exists — a button that opens nothing
-                is worse than no button. Records created before uploads existed, and
-                any whose upload failed, simply say so. */}
-            {d.hasFile
-              ? <button onClick={() => openDoc(d)} className="press mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><Download size={14} /> Open file</button>
-              : <p className="mt-3 text-center text-[11px] text-slate-400">No file attached</p>}
+            {/* A file-bearing document opens; a fileless one (created before uploads
+                existed, or whose upload failed) can now have a file ATTACHED from here
+                rather than only by delete-and-recreate. */}
+            {d.hasFile ? (
+              <div className="mt-3 flex gap-2">
+                <button onClick={() => openDoc(d)} className="press flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><Download size={14} /> Open file</button>
+                <label className="press flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-2.5 py-2 text-xs font-bold text-slate-500 transition hover:bg-slate-50" title="Replace the file">
+                  <FileUp size={14} />
+                  <input type="file" className="hidden" onChange={(e) => attachFile(d, e.target.files?.[0])} />
+                </label>
+              </div>
+            ) : (
+              <label className="press mt-3 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-300 py-2 text-xs font-bold text-slate-500 transition hover:bg-slate-50">
+                <FileUp size={14} /> Attach a file
+                <input type="file" className="hidden" onChange={(e) => attachFile(d, e.target.files?.[0])} />
+              </label>
+            )}
           </div>
         ); })}
       </div>
-      <Modal open={modal} onClose={() => setModal(false)} title="Upload document">
+      <Modal open={modal} onClose={() => { setModal(false); setPublishedId(null); setFile(null); setUploadErr(""); }} title="Upload document">
         <div className="space-y-3">
           <Field label="Document name"><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Fire Safety Policy 2026" className={inputCls} /></Field>
           <Field label="Type"><select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} className={inputCls}>{DOC_TYPES.map(t => <option key={t}>{t}</option>)}</select></Field>
@@ -4360,7 +4405,7 @@ function HndRegister({ store, sessionId, onBack }) {
   };
 
   const ql = query.trim().toLowerCase();
-  const visible = rows.filter(r => !ql || r.student.name.toLowerCase().includes(ql) || r.student.email.toLowerCase().includes(ql) || r.student.studentRef.includes(ql));
+  const visible = rows.filter(r => !ql || r.student.name.toLowerCase().includes(ql) || (r.student.email || "").toLowerCase().includes(ql) || r.student.studentRef.includes(ql));
 
   // Export this week's register to CSV — every student with their mark and remark,
   // plus the session's own date/time so the file stands alone.
@@ -4538,7 +4583,7 @@ function HndPercentages({ store }) {
   // ("Rendered more hooks than during the previous render") and crashes the whole app.
   const { units = [], rows = [], unitTotals = {}, overall = {} } = attendance || {};
   const ql = query.trim().toLowerCase();
-  let list = rows.filter(r => !ql || r.student.name.toLowerCase().includes(ql) || r.student.studentRef.includes(ql) || r.student.email.toLowerCase().includes(ql));
+  let list = rows.filter(r => !ql || r.student.name.toLowerCase().includes(ql) || r.student.studentRef.includes(ql) || (r.student.email || "").toLowerCase().includes(ql));
 
   // Every unit in the college as a column made this table unreadable: a row was mostly
   // "not enrolled", and the one figure that mattered was somewhere off to the right.
@@ -4811,7 +4856,7 @@ function HndStudents({ store }) {
   };
 
   const ql = query.trim().toLowerCase();
-  const filtered = store.students.filter(s => !ql || s.name.toLowerCase().includes(ql) || s.email.toLowerCase().includes(ql) || s.studentRef.includes(ql));
+  const filtered = store.students.filter(s => !ql || s.name.toLowerCase().includes(ql) || (s.email || "").toLowerCase().includes(ql) || s.studentRef.includes(ql));
   const paged = usePaged(filtered, 12, ql);
   // The email defaults to the student number, matching the college convention.
   const emailPreview = form.email || (form.studentRef ? `${form.studentRef}@londonbrookescollege.co.uk` : "");
@@ -5049,7 +5094,7 @@ function AdminStudents({ store }) {
     if (statusFilter === "inactive" && s.active !== false) return false;
     if (unitFilter && !(s.unitIds || []).includes(unitFilter)) return false;
     if (riskFilter !== "all" && riskBand(allPctOf(s)).label !== riskFilter) return false;
-    return !ql || s.name.toLowerCase().includes(ql) || s.email.toLowerCase().includes(ql) || s.studentRef.includes(ql);
+    return !ql || s.name.toLowerCase().includes(ql) || (s.email || "").toLowerCase().includes(ql) || s.studentRef.includes(ql);
   });
   const paged = usePaged(filtered, 12, `${ql}|${unitFilter}|${statusFilter}|${riskFilter}`);
   const emailPreview = form.email || (form.studentRef ? `${form.studentRef}@londonbrookescollege.co.uk` : "");
@@ -7829,7 +7874,7 @@ function Units({ store, onView, courseFilter = "", setCourseFilter }) {
 // Searchable, scrollable checkbox list of students for enrolling onto a course.
 function StudentPicker({ students, picked, onToggle, query, setQuery, onAll, onNone }) {
   const ql = (query || "").trim().toLowerCase();
-  const shown = students.filter(s => !ql || s.name.toLowerCase().includes(ql) || s.email.toLowerCase().includes(ql) || s.studentRef.includes(ql));
+  const shown = students.filter(s => !ql || s.name.toLowerCase().includes(ql) || (s.email || "").toLowerCase().includes(ql) || s.studentRef.includes(ql));
   return (
     <div className="rounded-xl border border-slate-200">
       <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
@@ -8862,7 +8907,10 @@ function StudentCombo({ students, value, onChange }) {
   const [q, setQ] = useState("");
   const sel = students.find(s => s.id === value);
   const ql = q.trim().toLowerCase();
-  const matches = (ql ? students.filter(s => s.name.toLowerCase().includes(ql) || s.studentRef.includes(ql) || s.email.toLowerCase().includes(ql)) : students);
+  // Guard every field. Students from the review roster deliberately carry NO email
+  // (it's a contact detail the roster withholds), so an unguarded (s.email || "").toLowerCase()
+  // white-screen-crashed the picker the moment a roster-fed admin typed anything.
+  const matches = (ql ? students.filter(s => (s.name || "").toLowerCase().includes(ql) || (s.studentRef || "").includes(ql) || (s.email || "").toLowerCase().includes(ql)) : students);
   const shown = matches.slice(0, 40);
   return (
     <div className="relative">
@@ -8911,7 +8959,21 @@ function AdminPAT({ store }) {
   // Needs students (for the picker) + interactions. Both load on open.
   useEffect(() => { refreshHnd(); refreshInteractions(); }, [refreshHnd, refreshInteractions]);
 
-  const studentsById = useMemo(() => Object.fromEntries(store.students.map(s => [s.id, s])), [store.students]);
+  // Roster fallback for a 'pat'-only admin. /hnd/students is gated on registers/
+  // students/executive, so store.students 403s to empty for them and the picker was
+  // permanently empty — no interaction could ever be logged. The student-reviews
+  // roster (open to any authenticated staff) provides the same names, so fall back to
+  // it, exactly as Student Reviews does.
+  const [roster, setRoster] = useState([]);
+  useEffect(() => {
+    if (store.students.length) return;
+    let cancelled = false;
+    api.studentReviewRoster().then(r => { if (!cancelled) setRoster(r.students || []); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [store.students.length]);
+  const pickerStudents = store.students.length ? store.students : roster;
+
+  const studentsById = useMemo(() => Object.fromEntries(pickerStudents.map(s => [s.id, s])), [pickerStudents]);
   const courseById = useMemo(() => Object.fromEntries(store.courses.map(p => [p.id, p])), [store.courses]);
   const unitById = useMemo(() => Object.fromEntries(store.units.map(m => [m.id, m])), [store.units]);
   const courseOf = (studentId) => {
@@ -9072,7 +9134,7 @@ function AdminPAT({ store }) {
 
       <Modal open={modal} onClose={() => !busy && setModal(false)} title={edit ? "Student interaction" : "Log new interaction"} width={560}>
         <div className="space-y-3">
-          <Field label="Student"><StudentCombo students={store.students} value={form.studentId} onChange={id => setForm(f => ({ ...f, studentId: id }))} /></Field>
+          <Field label="Student"><StudentCombo students={pickerStudents} value={form.studentId} onChange={id => setForm(f => ({ ...f, studentId: id }))} /></Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Interaction date"><input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className={inputCls} /></Field>
             <Field label="Interaction time"><input type="time" value={form.time} onChange={e => setForm(f => ({ ...f, time: e.target.value }))} className={inputCls} /></Field>
@@ -9466,6 +9528,19 @@ function AdminStaff({ store }) {
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
   const [form, setForm] = useState({ name: "", role: "", dept: "", email: "", allowance: 28, site: "" });
+  // Recovery actions, reachable from the Staff page too (not only Settings).
+  const [resetTarget, setResetTarget] = useState(null);
+  const [resetBusy, setResetBusy] = useState(false);
+  const resendInvite = async (s) => {
+    try { const r = await api.resendInvite(s.id); store.notify(r?.message || `Invitation re-sent to ${s.email}`); }
+    catch (e) { store.notify(e.message || "Could not re-send the invitation", "error"); }
+  };
+  const confirmReset = async () => {
+    setResetBusy(true);
+    try { await store.resetStaffTotp(resetTarget.id); setResetTarget(null); }
+    catch (_) { /* store toasted + refetched */ }
+    finally { setResetBusy(false); }
+  };
   const [query, setQuery] = useState("");
   const [deptFilter, setDeptFilter] = useState("");     // "" = all departments
   const [siteFilter, setSiteFilter] = useState("");     // "" = all sites
@@ -9627,6 +9702,12 @@ function AdminStaff({ store }) {
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-1 whitespace-nowrap">
                       <button onClick={() => setTeachingFor(s)} title="Teaching dashboard" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"><BarChart3 size={15} /></button>
+                      {/* Recovery actions — the server permits them for a staff-page
+                          admin, but they only existed on the Settings page, so a
+                          staff-only admin had no way to resend an invite or reset a
+                          lost-phone 2FA despite holding the permission. */}
+                      {s.pendingActivation && <button onClick={() => resendInvite(s)} title="Re-send the invitation email" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"><Mail size={15} /></button>}
+                      {s.totpEnabled && <button onClick={() => setResetTarget(s)} title="Reset two-step verification" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-amber-50 hover:text-amber-600"><ShieldCheck size={15} /></button>}
                       <button onClick={() => openEdit(s)} title="Edit staff" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button>
                       <button onClick={() => setDeleteTarget(s)} title="Remove staff" className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button>
                     </div>
@@ -9641,6 +9722,15 @@ function AdminStaff({ store }) {
       <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
 
       <StaffTeachingModal staffMember={teachingFor} onClose={() => setTeachingFor(null)} />
+      <ConfirmDialog
+        open={!!resetTarget}
+        title="Reset two-step verification?"
+        message={resetTarget ? `${resetTarget.name} will need to set up their authenticator app again next time it's required. Their old codes stop working immediately and their password is unchanged. They'll be notified.` : ""}
+        confirmLabel={resetBusy ? "Resetting…" : "Reset 2FA"}
+        cancelLabel="Cancel"
+        onConfirm={confirmReset}
+        onCancel={() => setResetTarget(null)}
+      />
       <Modal open={modal} onClose={() => setModal(false)} title={edit ? "Edit staff" : "Add staff"}>
         <div className="space-y-3">
           <Field label="Full name"><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Jane Doe" className={inputCls} /></Field>
@@ -9733,6 +9823,8 @@ const moodleTotal = (s) => MOODLE_COUNTS.reduce((n, [k]) => n + (Number(s?.[k]) 
 // Moodle (VLE) import. Reads the college's Moodle and creates the matching courses,
 // units, assessments, students and marks here — one way, never writing back.
 function MoodleCard({ store }) {
+  // Only registers/students admins may actually run a sync (server SYNC_PAGES).
+  const canSync = canAccessPage(store.currentUser, "registers") || canAccessPage(store.currentUser, "students");
   const [status, setStatus] = useState(null);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState("");        // "" | "preview" | "sync"
@@ -9852,10 +9944,17 @@ function MoodleCard({ store }) {
               className="press inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-200 disabled:opacity-50">
               {busy === "preview" ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Preview
             </button>
-            <PrimaryBtn onClick={runSync} disabled={!!busy || status.running} className="!px-3 !py-2 !text-xs">
-              {busy === "sync" || status.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Sync now
-            </PrimaryBtn>
+            {/* Running a sync needs the registers/students page (server SYNC_PAGES),
+                but this card lives on Settings. Without this guard a settings-only
+                admin saw an enabled button that 403'd. Preview stays available to all
+                (it only reads). */}
+            {canSync && (
+              <PrimaryBtn onClick={runSync} disabled={!!busy || status.running} className="!px-3 !py-2 !text-xs">
+                {busy === "sync" || status.running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Sync now
+              </PrimaryBtn>
+            )}
           </div>
+          {!canSync && <p className="mb-3 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500">You can preview changes here. Running a sync needs the Registers or Students permission.</p>}
 
           {preview && <p className="mb-2 rounded-lg bg-blue-50 px-2.5 py-1.5 text-[11px] font-semibold text-blue-700">Preview only — nothing has been saved.</p>}
 
