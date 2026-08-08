@@ -1,91 +1,79 @@
-// Regenerate every app icon from the real LBC logo.
+// Regenerate every app icon from the London Brookes College fanlight emblem.
 //
-// Why this exists: `npx cap add` seeds both platforms with Capacitor's placeholder
-// icon (a blue X on a grid), and nobody replaced it — so the installed apps carried
-// the placeholder while client/public/icon-512.png held the actual college logo.
+// The emblem is defined here as SVG (a solid royal-blue semicircle with a white
+// fanlight — outer ring, hub and radial spokes), so this script is the single source
+// of truth for every icon: favicon, PWA, iOS, Android and the store listing.
 //
-// Run from client/:  node scripts/make-icons.mjs
+// Run from client/:  node scripts/make-icons.mjs   (then: npx cap sync)
 import sharp from "sharp";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-const SRC = "public/icon-512.png";
+const BLUE = "#1e40af";   // emblem blue (matches src/Brand.jsx LBC_BLUE)
+const WHITE = "#ffffff";
 
-// The logo's own diagonal gradient, sampled from the source: navy → plum → maroon.
-// Used to fill the transparent rounded corners, because the stores and Android's
-// adaptive-icon mask apply their OWN shape. Supplying pre-rounded artwork gets it
-// rounded twice, leaving pale notches at the corners.
-const GRADIENT = (size) => Buffer.from(
-  `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">
-     <defs>
-       <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-         <stop offset="0%"   stop-color="#243888"/>
-         <stop offset="52%"  stop-color="#5c2a60"/>
-         <stop offset="100%" stop-color="#941d39"/>
-       </linearGradient>
-     </defs>
-     <rect width="${size}" height="${size}" fill="url(#g)"/>
-   </svg>`
-);
-
-const out = async (path, buf) => {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, buf);
-  console.log(`  ${path}`);
-};
-
-// Square, full-bleed, corners filled. flatten() only FILLS transparency — it leaves the
-// alpha channel in place — so removeAlpha() follows it. The App Store rejects any icon
-// that still carries an alpha channel, whether or not anything in it is transparent.
-async function squareIcon(size, { alpha = false } = {}) {
-  const logo = await sharp(SRC).resize(size, size, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } }).toBuffer();
-  let img = sharp(GRADIENT(size)).composite([{ input: logo }]).png();
-  if (!alpha) img = img.flatten({ background: "#243888" }).removeAlpha();
-  return img.toBuffer();
+// A square SVG containing the centred fanlight emblem.
+//   bg    — background fill, or null for transparent
+//   fill  — the semicircle disc colour
+//   line  — the fanlight line colour
+//   scale — emblem size as a fraction (1 ≈ 0.88·S wide); use ~0.8 for adaptive inset
+function emblem({ S, bg = null, fill = BLUE, line = WHITE, scale = 1 }) {
+  const cx = S / 2;
+  const R = S * 0.44 * scale;        // outer radius
+  const by = S / 2 + R / 2;          // baseline (centres the bounding box)
+  const rO = R * 0.86, rI = R * 0.30, sw = R * 0.072;
+  const pt = (r, deg) => { const a = (deg * Math.PI) / 180; return [(cx + r * Math.cos(a)).toFixed(1), (by - r * Math.sin(a)).toFixed(1)]; };
+  const arc = (r) => `M${cx - r},${by} A${r},${r} 0 0 1 ${cx + r},${by}`;
+  const spokes = [1, 2, 3, 4, 5, 6].map((i) => (i * 180) / 7).map((a) => { const [ix, iy] = pt(rI, a), [ox, oy] = pt(rO, a); return `<line x1="${ix}" y1="${iy}" x2="${ox}" y2="${oy}"/>`; }).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}">
+  ${bg ? `<rect width="${S}" height="${S}" fill="${bg}"/>` : ""}
+  <path d="${arc(R)} Z" fill="${fill}"/>
+  <g stroke="${line}" stroke-width="${sw}" stroke-linecap="round" fill="none">
+    <path d="${arc(rO)}"/><path d="${arc(rI)}"/>${spokes}
+  </g>
+</svg>`;
 }
 
-// Android adaptive foreground: the launcher crops to a circle/squircle and only the
-// centre ~66% is guaranteed visible, so the mark is inset and the background is left
-// transparent — the system draws ic_launcher_background behind it.
-async function adaptiveForeground(size) {
-  const inner = Math.round(size * 0.62);
-  const pad = Math.round((size - inner) / 2);
-  const logo = await sharp(SRC).resize(inner, inner, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } }).toBuffer();
-  return sharp({ create: { width: size, height: size, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-    .composite([{ input: logo, top: pad, left: pad }]).png().toBuffer();
-}
+const out = async (path, buf) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, buf); console.log(`  ${path}`); };
+const png = (opts) => sharp(Buffer.from(emblem(opts))).png();
+// A filled (no-alpha) square — the App Store and Play both reject alpha in the icon.
+const solid = async (S, opts = {}) => (await png({ S, bg: WHITE, ...opts })).flatten({ background: WHITE }).removeAlpha().toBuffer();
 
-console.log("Play Store listing:");
-await out("store/play-icon-512.png", await squareIcon(512));
+// --- Favicon (scalable) ---
+console.log("Favicon + PWA:");
+await out("public/icon.svg", Buffer.from(emblem({ S: 512, bg: WHITE })));
+await out("public/icon-192.png", await solid(192));
+await out("public/icon-512.png", await solid(512));
+await out("public/apple-touch-icon.png", await solid(180));
 
-// 1024x500 banner shown at the top of the Play listing. Logo left, wordmark right.
+// --- Play Store listing ---
+console.log("\nPlay Store listing:");
+await out("store/play-icon-512.png", await solid(512));
+
+// 1024x500 feature banner: emblem left, wordmark right, on white.
 console.log("\nPlay feature graphic:");
-const FEATURE = Buffer.from(
-  `<svg width="1024" height="500" xmlns="http://www.w3.org/2000/svg">
-     <defs>
-       <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-         <stop offset="0%" stop-color="#243888"/><stop offset="55%" stop-color="#5c2a60"/><stop offset="100%" stop-color="#941d39"/>
-       </linearGradient>
-     </defs>
-     <rect width="1024" height="500" fill="url(#g)"/>
-     <text x="430" y="238" font-family="Georgia,'Times New Roman',serif" font-size="74" font-weight="bold" fill="#ffffff">Staff Hub</text>
-     <text x="434" y="300" font-family="Helvetica,Arial,sans-serif" font-size="30" fill="#ffffff" opacity="0.82">London Brookes College</text>
-   </svg>`
-);
-const featureLogo = await sharp(SRC).resize(260, 260, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } }).toBuffer();
+const FEATURE = `<svg width="1024" height="500" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="500" fill="${WHITE}"/>
+  <text x="430" y="238" font-family="Georgia,'Times New Roman',serif" font-size="70" font-weight="bold" fill="${BLUE}">Staff Hub</text>
+  <text x="434" y="298" font-family="Helvetica,Arial,sans-serif" font-size="28" fill="#334155">London Brookes College</text>
+</svg>`;
+const featureLogo = await png({ S: 300 }).toBuffer();
 await out("store/play-feature-1024x500.png",
-  await sharp(FEATURE).composite([{ input: featureLogo, top: 120, left: 120 }]).flatten({ background: "#243888" }).removeAlpha().png().toBuffer());
+  await sharp(Buffer.from(FEATURE)).composite([{ input: featureLogo, top: 100, left: 110 }]).flatten({ background: WHITE }).removeAlpha().png().toBuffer());
 
-console.log("\niOS app icon (no alpha — the App Store rejects icons with an alpha channel):");
-await out("ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png", await squareIcon(1024));
+// --- iOS app icon (no alpha) ---
+console.log("\niOS app icon:");
+await out("ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png", await solid(1024));
 
+// --- Android launcher icons ---
 console.log("\nAndroid launcher icons:");
 const DENSITIES = { mdpi: 48, hdpi: 72, xhdpi: 96, xxhdpi: 144, xxxhdpi: 192 };
 for (const [density, size] of Object.entries(DENSITIES)) {
   const dir = `android/app/src/main/res/mipmap-${density}`;
-  await out(`${dir}/ic_launcher.png`, await squareIcon(size));
-  await out(`${dir}/ic_launcher_round.png`, await squareIcon(size, { alpha: true }));
-  await out(`${dir}/ic_launcher_foreground.png`, await adaptiveForeground(size));
+  await out(`${dir}/ic_launcher.png`, await solid(size));
+  await out(`${dir}/ic_launcher_round.png`, await solid(size));
+  // Adaptive foreground: emblem inset on transparent; the system draws the white background.
+  await out(`${dir}/ic_launcher_foreground.png`, await png({ S: size, scale: 0.72 }).toBuffer());
 }
 
 console.log("\nDone.");

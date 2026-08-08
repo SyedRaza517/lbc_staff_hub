@@ -66,7 +66,7 @@ function Phone({ children, onBack }) {
             <BrandMark size={22} />
           </span>
           <div className="leading-tight">
-            <p className="text-[13px] font-extrabold tracking-tight text-white" style={{ fontFamily: "'Lora', serif" }}>London Brookes</p>
+            <p className="text-[13px] font-extrabold tracking-tight text-white" style={{ fontFamily: "'Lora', serif" }}>London Brookes College</p>
             <p className="text-[10px] font-semibold tracking-[0.2em] text-white/60">STAFF HUB</p>
           </div>
         </div>
