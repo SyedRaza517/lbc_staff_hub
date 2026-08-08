@@ -80,6 +80,7 @@ app.use("/api/staff-reviews", wrapAsync(require("./routes/staffReviews")));
 app.use("/api/passwords", wrapAsync(require("./routes/passwords")));
 app.use("/api/my-reviews", wrapAsync(require("./routes/myReviews")));
 app.use("/api/student-reviews", wrapAsync(require("./routes/studentReviews")));
+app.use("/api/timetable", wrapAsync(require("./routes/timetable")));
 
 // 404 + error handlers
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));

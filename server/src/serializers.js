@@ -148,4 +148,14 @@ const sStudentQuery = (q) => ({
   ...(q.student ? { studentName: q.student.name || `${q.student.firstName} ${q.student.lastName}`, studentRef: q.student.studentRef, studentEmail: q.student.email, studentInitials: q.student.initials, studentColour: q.student.colour } : {}),
 });
 
-module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sCourse, sCohort, sTerm, sUnit, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet, sStudentQuery, parseAdminPages };
+// One weekly timetable row. `unit` is included when the query asks, so the client can
+// show the unit code alongside the free-text title.
+const sTimetableSlot = (t) => ({
+  id: t.id, courseId: t.courseId ?? null, year: t.year ?? null, termNumber: t.termNumber ?? null,
+  unitId: t.unitId ?? null, day: t.day, start: t.startTime, end: t.endTime,
+  title: t.title, lecturer: t.lecturer ?? "", room: t.room ?? "",
+  ...(t.unit ? { unitCode: t.unit.code } : {}),
+  ...(t.course ? { courseName: t.course.name } : {}),
+});
+
+module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sCourse, sCohort, sTerm, sUnit, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet, sStudentQuery, sTimetableSlot, parseAdminPages };

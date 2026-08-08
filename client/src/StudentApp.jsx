@@ -12,7 +12,7 @@ import {
   Percent, Award, MessageSquare, LogOut, ChevronLeft, ChevronRight,
   Loader2, Send, CheckCircle2, Info, ArrowRight, RefreshCw,
   Settings, KeyRound, Lock, Trash2, AlertTriangle, Home as HomeIcon,
-  Clock3, CalendarCheck, Sparkles, User,
+  Clock3, CalendarCheck, CalendarDays, Sparkles, User, MapPin,
 } from "lucide-react";
 
 const NAVY = "#1a3a8f";
@@ -21,7 +21,7 @@ const MAROON = "#9e1b32";
 // Section accents. Checked as an adjacent colour-blind-safe set (worst pair ΔE 16.4),
 // so the four areas stay tellable apart for every reader — and each still carries its
 // own icon and label, so colour is never the only signal.
-const ACCENT = { attendance: "#4f46e5", results: "#0891b2", ask: "#be123c", more: "#7c3aed" };
+const ACCENT = { attendance: "#4f46e5", results: "#0891b2", ask: "#be123c", timetable: "#0d7a5f", more: "#7c3aed" };
 const fmtPct = (p) => (p == null ? "—" : `${p}%`);
 // Attendance/grade bands. Four steps rather than three, so "nearly there" reads
 // differently from "needs attention" instead of both being flat red.
@@ -180,6 +180,7 @@ export default function StudentApp({ user, logout }) {
   const [attendance, setAttendance] = useState(null);
   const [results, setResults] = useState(null);
   const [reviews, setReviews] = useState(null);
+  const [timetable, setTimetable] = useState(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(true);
   // Android back returns to the home screen from any other tab.
@@ -189,13 +190,16 @@ export default function StudentApp({ user, logout }) {
   // attendance and results without each tab refetching the same thing.
   const load = useCallback(async () => {
     setBusy(true); setErr("");
-    const [a, r, q, v] = await Promise.allSettled([
-      api.studentAttendance(), api.studentAssessments(), api.studentQueries(), api.studentReviewsAboutMe(),
+    const [a, r, q, v, tt] = await Promise.allSettled([
+      api.studentAttendance(), api.studentAssessments(), api.studentQueries(), api.studentReviewsAboutMe(), api.studentTimetable(),
     ]);
     if (a.status === "fulfilled") setAttendance(a.value);
     if (r.status === "fulfilled") setResults(r.value);
     if (q.status === "fulfilled") setQueries(q.value);
     if (v.status === "fulfilled") setReviews(v.value);
+    // The timetable is a bonus screen — a failure here shouldn't add to the error
+    // banner that gates the core screens, so it's loaded but not counted in `failed`.
+    if (tt.status === "fulfilled") setTimetable(tt.value);
     // ANY failure is reported, not only a total one. Requiring all of them to fail meant
     // a single broken call showed the student "Not graded yet" or "0 sessions" — an
     // answer, and a wrong one — instead of telling them something didn't load.
@@ -238,8 +242,8 @@ export default function StudentApp({ user, logout }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, reviews]);
 
-  const title = { home: "Student Hub", attendance: "My Attendance", assessments: "My Results", reviews: "My Reviews", query: "Ask the College", more: "More" }[screen];
-  const shared = { attendance, results, reviews, queries, busy, err, reload: load, setScreen };
+  const title = { home: "Student Hub", attendance: "My Attendance", assessments: "My Results", reviews: "My Reviews", query: "Ask the College", timetable: "My Timetable", more: "More" }[screen];
+  const shared = { attendance, results, reviews, queries, timetable, busy, err, reload: load, setScreen };
 
   return (
     <PhoneShell header={<Header title={title} screen={screen} setScreen={setScreen} user={user} onRefresh={load} busy={busy} />}>
@@ -249,6 +253,7 @@ export default function StudentApp({ user, logout }) {
           {screen === "attendance" && <AttendanceScreen {...shared} />}
           {screen === "assessments" && <ResultsScreen {...shared} />}
           {screen === "reviews" && <ReviewsScreen {...shared} />}
+          {screen === "timetable" && <TimetableScreen timetable={timetable} busy={busy} reload={load} />}
           {screen === "query" && <QueryScreen queries={queries} reload={load} />}
           {screen === "more" && <MoreScreen user={user} logout={logout} setScreen={setScreen} />}
         </div>
@@ -434,8 +439,9 @@ function Home({ user, attendance, results, queries, reviews, busy, err, setScree
       <div className="grid grid-cols-2 gap-2.5">
         <Action onClick={() => setScreen("attendance")} Icon={Percent} label="My Attendance" sub="By unit" c={ACCENT.attendance} i={0} />
         <Action onClick={() => setScreen("assessments")} Icon={Award} label="My Results" sub="Marks & grades" c={ACCENT.results} i={1} />
-        <Action onClick={() => setScreen("query")} Icon={MessageSquare} label="Ask the College" sub={newReplies ? `${newReplies} new repl${newReplies === 1 ? "y" : "ies"}` : "Send a query"} c={ACCENT.ask} badge={newReplies} i={2} />
-        <Action onClick={() => setScreen("more")} Icon={Settings} label="More" sub="Account & settings" c={ACCENT.more} i={3} />
+        <Action onClick={() => setScreen("timetable")} Icon={CalendarDays} label="My Timetable" sub="Weekly classes" c={ACCENT.timetable} i={2} />
+        <Action onClick={() => setScreen("query")} Icon={MessageSquare} label="Ask the College" sub={newReplies ? `${newReplies} new repl${newReplies === 1 ? "y" : "ies"}` : "Send a query"} c={ACCENT.ask} badge={newReplies} i={3} />
+        <Action onClick={() => setScreen("more")} Icon={Settings} label="More" sub="Account & settings" c={ACCENT.more} i={4} />
       </div>
     </div>
   );
@@ -709,6 +715,82 @@ function ReviewText({ label, text }) {
   );
 }
 
+/* ============================== timetable ============================== */
+
+// 1 = Monday … 7 = Sunday (matches the server). Weekend days appear only if a slot
+// actually lands on one.
+const TT_DAYS = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+// The period label the college's own timetable uses ("Evening 18:00 – 21:00").
+const periodOf = (start) => { const h = Number(String(start).slice(0, 2)); return h < 12 ? "Morning" : h < 17 ? "Afternoon" : "Evening"; };
+
+function TimetableScreen({ timetable, busy, reload }) {
+  if (busy && !timetable) return <LoadingScreen />;
+  const stages = timetable?.stages || [];
+  if (!stages.length) {
+    return (
+      <Screen>
+        <Card className="text-center">
+          <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl" style={{ background: ACCENT.timetable + "18" }}><CalendarDays size={26} style={{ color: ACCENT.timetable }} /></div>
+          <p className="text-base font-extrabold text-slate-800">No timetable yet</p>
+          <p className="mt-1 text-sm text-slate-500">Your timetable will appear here once the college publishes it for your course. Pull to refresh, or check back soon.</p>
+          <button onClick={reload} className="press mx-auto mt-3 flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600"><RefreshCw size={13} /> Refresh</button>
+        </Card>
+      </Screen>
+    );
+  }
+  return (
+    <Screen>
+      {stages.map((st, i) => <TimetableBlock key={`${st.courseId}|${st.year}|${st.termNumber}`} stage={st} i={i} />)}
+      <p className="px-1 text-center text-[11px] text-slate-400">Times and rooms are set by the college. If something looks wrong, message us from “Ask the College”.</p>
+    </Screen>
+  );
+}
+
+function TimetableBlock({ stage, i }) {
+  const accent = stage.colour || ACCENT.timetable;
+  // Group the rows by weekday, in Mon→Sun order, each sorted by start time.
+  const byDay = {};
+  for (const r of stage.rows) (byDay[r.day] = byDay[r.day] || []).push(r);
+  for (const d of Object.keys(byDay)) byDay[d].sort((a, b) => a.start.localeCompare(b.start));
+  const days = [1, 2, 3, 4, 5, 6, 7].filter(d => byDay[d]?.length);
+
+  return (
+    <Card i={i} className="!p-0 overflow-hidden">
+      {/* Header band — the intake / course / stage, like the emailed timetable. */}
+      <div className="px-4 py-3.5 text-white" style={{ background: `linear-gradient(135deg, ${accent}, ${NAVY_DARK})` }}>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-white/70">Weekly timetable</p>
+        <p className="mt-0.5 text-sm font-extrabold leading-tight">{stage.courseName || "My course"}</p>
+        {(stage.year != null || stage.termNumber != null) && (
+          <p className="mt-0.5 text-[12px] font-semibold text-white/85">{[stage.year != null ? `Year ${stage.year}` : null, stage.termNumber != null ? `Term ${stage.termNumber}` : null].filter(Boolean).join(" · ")}</p>
+        )}
+      </div>
+
+      <div className="divide-y divide-slate-100">
+        {days.map(d => (
+          <div key={d} className="px-4 py-3">
+            <p className="mb-2 text-[11px] font-extrabold uppercase tracking-widest" style={{ color: accent }}>{TT_DAYS[d]}</p>
+            <div className="space-y-2">
+              {byDay[d].map(r => (
+                <div key={r.id} className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200/70">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-bold text-slate-800">{r.title}</p>
+                    <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-slate-500 ring-1 ring-slate-200">{periodOf(r.start)}</span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-slate-500">
+                    <span className="flex items-center gap-1 font-semibold text-slate-600"><Clock3 size={12} /> {r.start} – {r.end}</span>
+                    {r.lecturer && <span className="flex items-center gap-1"><User size={12} /> {r.lecturer}</span>}
+                    {r.room && <span className="flex items-center gap-1"><MapPin size={12} /> {r.room}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 /* ============================== ask the college ============================== */
 
 function QueryScreen({ queries = [], reload }) {
@@ -839,6 +921,7 @@ function MoreScreen({ user, logout, setScreen }) {
       {/* The second way in. Home only shows a review card once one exists, so this row
           is what makes the screen findable — and it's here whether there are any or not. */}
       <Card className="!p-0 overflow-hidden">
+        <Row Icon={CalendarDays} label="My timetable" sub="Your weekly classes" onClick={() => setScreen("timetable")} />
         <Row Icon={Info} label="My progress reviews" sub="What your lecturers have written" onClick={() => setScreen("reviews")} />
       </Card>
 

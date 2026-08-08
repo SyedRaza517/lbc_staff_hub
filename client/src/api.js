@@ -144,6 +144,15 @@ export const api = {
   studentAssessments: () => request("/student/me/assessments"),
   submitStudentQuery: (subject, message) => request("/student/me/query", { method: "POST", body: { subject, message } }),
   studentQueries: () => request("/student/me/queries"),
+  studentTimetable: () => request("/student/me/timetable"),
+
+  // timetable (admin) — weekly slots scoped to course + year + term
+  timetableCourses: () => request("/timetable/courses"),
+  timetable: (courseId, year, termNumber) => { const q = new URLSearchParams({ courseId }); if (year != null && year !== "") q.set("year", year); if (termNumber != null && termNumber !== "") q.set("termNumber", termNumber); return request(`/timetable?${q.toString()}`); },
+  timetableAutofill: (data) => request("/timetable/autofill", { method: "POST", body: data }),
+  addTimetableSlot: (data) => request("/timetable/slots", { method: "POST", body: data }),
+  updateTimetableSlot: (id, data) => request(`/timetable/slots/${id}`, { method: "PUT", body: data }),
+  removeTimetableSlot: (id) => request(`/timetable/slots/${id}`, { method: "DELETE" }),
 
   // admin: student queries tab
   listStudentQueries: (status) => request(`/student-queries${status ? `?status=${status}` : ""}`),

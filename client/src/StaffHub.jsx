@@ -2114,8 +2114,8 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
 /* ============================================================ ADMIN DASHBOARD ============================================================ */
 // The assignable admin pages, in nav order. "access" is intentionally excluded —
 // it is Super-Admin-only and never granted. Keep in sync with server validate.js.
-const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "passwords", "settings"];
-const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentreviews: "Student Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", passwords: "Reset Passwords", settings: "Settings" };
+const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "timetable", "passwords", "settings"];
+const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentreviews: "Student Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", timetable: "Timetable", passwords: "Reset Passwords", settings: "Settings" };
 
 // Can this user see/use a given admin page? The Super Admin gets everything,
 // including the Super-Admin-only Access tab. A page-scoped admin gets only their
@@ -2558,6 +2558,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
     { key: "studentqueries", label: "Student Queries", I: Inbox },
     { key: "staff", label: "Staff", I: Users },
     { key: "timesheets", label: "Timesheets", I: Timer },
+    { key: "timetable", label: "Timetable", I: CalendarClock },
     { key: "passwords", label: "Reset Passwords", I: KeyRound },
     { key: "settings", label: "Settings", I: Settings },
     { key: "access", label: "Access", I: ShieldCheck },
@@ -2637,6 +2638,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
         {activeKey === "studentqueries" && <AdminStudentQueries store={store} />}
         {activeKey === "staff" && <AdminStaff store={store} />}
         {activeKey === "timesheets" && <AdminTimesheets store={store} />}
+        {activeKey === "timetable" && <AdminTimetable store={store} />}
         {activeKey === "settings" && <AdminSettings store={store} />}
         {activeKey === "access" && <AdminAccess store={store} />}
       </main>
@@ -9992,6 +9994,167 @@ function MoodleCard({ store }) {
         </>
       )}
     </div>
+  );
+}
+
+/* ----- Dashboard: Timetable (weekly schedule, per course/year/term) ----- */
+// 1 = Monday … 7 = Sunday (ISO). The server stores the same.
+const TT_DAYS = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const TT_DAY_SHORT = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+// The period label the college's timetable uses, derived from the start hour.
+const periodOf = (start) => { const h = Number(String(start).slice(0, 2)); return h < 12 ? "Morning" : h < 17 ? "Afternoon" : "Evening"; };
+const fmtSlotTime = (s) => `${periodOf(s.start)} ${s.start} – ${s.end}`;
+
+function AdminTimetable({ store }) {
+  const { notify } = store;
+  const [courses, setCourses] = useState([]);
+  const [courseId, setCourseId] = useState("");
+  const [year, setYear] = useState("");        // "" = all years
+  const [term, setTerm] = useState("");        // "" = all terms
+  const [data, setData] = useState({ slots: [], units: [] });
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [modal, setModal] = useState(null);    // null | slot-being-edited | "new"
+  const [form, setForm] = useState({ day: 2, start: "10:00", end: "13:00", title: "", lecturer: "", room: "", unitId: "" });
+
+  useEffect(() => {
+    api.timetableCourses().then(cs => {
+      setCourses(cs);
+      if (cs.length && !courseId) setCourseId(cs[0].id);
+    }).catch(e => notify?.(e.message || "Couldn't load courses", "error"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const load = useCallback(async () => {
+    if (!courseId) { setData({ slots: [], units: [] }); return; }
+    setLoading(true);
+    try { setData(await api.timetable(courseId, year, term)); }
+    catch (e) { notify?.(e.message || "Couldn't load the timetable", "error"); }
+    setLoading(false);
+  }, [courseId, year, term, notify]);
+  useEffect(() => { load(); }, [load]);
+
+  const course = courses.find(c => c.id === courseId);
+  // The (year, term) stages this course actually has units in, for the pickers.
+  const stages = course?.stages || [];
+  const years = [...new Set(stages.map(s => s.year))].sort();
+  const termsForYear = [...new Set(stages.filter(s => !year || s.year === Number(year)).map(s => s.termNumber))].sort();
+
+  const scoped = { courseId, year: year || null, termNumber: term || null };
+  const autofill = async () => {
+    if (!courseId) return;
+    setBusy(true);
+    try {
+      const r = await api.timetableAutofill(scoped);
+      const skipped = (r.skipped || []).filter(s => s.reason.includes("register")).length;
+      notify?.(`${r.created} row${r.created === 1 ? "" : "s"} added from ${r.unitsFilled} unit${r.unitsFilled === 1 ? "" : "s"}${skipped ? ` · ${skipped} unit(s) had no registers to read times from` : ""}`, r.created ? "success" : "info");
+      await load();
+    } catch (e) { notify?.(e.message || "Auto-fill failed", "error"); }
+    setBusy(false);
+  };
+  const openNew = () => { setForm({ day: 2, start: "10:00", end: "13:00", title: "", lecturer: "", room: "", unitId: "" }); setModal("new"); };
+  const openEdit = (s) => { setForm({ day: s.day, start: s.start, end: s.end, title: s.title, lecturer: s.lecturer || "", room: s.room || "", unitId: s.unitId || "" }); setModal(s); };
+  const saveSlot = async () => {
+    if (!form.title.trim()) { notify?.("Give the session a title", "error"); return; }
+    setBusy(true);
+    try {
+      if (modal === "new") await api.addTimetableSlot({ ...scoped, ...form, day: Number(form.day) });
+      else await api.updateTimetableSlot(modal.id, { day: Number(form.day), start: form.start, end: form.end, title: form.title, lecturer: form.lecturer, room: form.room });
+      setModal(null); await load();
+      notify?.("Timetable saved", "success");
+    } catch (e) { notify?.(e.message || "Couldn't save the row", "error"); }
+    setBusy(false);
+  };
+  const delSlot = async (s) => {
+    if (!window.confirm(`Remove "${s.title}" (${TT_DAY_SHORT[s.day]} ${s.start})?`)) return;
+    try { await api.removeTimetableSlot(s.id); await load(); notify?.("Row removed", "info"); }
+    catch (e) { notify?.(e.message || "Couldn't remove the row", "error"); }
+  };
+
+  const slotsByDay = useMemo(() => {
+    const m = {};
+    for (const s of data.slots) { (m[s.day] = m[s.day] || []).push(s); }
+    for (const d of Object.keys(m)) m[d].sort((a, b) => a.start.localeCompare(b.start));
+    return m;
+  }, [data.slots]);
+  const unitsNoSlot = data.units.filter(u => u.slotCount === 0);
+
+  return (
+    <>
+      <AdminHeader title="Timetable" subtitle="Build the weekly timetable students see — per course, year and term" Icon={CalendarClock} />
+
+      {/* Scope pickers */}
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <Field label="Course"><select value={courseId} onChange={e => { setCourseId(e.target.value); setYear(""); setTerm(""); }} className={inputCls}>{courses.length === 0 && <option value="">No courses yet</option>}{courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+        <Field label="Year"><select value={year} onChange={e => { setYear(e.target.value); setTerm(""); }} className={inputCls}><option value="">All years</option>{years.map(y => <option key={y} value={y}>Year {y}</option>)}</select></Field>
+        <Field label="Term"><select value={term} onChange={e => setTerm(e.target.value)} className={inputCls}><option value="">All terms</option>{termsForYear.map(t => <option key={t} value={t}>Term {t}</option>)}</select></Field>
+        <div className="ml-auto flex gap-2">
+          <button onClick={autofill} disabled={busy || !courseId} className="press inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2.5 text-xs font-bold text-slate-600 transition hover:bg-slate-200 disabled:opacity-50"><RefreshCw size={14} className={busy ? "animate-spin" : ""} /> Auto-fill from units</button>
+          <PrimaryBtn onClick={openNew} disabled={!courseId}><Plus size={16} /> Add row</PrimaryBtn>
+        </div>
+      </div>
+
+      <p className="mb-3 flex items-start gap-1.5 rounded-xl bg-blue-50 px-3 py-2 text-[11px] leading-snug text-blue-700 ring-1 ring-blue-100"><Info size={13} className="mt-px shrink-0" /> Auto-fill reads each unit's registers to place its lectures and tutorials on the right day and time, using the unit's tutor. Then edit any row's time, lecturer or room, and add workshops or study-support rows by hand. Students on this course see it on their app.</p>
+
+      {loading ? <div className="skeleton h-64 rounded-2xl" /> : (
+        <>
+          {data.slots.length === 0 && (
+            <Card><EmptyState Icon={CalendarClock} title="No timetable yet" msg={data.units.length ? "Tap “Auto-fill from units” to build it from the registers, or add rows by hand." : "Add units (with registers) to this course/year/term first, or add rows by hand."} /></Card>
+          )}
+
+          {/* Weekly grid, grouped by day */}
+          {data.slots.length > 0 && (
+            <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
+                  <tr><th className="px-4 py-3">Day</th><th className="px-4 py-3">Time</th><th className="px-4 py-3">Session</th><th className="px-4 py-3">Lecturer</th><th className="px-4 py-3">Venue</th><th className="px-4 py-3 text-right">Actions</th></tr>
+                </thead>
+                <tbody>
+                  {[1, 2, 3, 4, 5, 6, 7].filter(d => slotsByDay[d]?.length).map(d => (
+                    slotsByDay[d].map((s, idx) => (
+                      <tr key={s.id} className="border-t border-slate-100 hover:bg-blue-50/30">
+                        <td className="px-4 py-3 font-bold text-slate-700">{idx === 0 ? TT_DAYS[d] : ""}</td>
+                        <td className="px-4 py-3 whitespace-nowrap text-slate-600"><span className="font-semibold text-slate-500">{periodOf(s.start)}</span> {s.start}–{s.end}</td>
+                        <td className="px-4 py-3"><span className="font-semibold text-slate-700">{s.title}</span>{s.unitCode && <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">{s.unitCode}</span>}</td>
+                        <td className="px-4 py-3 text-slate-500">{s.lecturer || "—"}</td>
+                        <td className="px-4 py-3">{s.room ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{s.room}</span> : <span className="text-slate-300">—</span>}</td>
+                        <td className="px-4 py-3"><div className="flex justify-end gap-1"><button onClick={() => openEdit(s)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button><button onClick={() => delSlot(s)} className="rounded-lg p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button></div></td>
+                      </tr>
+                    ))
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Units in this scope that have no timetable rows yet */}
+          {unitsNoSlot.length > 0 && (
+            <div className="mt-4 rounded-2xl bg-amber-50 p-3 ring-1 ring-amber-200">
+              <p className="mb-1 text-xs font-bold text-amber-800">{unitsNoSlot.length} unit{unitsNoSlot.length === 1 ? "" : "s"} not on the timetable yet</p>
+              <p className="text-[11px] text-amber-700">{unitsNoSlot.map(u => `${u.code}${u.sessionCount === 0 ? " (no registers)" : ""}`).join(" · ")}</p>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Add / edit row */}
+      <Modal open={!!modal} onClose={() => setModal(null)} title={modal === "new" ? "Add timetable row" : "Edit timetable row"}>
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-2">
+            <Field label="Day"><select value={form.day} onChange={e => setForm(f => ({ ...f, day: e.target.value }))} className={inputCls}>{[1, 2, 3, 4, 5, 6, 7].map(d => <option key={d} value={d}>{TT_DAYS[d]}</option>)}</select></Field>
+            <Field label="Start"><input type="time" value={form.start} onChange={e => setForm(f => ({ ...f, start: e.target.value }))} className={inputCls} /></Field>
+            <Field label="End"><input type="time" value={form.end} onChange={e => setForm(f => ({ ...f, end: e.target.value }))} className={inputCls} /></Field>
+          </div>
+          <Field label="Session"><input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. Operational Planning and Management, or Study Support" className={inputCls} /></Field>
+          <Field label="Lecturer"><input value={form.lecturer} onChange={e => setForm(f => ({ ...f, lecturer: e.target.value }))} placeholder="e.g. Dr Funke Ogunjimi" className={inputCls} /></Field>
+          <Field label="Venue / room"><input value={form.room} onChange={e => setForm(f => ({ ...f, room: e.target.value }))} placeholder="e.g. Room 101, Online, Study Room 1st Floor" className={inputCls} /></Field>
+          {modal === "new" && (
+            <Field label="Link to a unit (optional)"><select value={form.unitId} onChange={e => { const u = data.units.find(x => x.id === e.target.value); setForm(f => ({ ...f, unitId: e.target.value, title: f.title || (u?.name || ""), lecturer: f.lecturer || (u?.tutor || "") })); }} className={inputCls}><option value="">Not a taught unit (workshop / support)</option>{data.units.map(u => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}</select></Field>
+          )}
+          <PrimaryBtn onClick={saveSlot} disabled={busy || !form.title.trim()} className="w-full">{busy ? <><Loader2 size={16} className="animate-spin" /> Saving…</> : <><Check size={16} /> Save row</>}</PrimaryBtn>
+        </div>
+      </Modal>
+    </>
   );
 }
 

@@ -105,6 +105,45 @@ router.get("/me/assessments", async (req, res) => {
   });
 });
 
+// GET /api/student/me/timetable — the weekly timetable relevant to this student.
+//
+// A student's course/year/term is derived from the units they are ENROLLED on (a
+// cohort is set for very few students, so enrolments are the reliable signal). Their
+// timetable is every slot whose (courseId, year, termNumber) matches one of those
+// enrolled units — which includes the workshop/support rows that share the same scope
+// but are not units. Grouped by stage so the app can show one course/year/term block.
+router.get("/me/timetable", async (req, res) => {
+  const student = await prisma.student.findUnique({
+    where: { id: req.user.id },
+    include: { enrolments: { include: { unit: { select: { courseId: true, year: true, termNumber: true } } } } },
+  });
+  if (!student) return res.status(404).json({ error: "Student not found" });
+
+  // The distinct (course, year, term) stages the student's units place them in.
+  const stageKeys = new Set();
+  for (const e of student.enrolments) {
+    const u = e.unit;
+    if (u?.courseId != null && u.year != null && u.termNumber != null) stageKeys.add(`${u.courseId}|${u.year}|${u.termNumber}`);
+  }
+  if (!stageKeys.size) return res.json({ stages: [] });
+
+  const or = [...stageKeys].map((k) => { const [courseId, year, termNumber] = k.split("|"); return { courseId, year: Number(year), termNumber: Number(termNumber) }; });
+  const slots = await prisma.timetableSlot.findMany({
+    where: { OR: or },
+    include: { course: { select: { name: true, colour: true } }, unit: { select: { code: true } } },
+    orderBy: [{ day: "asc" }, { startTime: "asc" }],
+  });
+
+  // Group into one block per (course, year, term).
+  const byStage = new Map();
+  for (const s of slots) {
+    const key = `${s.courseId}|${s.year}|${s.termNumber}`;
+    if (!byStage.has(key)) byStage.set(key, { courseId: s.courseId, courseName: s.course?.name || "", colour: s.course?.colour || null, year: s.year, termNumber: s.termNumber, rows: [] });
+    byStage.get(key).rows.push({ id: s.id, day: s.day, start: s.startTime, end: s.endTime, title: s.title, lecturer: s.lecturer || "", room: s.room || "", unitCode: s.unit?.code || null });
+  }
+  res.json({ stages: [...byStage.values()].sort((a, b) => (a.year - b.year) || (a.termNumber - b.termNumber)) });
+});
+
 // GET /api/student/me/queries — this student's own queries and any admin replies.
 router.get("/me/queries", async (req, res) => {
   const rows = await prisma.studentQuery.findMany({ where: { studentId: req.user.id }, orderBy: { createdAt: "desc" } });

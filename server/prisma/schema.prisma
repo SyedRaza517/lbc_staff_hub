@@ -267,6 +267,43 @@ model Course {
 
   units Unit[]
   cohorts Cohort[]
+  timetableSlots TimetableSlot[]
+}
+
+// One row of a weekly timetable, shown to students on their app.
+//
+// Scoped to a COURSE + year + term (the header on the college's timetable reads
+// "November 2025 intake — HND … AY 2025-26, Term 3"). A slot need NOT map to a unit:
+// alongside taught units and their tutorials it also carries workshops and study
+// support ("Academic Skills Workshop", "Study Support") that are not units at all, so
+// the title/lecturer/room live on the slot itself. The optional unit link is set when a
+// slot was auto-filled from a unit, so a student's enrolment can be matched.
+//
+// Deliberately separate from HndSession (dated attendance registers): a slot is the
+// REPEATING WEEKLY PATTERN a student reads ("Tuesdays 18:00 Operational Planning"),
+// a session is one dated class a register is taken for. The admin auto-fills slots
+// from a unit's sessions (which supply the weekday and times), then edits them.
+model TimetableSlot {
+  id         String   @id @default(cuid())
+  course     Course?  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId   String?
+  year       Int?     // 1 | 2 — curriculum year
+  termNumber Int?     // 1..6 — the college numbers terms straight through both years
+  // Set when auto-filled from a unit; null for a hand-added row (workshop/support).
+  // SetNull so reorganising units never deletes a published timetable.
+  unit       Unit?    @relation("UnitTimetable", fields: [unitId], references: [id], onDelete: SetNull)
+  unitId     String?
+  day        Int      // 1 = Monday … 7 = Sunday (ISO weekday)
+  startTime  String   // HH:MM, 24h
+  endTime    String   // HH:MM, 24h
+  title      String   // what the student sees, e.g. "Operational Planning and Management" or "Study Support"
+  lecturer   String   @default("")  // free text; defaults from the unit's tutor on auto-fill
+  room       String   @default("")  // "Online", "Room 101", "Study Room 1st Floor", …
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([courseId, year, termNumber])
+  @@index([unitId])
 }
 
 // An intake of students on a course, e.g. "SEP 2025" or "June 2023". The same
@@ -372,6 +409,7 @@ model Unit {
   enrolments  Enrolment[]
   assessments Assessment[]
   studentReviews StudentReview[]
+  timetableSlots TimetableSlot[] @relation("UnitTimetable")
 
   @@unique([courseId, code])
   @@index([courseId])
