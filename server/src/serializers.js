@@ -158,4 +158,11 @@ const sTimetableSlot = (t) => ({
   ...(t.course ? { courseName: t.course.name } : {}),
 });
 
-module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sCourse, sCohort, sTerm, sUnit, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet, sStudentQuery, sTimetableSlot, parseAdminPages };
+const sTermCalendar = (c) => ({
+  courseId: c.courseId ?? null, year: c.year ?? null, termNumber: c.termNumber ?? null,
+  startDate: c.startDate || null, endDate: c.endDate || null,
+  weeks: Array.isArray(c.weeks) ? c.weeks : (() => { try { return JSON.parse(c.weeks || "[]"); } catch { return []; } })(),
+  published: !!c.published,
+});
+
+module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sCourse, sCohort, sTerm, sUnit, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet, sStudentQuery, sTimetableSlot, sTermCalendar, parseAdminPages };

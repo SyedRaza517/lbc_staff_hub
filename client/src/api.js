@@ -151,6 +151,7 @@ export const api = {
   timetable: (courseId, year, termNumber) => { const q = new URLSearchParams({ courseId }); if (year != null && year !== "") q.set("year", year); if (termNumber != null && termNumber !== "") q.set("termNumber", termNumber); return request(`/timetable?${q.toString()}`); },
   timetableAutofill: (data) => request("/timetable/autofill", { method: "POST", body: data }),
   publishTimetable: (data) => request("/timetable/publish", { method: "POST", body: data }),
+  saveTimetableCalendar: (data) => request("/timetable/calendar", { method: "PUT", body: data }),
   addTimetableSlot: (data) => request("/timetable/slots", { method: "POST", body: data }),
   updateTimetableSlot: (id, data) => request(`/timetable/slots/${id}`, { method: "PUT", body: data }),
   removeTimetableSlot: (id) => request(`/timetable/slots/${id}`, { method: "DELETE" }),

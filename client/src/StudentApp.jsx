@@ -746,6 +746,18 @@ function TimetableScreen({ timetable, busy, reload }) {
   );
 }
 
+// "2026-06-01" → "1 Jun 2026" for the term header and week-commencing column.
+const ttFmtDate = (d, withYear) => { if (!d) return ""; const dt = new Date(d + "T00:00:00"); return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-GB", { day: "numeric", month: "short", ...(withYear ? { year: "numeric" } : {}) }); };
+// Colour the academic-calendar activities the way the college does: assessment stands
+// out most, formative feedback next, teaching is the calm default.
+const activityStyle = (a) => {
+  const s = String(a || "").toLowerCase();
+  if (s.includes("assessment") || s.includes("exam")) return "bg-rose-100 text-rose-700";
+  if (s.includes("feedback") || s.includes("formative")) return "bg-amber-100 text-amber-700";
+  if (s.includes("break") || s.includes("reading") || s.includes("extra")) return "bg-slate-100 text-slate-500";
+  return "bg-emerald-50 text-emerald-700";
+};
+
 function TimetableBlock({ stage, i }) {
   const accent = stage.colour || ACCENT.timetable;
   // Group the rows by weekday, in Mon→Sun order, each sorted by start time.
@@ -753,40 +765,68 @@ function TimetableBlock({ stage, i }) {
   for (const r of stage.rows) (byDay[r.day] = byDay[r.day] || []).push(r);
   for (const d of Object.keys(byDay)) byDay[d].sort((a, b) => a.start.localeCompare(b.start));
   const days = [1, 2, 3, 4, 5, 6, 7].filter(d => byDay[d]?.length);
+  const td = stage.termDates || {};
+  const weeks = stage.calendar?.weeks || [];
 
   return (
     <Card i={i} className="!p-0 overflow-hidden">
-      {/* Header band — the intake / course / stage, like the emailed timetable. */}
+      {/* Header band — the intake / course / stage / term dates, like the emailed timetable. */}
       <div className="px-4 py-3.5 text-white" style={{ background: `linear-gradient(135deg, ${accent}, ${NAVY_DARK})` }}>
         <p className="text-[11px] font-semibold uppercase tracking-wide text-white/70">Weekly timetable</p>
         <p className="mt-0.5 text-sm font-extrabold leading-tight">{stage.courseName || "My course"}</p>
         {(stage.year != null || stage.termNumber != null) && (
           <p className="mt-0.5 text-[12px] font-semibold text-white/85">{[stage.year != null ? `Year ${stage.year}` : null, stage.termNumber != null ? `Term ${stage.termNumber}` : null].filter(Boolean).join(" · ")}</p>
         )}
+        {(td.start || td.end) && (
+          <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-bold"><CalendarDays size={12} /> {ttFmtDate(td.start, true)}{td.start && td.end ? " – " : ""}{ttFmtDate(td.end, true)}</p>
+        )}
       </div>
 
-      <div className="divide-y divide-slate-100">
-        {days.map(d => (
-          <div key={d} className="px-4 py-3">
-            <p className="mb-2 text-[11px] font-extrabold uppercase tracking-widest" style={{ color: accent }}>{TT_DAYS[d]}</p>
-            <div className="space-y-2">
-              {byDay[d].map(r => (
-                <div key={r.id} className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200/70">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm font-bold text-slate-800">{r.title}</p>
-                    <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-slate-500 ring-1 ring-slate-200">{periodOf(r.start)}</span>
+      {days.length > 0 && (
+        <div className="divide-y divide-slate-100">
+          {days.map(d => (
+            <div key={d} className="px-4 py-3">
+              <p className="mb-2 text-[11px] font-extrabold uppercase tracking-widest" style={{ color: accent }}>{TT_DAYS[d]}</p>
+              <div className="space-y-2">
+                {byDay[d].map(r => (
+                  <div key={r.id} className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200/70">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-bold text-slate-800">{r.title}</p>
+                      <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-slate-500 ring-1 ring-slate-200">{periodOf(r.start)}</span>
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-slate-500">
+                      <span className="flex items-center gap-1 font-semibold text-slate-600"><Clock3 size={12} /> {r.start} – {r.end}</span>
+                      {r.lecturer && <span className="flex items-center gap-1"><User size={12} /> {r.lecturer}</span>}
+                      {r.room && <span className="flex items-center gap-1"><MapPin size={12} /> {r.room}</span>}
+                    </div>
                   </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-slate-500">
-                    <span className="flex items-center gap-1 font-semibold text-slate-600"><Clock3 size={12} /> {r.start} – {r.end}</span>
-                    {r.lecturer && <span className="flex items-center gap-1"><User size={12} /> {r.lecturer}</span>}
-                    {r.room && <span className="flex items-center gap-1"><MapPin size={12} /> {r.room}</span>}
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
+          ))}
+        </div>
+      )}
+
+      {/* Academic calendar — the term's weekly structure (Week / Commencing / Activity). */}
+      {weeks.length > 0 && (
+        <div className="border-t-4 border-slate-100 px-4 py-3">
+          <p className="mb-2 text-[11px] font-extrabold uppercase tracking-widest" style={{ color: accent }}>Academic calendar</p>
+          <div className="overflow-hidden rounded-xl ring-1 ring-slate-200">
+            <table className="w-full text-[12px]">
+              <thead><tr className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-wide text-slate-400"><th className="px-3 py-2">Wk</th><th className="px-3 py-2">Commencing</th><th className="px-3 py-2">Activity</th></tr></thead>
+              <tbody>
+                {weeks.map((w, k) => (
+                  <tr key={k} className="border-t border-slate-100">
+                    <td className="px-3 py-2 font-bold text-slate-600">{w.n}</td>
+                    <td className="px-3 py-2 text-slate-500">{ttFmtDate(w.wc)}</td>
+                    <td className="px-3 py-2"><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${activityStyle(w.activity)}`}>{w.activity || "Teaching"}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </Card>
   );
 }

@@ -115,33 +115,57 @@ router.get("/me/assessments", async (req, res) => {
 router.get("/me/timetable", async (req, res) => {
   const student = await prisma.student.findUnique({
     where: { id: req.user.id },
-    include: { enrolments: { include: { unit: { select: { courseId: true, year: true, termNumber: true } } } } },
+    include: { enrolments: { include: { unit: { select: { courseId: true, year: true, termNumber: true, startDate: true, endDate: true } } } } },
   });
   if (!student) return res.status(404).json({ error: "Student not found" });
 
-  // The distinct (course, year, term) stages the student's units place them in.
+  // The distinct (course, year, term) stages the student's units place them in, and the
+  // term's date window per stage (earliest unit start, latest unit end) for the header.
   const stageKeys = new Set();
+  const winStart = new Map(), winEnd = new Map();  // stageKey -> earliest start / latest end
   for (const e of student.enrolments) {
     const u = e.unit;
-    if (u?.courseId != null && u.year != null && u.termNumber != null) stageKeys.add(`${u.courseId}|${u.year}|${u.termNumber}`);
+    if (u?.courseId == null || u.year == null || u.termNumber == null) continue;
+    const key = `${u.courseId}|${u.year}|${u.termNumber}`;
+    stageKeys.add(key);
+    if (u.startDate && (!winStart.has(key) || u.startDate < winStart.get(key))) winStart.set(key, u.startDate);
+    if (u.endDate && (!winEnd.has(key) || u.endDate > winEnd.get(key))) winEnd.set(key, u.endDate);
   }
   if (!stageKeys.size) return res.json({ stages: [] });
 
   const or = [...stageKeys].map((k) => { const [courseId, year, termNumber] = k.split("|"); return { courseId, year: Number(year), termNumber: Number(termNumber) }; });
-  // Only PUBLISHED rows — a draft timetable the admin is still building stays invisible
+  // Only PUBLISHED rows/calendars — a draft the admin is still building stays invisible
   // to students until they press Publish.
-  const slots = await prisma.timetableSlot.findMany({
-    where: { published: true, OR: or },
-    include: { course: { select: { name: true, colour: true } }, unit: { select: { code: true } } },
-    orderBy: [{ day: "asc" }, { startTime: "asc" }],
-  });
+  const [slots, calendars] = await Promise.all([
+    prisma.timetableSlot.findMany({
+      where: { published: true, OR: or },
+      include: { course: { select: { name: true, colour: true } }, unit: { select: { code: true } } },
+      orderBy: [{ day: "asc" }, { startTime: "asc" }],
+    }),
+    prisma.termCalendar.findMany({ where: { published: true, OR: or }, include: { course: { select: { name: true, colour: true } } } }),
+  ]);
 
-  // Group into one block per (course, year, term).
+  // One block per (course, year, term) — from either a timetable row or a calendar.
   const byStage = new Map();
+  const ensure = (courseId, year, termNumber, courseName, colour) => {
+    const key = `${courseId}|${year}|${termNumber}`;
+    if (!byStage.has(key)) {
+      const win = { start: winStart.get(key) || null, end: winEnd.get(key) || null };
+      byStage.set(key, { courseId, courseName: courseName || "", colour: colour || null, year, termNumber, termDates: win, rows: [], calendar: null });
+    }
+    return byStage.get(key);
+  };
   for (const s of slots) {
-    const key = `${s.courseId}|${s.year}|${s.termNumber}`;
-    if (!byStage.has(key)) byStage.set(key, { courseId: s.courseId, courseName: s.course?.name || "", colour: s.course?.colour || null, year: s.year, termNumber: s.termNumber, rows: [] });
-    byStage.get(key).rows.push({ id: s.id, day: s.day, start: s.startTime, end: s.endTime, title: s.title, lecturer: s.lecturer || "", room: s.room || "", unitCode: s.unit?.code || null });
+    ensure(s.courseId, s.year, s.termNumber, s.course?.name, s.course?.colour)
+      .rows.push({ id: s.id, day: s.day, start: s.startTime, end: s.endTime, title: s.title, lecturer: s.lecturer || "", room: s.room || "", unitCode: s.unit?.code || null });
+  }
+  for (const c of calendars) {
+    const st = ensure(c.courseId, c.year, c.termNumber, c.course?.name, c.course?.colour);
+    const weeks = Array.isArray(c.weeks) ? c.weeks : (() => { try { return JSON.parse(c.weeks || "[]"); } catch { return []; } })();
+    st.calendar = { startDate: c.startDate || null, endDate: c.endDate || null, weeks };
+    // A calendar's own dates win for the header when set; otherwise keep the unit-derived ones.
+    if (c.startDate) st.termDates.start = c.startDate;
+    if (c.endDate) st.termDates.end = c.endDate;
   }
   res.json({ stages: [...byStage.values()].sort((a, b) => (a.year - b.year) || (a.termNumber - b.termNumber)) });
 });

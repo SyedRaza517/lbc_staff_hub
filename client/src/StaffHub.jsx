@@ -10016,6 +10016,7 @@ function AdminTimetable({ store }) {
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState(null);    // null | slot-being-edited | "new"
   const [form, setForm] = useState({ day: 2, start: "10:00", end: "13:00", title: "", lecturer: "", room: "", unitId: "" });
+  const [cal, setCal] = useState({ startDate: "", endDate: "", weeks: [] });   // academic calendar editor
 
   useEffect(() => {
     api.timetableCourses().then(cs => {
@@ -10033,6 +10034,18 @@ function AdminTimetable({ store }) {
     setLoading(false);
   }, [courseId, year, term, notify]);
   useEffect(() => { load(); }, [load]);
+
+  // Keep the calendar editor in step with the loaded scope: use the stored calendar if
+  // there is one, otherwise seed the dates from the units so the admin starts from the
+  // real term window rather than a blank form.
+  useEffect(() => {
+    const c = data.calendar, td = data.termDates || {};
+    setCal({
+      startDate: c?.startDate || td.start || "",
+      endDate: c?.endDate || td.end || "",
+      weeks: c?.weeks?.length ? c.weeks : [],
+    });
+  }, [data]);
 
   const course = courses.find(c => c.id === courseId);
   // The (year, term) stages this course actually has units in, for the pickers.
@@ -10063,6 +10076,32 @@ function AdminTimetable({ store }) {
     setBusy(false);
   };
   const fmtDate = (d) => { if (!d) return ""; const dt = new Date(d + "T00:00:00"); return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-GB", { day: "numeric", month: "short" }); };
+  // --- Academic calendar (weekly structure) ---
+  const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const mondayOf = (dateStr) => { const d = new Date(dateStr + "T00:00:00"); const off = (d.getDay() + 6) % 7; d.setDate(d.getDate() - off); return d; };
+  // Build one row per week (w.c. = the Monday) from the term start to end, defaulting to
+  // "Teaching" and keeping any activity already set for that week number.
+  const genWeeks = () => {
+    if (!cal.startDate || !cal.endDate) { notify?.("Set the term start and end dates first", "error"); return; }
+    if (cal.endDate < cal.startDate) { notify?.("End date must be after the start date", "error"); return; }
+    const prev = new Map((cal.weeks || []).map(w => [w.n, w.activity]));
+    const end = new Date(cal.endDate + "T00:00:00");
+    const out = []; let d = mondayOf(cal.startDate); let n = 1;
+    while (d <= end && n <= 52) { out.push({ n, wc: isoOf(d), activity: prev.get(n) || "Teaching" }); d = new Date(d); d.setDate(d.getDate() + 7); n++; }
+    setCal(c => ({ ...c, weeks: out }));
+  };
+  const setWeek = (i, patch) => setCal(c => ({ ...c, weeks: c.weeks.map((w, j) => j === i ? { ...w, ...patch } : w) }));
+  const removeWeek = (i) => setCal(c => ({ ...c, weeks: c.weeks.filter((_, j) => j !== i).map((w, j) => ({ ...w, n: j + 1 })) }));
+  const saveCalendar = async () => {
+    if (!year || !term) { notify?.("Pick a specific year and term first", "error"); return; }
+    setBusy(true);
+    try {
+      await api.saveTimetableCalendar({ courseId, year, termNumber: term, startDate: cal.startDate || null, endDate: cal.endDate || null, weeks: cal.weeks });
+      await load();
+      notify?.("Term dates & calendar saved", "success");
+    } catch (e) { notify?.(e.message || "Couldn't save the calendar", "error"); }
+    setBusy(false);
+  };
   // Best starting stage for a hand-added row: the specific year/term in view, else the
   // course's first real stage — so a row is student-reachable even from an "all" view.
   const firstStage = stages[0] || null;
@@ -10235,6 +10274,46 @@ function AdminTimetable({ store }) {
             </div>
           )}
         </>
+      )}
+
+      {/* Term dates & academic calendar (the "weekly structure" from the college email).
+          Per exact year+term, so it only shows once a specific stage is picked. */}
+      {!loading && courseId && year && term && (
+        <div className="mt-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Term dates & academic calendar</p>
+          <p className="mt-0.5 mb-3 text-[11px] text-slate-400">The start/end dates and the week-by-week structure students see. Dates are pre-filled from the units — adjust if needed, tap “Generate weeks”, set each week’s activity, then Save.</p>
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Term start"><input type="date" value={cal.startDate} onChange={e => setCal(c => ({ ...c, startDate: e.target.value }))} className={inputCls} /></Field>
+            <Field label="Term end"><input type="date" value={cal.endDate} onChange={e => setCal(c => ({ ...c, endDate: e.target.value }))} className={inputCls} /></Field>
+            <button onClick={genWeeks} className="press inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2.5 text-xs font-bold text-slate-600 transition hover:bg-slate-200"><RefreshCw size={14} /> Generate weeks</button>
+          </div>
+
+          {cal.weeks.length > 0 && (
+            <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-slate-200">
+              <table className="w-full min-w-[520px] text-sm">
+                <thead className="bg-slate-50 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                  <tr><th className="px-3 py-2">Week</th><th className="px-3 py-2">Commencing</th><th className="px-3 py-2">Activity</th><th className="px-3 py-2"></th></tr>
+                </thead>
+                <tbody>
+                  {cal.weeks.map((w, i) => (
+                    <tr key={i} className="border-t border-slate-100">
+                      <td className="px-3 py-2 font-bold text-slate-600">{w.n}</td>
+                      <td className="px-3 py-2"><input type="date" value={w.wc || ""} onChange={e => setWeek(i, { wc: e.target.value })} className={`${inputCls} !py-1.5`} /></td>
+                      <td className="px-3 py-2"><input list="tt-activities" value={w.activity || ""} onChange={e => setWeek(i, { activity: e.target.value })} placeholder="Teaching" className={`${inputCls} !py-1.5`} /></td>
+                      <td className="px-3 py-2 text-right"><button onClick={() => removeWeek(i)} className="rounded-lg p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-500"><Trash2 size={14} /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <datalist id="tt-activities"><option value="Teaching" /><option value="Formative Feedback" /><option value="Assessment" /><option value="Reading Week" /><option value="Break" /><option value="Extra-curricular activities" /></datalist>
+            </div>
+          )}
+
+          <div className="mt-3 flex items-center gap-2">
+            <PrimaryBtn onClick={saveCalendar} disabled={busy}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Save term dates & calendar</PrimaryBtn>
+            {cal.weeks.length === 0 && <span className="text-[11px] text-slate-400">Set the dates and tap “Generate weeks” to build the calendar.</span>}
+          </div>
+        </div>
       )}
 
       {/* Add / edit row */}

@@ -9,8 +9,9 @@
 // both, since the whole feature is admin-only (students read via /api/student/me/timetable).
 const router = require("express").Router();
 const prisma = require("../db");
-const { sTimetableSlot } = require("../serializers");
+const { sTimetableSlot, sTermCalendar } = require("../serializers");
 const { requireAuth, requirePage } = require("../auth");
+const { isRealDate } = require("../validate");
 
 router.use(requireAuth, requirePage("timetable"));
 
@@ -32,6 +33,13 @@ function scheduleOf(sessions) {
     out.push({ day, start: s.startTime, end: s.endTime, kind: s.kind || "" });
   }
   return out.sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
+}
+// The term's date window, read from the units in scope: earliest start, latest end.
+// This is what fills the "Term 3, 1 Jun – 27 Jul" header without asking for it twice.
+function termWindow(units) {
+  const starts = units.map((u) => u.startDate).filter(Boolean).sort();
+  const ends = units.map((u) => u.endDate).filter(Boolean).sort();
+  return { start: starts[0] || null, end: ends.length ? ends[ends.length - 1] : null };
 }
 
 // Validate a slot body for create/update. `partial` allows omitted fields on update.
@@ -100,6 +108,15 @@ router.get("/", async (req, res) => {
       orderBy: [{ year: "asc" }, { termNumber: "asc" }, { code: "asc" }],
     }),
   ]);
+
+  // The academic calendar is one row per exact (course, year, term). Only fetch it when
+  // both are pinned — an "all years/terms" view has no single calendar.
+  let calendar = null;
+  if (year != null && termNumber != null) {
+    const c = await prisma.termCalendar.findFirst({ where: { courseId, year, termNumber } });
+    if (c) calendar = sTermCalendar(c);
+  }
+
   res.json({
     slots: slots.map(sTimetableSlot),
     // Each unit carries its own dates and the weekly pattern read from its registers,
@@ -112,6 +129,8 @@ router.get("/", async (req, res) => {
       sessionCount: u._count.sessions, slotCount: u._count.timetableSlots,
       schedule: scheduleOf(u.sessions),
     })),
+    termDates: termWindow(units),   // derived from the units, for the header
+    calendar,                        // stored academic calendar for this exact stage (or null)
   });
 });
 
@@ -171,8 +190,44 @@ router.post("/publish", async (req, res) => {
   // null year/term = "all in view" — publish/hide every row currently shown, not just
   // the null-scoped ones (matches how GET / filters the same scope).
   const where = { courseId: scope.courseId, ...(scope.year != null ? { year: scope.year } : {}), ...(scope.termNumber != null ? { termNumber: scope.termNumber } : {}) };
-  const r = await prisma.timetableSlot.updateMany({ where, data: { published } });
+  const [r] = await Promise.all([
+    prisma.timetableSlot.updateMany({ where, data: { published } }),
+    // The academic calendar rides the same switch, so one Publish releases the whole thing.
+    prisma.termCalendar.updateMany({ where, data: { published } }),
+  ]);
   res.json({ published, count: r.count });
+});
+
+// PUT /api/timetable/calendar  { courseId, year, termNumber, startDate?, endDate?, weeks }
+// Save the term's dates and week-by-week structure (Week 1 TEACHING … Week 9 ASSESSMENT)
+// for one exact stage. Upserted — there is at most one calendar per (course, year, term).
+// It keeps its current published state on save, so editing never surprises students; the
+// Publish button is what makes it (and the timetable) visible.
+router.put("/calendar", async (req, res) => {
+  const scope = await parseScope(req.body);
+  if (scope.error) return res.status(400).json({ error: scope.error });
+  if (scope.year == null || scope.termNumber == null) return res.status(400).json({ error: "Pick a specific year and term for the calendar" });
+  const startDate = req.body?.startDate ? str(req.body.startDate) : null;
+  const endDate = req.body?.endDate ? str(req.body.endDate) : null;
+  if (startDate && !isRealDate(startDate)) return res.status(400).json({ error: "Start date is not a real date" });
+  if (endDate && !isRealDate(endDate)) return res.status(400).json({ error: "End date is not a real date" });
+  if (startDate && endDate && endDate < startDate) return res.status(400).json({ error: "End date must be after the start date" });
+
+  // Sanitise the weeks array: a numbered list of { n, wc (real date), activity (<=60 chars) }.
+  const rawWeeks = Array.isArray(req.body?.weeks) ? req.body.weeks : [];
+  if (rawWeeks.length > 60) return res.status(400).json({ error: "Too many weeks" });
+  const weeks = rawWeeks.map((w, i) => ({
+    n: Number.isInteger(w?.n) ? w.n : i + 1,
+    wc: isRealDate(str(w?.wc)) ? str(w.wc) : null,
+    activity: str(w?.activity).slice(0, 60) || "Teaching",
+  }));
+
+  const existing = await prisma.termCalendar.findFirst({ where: { courseId: scope.courseId, year: scope.year, termNumber: scope.termNumber } });
+  const data = { courseId: scope.courseId, year: scope.year, termNumber: scope.termNumber, startDate, endDate, weeks };
+  const saved = existing
+    ? await prisma.termCalendar.update({ where: { id: existing.id }, data })
+    : await prisma.termCalendar.create({ data });
+  res.json(sTermCalendar(saved));
 });
 
 // POST /api/timetable/slots — add one row by hand (a workshop, study support, or a

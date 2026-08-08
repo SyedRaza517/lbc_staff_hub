@@ -268,6 +268,7 @@ model Course {
   units Unit[]
   cohorts Cohort[]
   timetableSlots TimetableSlot[]
+  termCalendars TermCalendar[]
 }
 
 // One row of a weekly timetable, shown to students on their app.
@@ -308,6 +309,27 @@ model TimetableSlot {
 
   @@index([courseId, year, termNumber])
   @@index([unitId])
+}
+
+// The academic calendar for one (course, year, term): the term's start/end dates and a
+// week-by-week structure — "Week 1, w.c. 1 Jun, TEACHING … Week 9, w.c. 27 Jul, ASSESSMENT".
+// Sits alongside the weekly timetable grid; the college's email shows both. One row per
+// scope (upserted). `weeks` is JSON: [{ "n": 1, "wc": "2026-06-01", "activity": "Teaching" }].
+// Shares the timetable's publish switch — publishing a scope releases its calendar too.
+model TermCalendar {
+  id         String   @id @default(cuid())
+  course     Course?  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId   String?
+  year       Int?
+  termNumber Int?
+  startDate  String?  // YYYY-MM-DD — term start (defaults from the units' dates, editable)
+  endDate    String?  // YYYY-MM-DD — term end
+  weeks      Json     @default("[]")
+  published  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([courseId, year, termNumber])
 }
 
 // An intake of students on a course, e.g. "SEP 2025" or "June 2023". The same
