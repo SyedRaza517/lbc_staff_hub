@@ -153,7 +153,7 @@ const sStudentQuery = (q) => ({
 const sTimetableSlot = (t) => ({
   id: t.id, courseId: t.courseId ?? null, year: t.year ?? null, termNumber: t.termNumber ?? null,
   unitId: t.unitId ?? null, day: t.day, start: t.startTime, end: t.endTime,
-  title: t.title, lecturer: t.lecturer ?? "", room: t.room ?? "",
+  title: t.title, lecturer: t.lecturer ?? "", room: t.room ?? "", published: !!t.published,
   ...(t.unit ? { unitCode: t.unit.code } : {}),
   ...(t.course ? { courseName: t.course.name } : {}),
 });

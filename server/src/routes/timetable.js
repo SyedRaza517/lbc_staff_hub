@@ -126,6 +126,20 @@ router.post("/autofill", async (req, res) => {
   res.status(201).json({ created: toCreate.length, unitsFilled: units.length - skipped.length, skipped });
 });
 
+// POST /api/timetable/publish  { courseId, year, termNumber, published }
+// Release a whole scope to students, or pull it back to draft. Students only ever see
+// published rows (see /api/student/me/timetable), so this one switch is what makes a
+// finished timetable visible — the admin builds privately, then publishes in one go.
+// Operates on the exact (course, year, term) scope shown in the dashboard.
+router.post("/publish", async (req, res) => {
+  const scope = await parseScope(req.body);
+  if (scope.error) return res.status(400).json({ error: scope.error });
+  const published = req.body?.published !== false; // anything but an explicit false publishes
+  const where = { courseId: scope.courseId, year: scope.year, termNumber: scope.termNumber };
+  const r = await prisma.timetableSlot.updateMany({ where, data: { published } });
+  res.json({ published, count: r.count });
+});
+
 // POST /api/timetable/slots — add one row by hand (a workshop, study support, or a
 // correction). courseId/year/termNumber set the scope; unitId is optional.
 router.post("/slots", async (req, res) => {

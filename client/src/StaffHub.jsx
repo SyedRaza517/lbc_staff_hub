@@ -10070,6 +10070,20 @@ function AdminTimetable({ store }) {
     try { await api.removeTimetableSlot(s.id); await load(); notify?.("Row removed", "info"); }
     catch (e) { notify?.(e.message || "Couldn't remove the row", "error"); }
   };
+  const setPublished = async (published) => {
+    setBusy(true);
+    try {
+      const r = await api.publishTimetable({ ...scoped, published });
+      await load();
+      notify?.(published ? `Published — students on this course now see ${r.count} row${r.count === 1 ? "" : "s"}` : "Unpublished — hidden from students while you edit", published ? "success" : "info");
+    } catch (e) { notify?.(e.message || "Couldn't update publishing", "error"); }
+    setBusy(false);
+  };
+
+  // Publish state across the rows currently in scope: none / draft / partly / published.
+  const total = data.slots.length;
+  const pubCount = data.slots.filter(s => s.published).length;
+  const pubState = total === 0 ? "empty" : pubCount === 0 ? "draft" : pubCount === total ? "published" : "partial";
 
   const slotsByDay = useMemo(() => {
     const m = {};
@@ -10094,7 +10108,23 @@ function AdminTimetable({ store }) {
         </div>
       </div>
 
-      <p className="mb-3 flex items-start gap-1.5 rounded-xl bg-blue-50 px-3 py-2 text-[11px] leading-snug text-blue-700 ring-1 ring-blue-100"><Info size={13} className="mt-px shrink-0" /> Auto-fill reads each unit's registers to place its lectures and tutorials on the right day and time, using the unit's tutor. Then edit any row's time, lecturer or room, and add workshops or study-support rows by hand. Students on this course see it on their app.</p>
+      <p className="mb-3 flex items-start gap-1.5 rounded-xl bg-blue-50 px-3 py-2 text-[11px] leading-snug text-blue-700 ring-1 ring-blue-100"><Info size={13} className="mt-px shrink-0" /> Auto-fill reads each unit's registers to place its lectures and tutorials on the right day and time, using the unit's tutor. Then edit any row's time, lecturer or room, and add workshops or study-support rows by hand. Nothing shows to students until you press <b>Publish</b>.</p>
+
+      {/* Publish state for the scope in view. Students only ever see published rows, so
+          this bar is where a built timetable is released — or pulled back to draft. */}
+      {pubState !== "empty" && (
+        <div className={`mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl px-3.5 py-2.5 ring-1 ${pubState === "published" ? "bg-emerald-50 ring-emerald-200" : pubState === "partial" ? "bg-amber-50 ring-amber-200" : "bg-slate-50 ring-slate-200"}`}>
+          <div className="flex items-center gap-2 text-sm">
+            {pubState === "published" && <><span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-bold text-white"><Check size={12} /> Live</span><span className="text-emerald-800">Students on this course/year/term see this timetable.</span></>}
+            {pubState === "draft" && <><span className="inline-flex items-center gap-1 rounded-full bg-slate-400 px-2 py-0.5 text-[11px] font-bold text-white">Draft</span><span className="text-slate-600">Not visible to students yet — publish when it's ready.</span></>}
+            {pubState === "partial" && <><span className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-bold text-white">Partly live</span><span className="text-amber-800">{pubCount} of {total} rows live · {total - pubCount} new draft{total - pubCount === 1 ? "" : "s"} not shown yet.</span></>}
+          </div>
+          <div className="flex gap-2">
+            {pubState !== "draft" && <button onClick={() => setPublished(false)} disabled={busy} className="press rounded-xl bg-white px-3 py-2 text-xs font-bold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:opacity-50">Unpublish</button>}
+            {pubState !== "published" && <PrimaryBtn onClick={() => setPublished(true)} disabled={busy}>{busy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} {pubState === "partial" ? "Publish new rows" : "Publish to students"}</PrimaryBtn>}
+          </div>
+        </div>
+      )}
 
       {loading ? <div className="skeleton h-64 rounded-2xl" /> : (
         <>
@@ -10115,7 +10145,7 @@ function AdminTimetable({ store }) {
                       <tr key={s.id} className="border-t border-slate-100 hover:bg-blue-50/30">
                         <td className="px-4 py-3 font-bold text-slate-700">{idx === 0 ? TT_DAYS[d] : ""}</td>
                         <td className="px-4 py-3 whitespace-nowrap text-slate-600"><span className="font-semibold text-slate-500">{periodOf(s.start)}</span> {s.start}–{s.end}</td>
-                        <td className="px-4 py-3"><span className="font-semibold text-slate-700">{s.title}</span>{s.unitCode && <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">{s.unitCode}</span>}</td>
+                        <td className="px-4 py-3"><span className="font-semibold text-slate-700">{s.title}</span>{s.unitCode && <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">{s.unitCode}</span>}{!s.published && <span className="ml-1.5 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">Draft</span>}</td>
                         <td className="px-4 py-3 text-slate-500">{s.lecturer || "—"}</td>
                         <td className="px-4 py-3">{s.room ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{s.room}</span> : <span className="text-slate-300">—</span>}</td>
                         <td className="px-4 py-3"><div className="flex justify-end gap-1"><button onClick={() => openEdit(s)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button><button onClick={() => delSlot(s)} className="rounded-lg p-1.5 text-slate-300 hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button></div></td>

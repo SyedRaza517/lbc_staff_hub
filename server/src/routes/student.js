@@ -128,8 +128,10 @@ router.get("/me/timetable", async (req, res) => {
   if (!stageKeys.size) return res.json({ stages: [] });
 
   const or = [...stageKeys].map((k) => { const [courseId, year, termNumber] = k.split("|"); return { courseId, year: Number(year), termNumber: Number(termNumber) }; });
+  // Only PUBLISHED rows — a draft timetable the admin is still building stays invisible
+  // to students until they press Publish.
   const slots = await prisma.timetableSlot.findMany({
-    where: { OR: or },
+    where: { published: true, OR: or },
     include: { course: { select: { name: true, colour: true } }, unit: { select: { code: true } } },
     orderBy: [{ day: "asc" }, { startTime: "asc" }],
   });

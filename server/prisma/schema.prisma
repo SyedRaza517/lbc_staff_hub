@@ -299,6 +299,10 @@ model TimetableSlot {
   title      String   // what the student sees, e.g. "Operational Planning and Management" or "Study Support"
   lecturer   String   @default("")  // free text; defaults from the unit's tutor on auto-fill
   room       String   @default("")  // "Online", "Room 101", "Study Room 1st Floor", …
+  // Draft until an admin publishes the scope. Students only ever see published rows,
+  // so a timetable can be built and edited privately, then released in one go. A row
+  // added after publishing starts as a draft again, so the admin decides when it shows.
+  published  Boolean  @default(false)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
