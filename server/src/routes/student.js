@@ -136,14 +136,14 @@ router.get("/me/timetable", async (req, res) => {
   const or = [...stageKeys].map((k) => { const [courseId, year, termNumber] = k.split("|"); return { courseId, year: Number(year), termNumber: Number(termNumber) }; });
   // Only PUBLISHED rows/calendars — a draft the admin is still building stays invisible
   // to students until they press Publish.
-  const [slots, calendars] = await Promise.all([
-    prisma.timetableSlot.findMany({
-      where: { published: true, OR: or },
-      include: { course: { select: { name: true, colour: true } }, unit: { select: { code: true } } },
-      orderBy: [{ day: "asc" }, { startTime: "asc" }],
-    }),
-    prisma.termCalendar.findMany({ where: { published: true, OR: or }, include: { course: { select: { name: true, colour: true } } } }),
-  ]);
+  const slots = await prisma.timetableSlot.findMany({
+    where: { published: true, OR: or },
+    include: { course: { select: { name: true, colour: true } }, unit: { select: { code: true } } },
+    orderBy: [{ day: "asc" }, { startTime: "asc" }],
+  });
+  // Best-effort: a missing calendar table must not stop the timetable itself loading.
+  let calendars = [];
+  try { calendars = await prisma.termCalendar.findMany({ where: { published: true, OR: or }, include: { course: { select: { name: true, colour: true } } } }); } catch (_e) { calendars = []; }
 
   // One block per (course, year, term) — from either a timetable row or a calendar.
   const byStage = new Map();

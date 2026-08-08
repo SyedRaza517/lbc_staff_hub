@@ -113,8 +113,12 @@ router.get("/", async (req, res) => {
   // both are pinned — an "all years/terms" view has no single calendar.
   let calendar = null;
   if (year != null && termNumber != null) {
-    const c = await prisma.termCalendar.findFirst({ where: { courseId, year, termNumber } });
-    if (c) calendar = sTermCalendar(c);
+    // Best-effort: if the calendar table hasn't been created yet, the timetable itself
+    // must still load — so a missing table means "no calendar", not a 500.
+    try {
+      const c = await prisma.termCalendar.findFirst({ where: { courseId, year, termNumber } });
+      if (c) calendar = sTermCalendar(c);
+    } catch (_e) { /* TermCalendar not migrated yet */ }
   }
 
   res.json({
@@ -190,11 +194,10 @@ router.post("/publish", async (req, res) => {
   // null year/term = "all in view" — publish/hide every row currently shown, not just
   // the null-scoped ones (matches how GET / filters the same scope).
   const where = { courseId: scope.courseId, ...(scope.year != null ? { year: scope.year } : {}), ...(scope.termNumber != null ? { termNumber: scope.termNumber } : {}) };
-  const [r] = await Promise.all([
-    prisma.timetableSlot.updateMany({ where, data: { published } }),
-    // The academic calendar rides the same switch, so one Publish releases the whole thing.
-    prisma.termCalendar.updateMany({ where, data: { published } }),
-  ]);
+  const r = await prisma.timetableSlot.updateMany({ where, data: { published } });
+  // The academic calendar rides the same switch — best-effort so publish never fails
+  // just because the calendar table isn't migrated yet.
+  try { await prisma.termCalendar.updateMany({ where, data: { published } }); } catch (_e) { /* TermCalendar optional */ }
   res.json({ published, count: r.count });
 });
 
@@ -222,12 +225,17 @@ router.put("/calendar", async (req, res) => {
     activity: str(w?.activity).slice(0, 60) || "Teaching",
   }));
 
-  const existing = await prisma.termCalendar.findFirst({ where: { courseId: scope.courseId, year: scope.year, termNumber: scope.termNumber } });
-  const data = { courseId: scope.courseId, year: scope.year, termNumber: scope.termNumber, startDate, endDate, weeks };
-  const saved = existing
-    ? await prisma.termCalendar.update({ where: { id: existing.id }, data })
-    : await prisma.termCalendar.create({ data });
-  res.json(sTermCalendar(saved));
+  try {
+    const existing = await prisma.termCalendar.findFirst({ where: { courseId: scope.courseId, year: scope.year, termNumber: scope.termNumber } });
+    const data = { courseId: scope.courseId, year: scope.year, termNumber: scope.termNumber, startDate, endDate, weeks };
+    const saved = existing
+      ? await prisma.termCalendar.update({ where: { id: existing.id }, data })
+      : await prisma.termCalendar.create({ data });
+    res.json(sTermCalendar(saved));
+  } catch (e) {
+    if (e?.code === "P2021" || /does not exist/i.test(e?.message || "")) return res.status(503).json({ error: "The calendar table isn't set up yet — run the database setup, then try again." });
+    throw e;
+  }
 });
 
 // POST /api/timetable/slots — add one row by hand (a workshop, study support, or a
