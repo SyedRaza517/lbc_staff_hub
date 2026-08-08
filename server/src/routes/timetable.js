@@ -18,6 +18,21 @@ const str = (v) => (typeof v === "string" ? v.trim() : "");
 const isTime = (v) => /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 const isDay = (v) => Number.isInteger(v) && v >= 1 && v <= 7;
 const MAX_YEAR = 2, MAX_TERM = 6;
+// The weekday a dated session falls on, as ISO 1..7 (Mon..Sun). Sunday is 0 in JS.
+const isoDay = (dateStr) => { const d = new Date(`${dateStr}T00:00:00Z`).getUTCDay(); return d === 0 ? 7 : d; };
+// The distinct weekly pattern a unit is taught on, derived from its dated sessions:
+// one entry per (weekday, start, end, kind). This is what becomes its timetable rows.
+function scheduleOf(sessions) {
+  const seen = new Set(); const out = [];
+  for (const s of sessions) {
+    const day = isoDay(s.date);
+    const key = `${day}|${s.startTime}|${s.endTime}|${s.kind}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ day, start: s.startTime, end: s.endTime, kind: s.kind || "" });
+  }
+  return out.sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
+}
 
 // Validate a slot body for create/update. `partial` allows omitted fields on update.
 function parseSlot(body, partial) {
@@ -70,34 +85,57 @@ router.get("/", async (req, res) => {
   if (!courseId) return res.status(400).json({ error: "courseId is required" });
   const year = req.query?.year != null && req.query.year !== "" ? Number(req.query.year) : null;
   const termNumber = req.query?.termNumber != null && req.query.termNumber !== "" ? Number(req.query.termNumber) : null;
-  const where = { courseId, year, termNumber };
+  // null year/term means "all" — don't filter that dimension, rather than "IS NULL".
+  const where = { courseId, ...(year != null ? { year } : {}), ...(termNumber != null ? { termNumber } : {}) };
   const [slots, units] = await Promise.all([
     prisma.timetableSlot.findMany({ where, include: { unit: { select: { code: true } } }, orderBy: [{ day: "asc" }, { startTime: "asc" }] }),
     prisma.unit.findMany({
       where: { courseId, ...(year != null ? { year } : {}), ...(termNumber != null ? { termNumber } : {}) },
-      select: { id: true, code: true, name: true, tutor: true, tutorStaff: { select: { name: true } }, _count: { select: { sessions: true, timetableSlots: true } } },
-      orderBy: { code: "asc" },
+      select: {
+        id: true, code: true, name: true, year: true, termNumber: true,
+        startDate: true, endDate: true, tutor: true, tutorStaff: { select: { name: true } },
+        sessions: { select: { date: true, startTime: true, endTime: true, kind: true } },
+        _count: { select: { sessions: true, timetableSlots: true } },
+      },
+      orderBy: [{ year: "asc" }, { termNumber: "asc" }, { code: "asc" }],
     }),
   ]);
   res.json({
     slots: slots.map(sTimetableSlot),
-    units: units.map((u) => ({ id: u.id, code: u.code, name: u.name, tutor: u.tutorStaff?.name || u.tutor || "", sessionCount: u._count.sessions, slotCount: u._count.timetableSlots })),
+    // Each unit carries its own dates and the weekly pattern read from its registers,
+    // so the dashboard can show "this unit runs Mon 18:00–21:00, 12 Jun–20 Sep" and let
+    // the admin set a lecturer and add it in one tap.
+    units: units.map((u) => ({
+      id: u.id, code: u.code, name: u.name, year: u.year ?? null, termNumber: u.termNumber ?? null,
+      startDate: u.startDate || null, endDate: u.endDate || null,
+      tutor: u.tutorStaff?.name || u.tutor || "",
+      sessionCount: u._count.sessions, slotCount: u._count.timetableSlots,
+      schedule: scheduleOf(u.sessions),
+    })),
   });
 });
 
-// POST /api/timetable/autofill  { courseId, year, termNumber }
-// Build slots for every unit in the scope, from that unit's generated sessions. Each
-// distinct (weekday, start, end, kind) becomes a slot: a "Teaching" session is the
-// class, a "Seminar" becomes a "… Tutorial" row — matching how the college lays it out.
-// Idempotent: a unit that already has slots is skipped, so re-running never duplicates.
-const isoDay = (dateStr) => { const d = new Date(`${dateStr}T00:00:00Z`).getUTCDay(); return d === 0 ? 7 : d; }; // Sun=0 -> 7
+// POST /api/timetable/autofill  { courseId, year, termNumber, unitId?, lecturer? }
+// Build slots from units' generated sessions. Each distinct (weekday, start, end, kind)
+// becomes a slot: a "Teaching" session is the class, a "Seminar" becomes a "… Tutorial"
+// row — matching how the college lays it out. Idempotent: a unit that already has slots
+// is skipped, so re-running never duplicates.
+//
+// Two ways to call it:
+//   - no unitId  → fill every unit in the (course, year, term) scope at once.
+//   - a unitId   → fill just that one unit, optionally with a `lecturer` the admin typed.
+//
+// Each slot takes the UNIT's own year/term (not the picker's), so a timetable built while
+// viewing "all years" still lands on the exact stage a student is enrolled in and shows up.
 router.post("/autofill", async (req, res) => {
   const scope = await parseScope(req.body);
   if (scope.error) return res.status(400).json({ error: scope.error });
   const { courseId, year, termNumber } = scope;
+  const onlyUnitId = str(req.body?.unitId) || null;
+  const lecturerOverride = typeof req.body?.lecturer === "string" ? str(req.body.lecturer).slice(0, 120) : null;
 
   const units = await prisma.unit.findMany({
-    where: { courseId, ...(year != null ? { year } : {}), ...(termNumber != null ? { termNumber } : {}) },
+    where: { courseId, ...(year != null ? { year } : {}), ...(termNumber != null ? { termNumber } : {}), ...(onlyUnitId ? { id: onlyUnitId } : {}) },
     include: { sessions: { select: { date: true, startTime: true, endTime: true, kind: true } }, tutorStaff: { select: { name: true } }, _count: { select: { timetableSlots: true } } },
   });
 
@@ -106,17 +144,12 @@ router.post("/autofill", async (req, res) => {
   for (const u of units) {
     if (u._count.timetableSlots > 0) { skipped.push({ code: u.code, reason: "already has timetable rows" }); continue; }
     if (!u.sessions.length) { skipped.push({ code: u.code, reason: "no registers to read a day/time from" }); continue; }
-    const lecturer = u.tutorStaff?.name || u.tutor || "";
-    const seen = new Set();
-    for (const s of u.sessions) {
-      const day = isoDay(s.date);
-      const key = `${day}|${s.startTime}|${s.endTime}|${s.kind}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+    const lecturer = lecturerOverride != null ? lecturerOverride : (u.tutorStaff?.name || u.tutor || "");
+    for (const s of scheduleOf(u.sessions)) {
       const isTutorial = String(s.kind || "").toLowerCase() === "seminar";
       toCreate.push({
-        courseId, year, termNumber, unitId: u.id,
-        day, startTime: s.startTime, endTime: s.endTime,
+        courseId, year: u.year ?? year, termNumber: u.termNumber ?? termNumber, unitId: u.id,
+        day: s.day, startTime: s.start, endTime: s.end,
         title: `${u.name}${isTutorial ? " Tutorial" : ""}`,
         lecturer, room: "",
       });
@@ -135,7 +168,9 @@ router.post("/publish", async (req, res) => {
   const scope = await parseScope(req.body);
   if (scope.error) return res.status(400).json({ error: scope.error });
   const published = req.body?.published !== false; // anything but an explicit false publishes
-  const where = { courseId: scope.courseId, year: scope.year, termNumber: scope.termNumber };
+  // null year/term = "all in view" — publish/hide every row currently shown, not just
+  // the null-scoped ones (matches how GET / filters the same scope).
+  const where = { courseId: scope.courseId, ...(scope.year != null ? { year: scope.year } : {}), ...(scope.termNumber != null ? { termNumber: scope.termNumber } : {}) };
   const r = await prisma.timetableSlot.updateMany({ where, data: { published } });
   res.json({ published, count: r.count });
 });

@@ -10016,6 +10016,7 @@ function AdminTimetable({ store }) {
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState(null);    // null | slot-being-edited | "new"
   const [form, setForm] = useState({ day: 2, start: "10:00", end: "13:00", title: "", lecturer: "", room: "", unitId: "" });
+  const [unitLecturers, setUnitLecturers] = useState({});   // unitId -> lecturer being typed in the units panel
 
   useEffect(() => {
     api.timetableCourses().then(cs => {
@@ -10040,6 +10041,16 @@ function AdminTimetable({ store }) {
   const years = [...new Set(stages.map(s => s.year))].sort();
   const termsForYear = [...new Set(stages.filter(s => !year || s.year === Number(year)).map(s => s.termNumber))].sort();
 
+  // On picking a course, jump to its first real stage (a specific year + term). What you
+  // build there lands on the exact stage students are enrolled in, so it reaches them —
+  // "All years / All terms" stays available, but as a wide view, not a build target.
+  useEffect(() => {
+    const st = (course?.stages || [])[0];
+    setYear(st ? String(st.year) : "");
+    setTerm(st ? String(st.termNumber) : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseId]);
+
   const scoped = { courseId, year: year || null, termNumber: term || null };
   const autofill = async () => {
     if (!courseId) return;
@@ -10052,6 +10063,20 @@ function AdminTimetable({ store }) {
     } catch (e) { notify?.(e.message || "Auto-fill failed", "error"); }
     setBusy(false);
   };
+  // Add ONE unit to the timetable, with the lecturer typed inline. Day/time come from the
+  // unit's registers; the slot lands on the unit's own year+term so students see it.
+  const addUnit = async (u) => {
+    setBusy(true);
+    try {
+      const lecturer = (unitLecturers[u.id] ?? u.tutor ?? "").trim();
+      const r = await api.timetableAutofill({ courseId, unitId: u.id, lecturer });
+      if (r.created > 0) notify?.(`Added ${u.code} — ${r.created} session${r.created === 1 ? "" : "s"}`, "success");
+      else notify?.(`${u.code}: ${(r.skipped?.[0]?.reason) || "nothing to add"}`, "info");
+      await load();
+    } catch (e) { notify?.(e.message || "Couldn't add the unit", "error"); }
+    setBusy(false);
+  };
+  const fmtDate = (d) => { if (!d) return ""; const dt = new Date(d + "T00:00:00"); return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-GB", { day: "numeric", month: "short" }); };
   const openNew = () => { setForm({ day: 2, start: "10:00", end: "13:00", title: "", lecturer: "", room: "", unitId: "" }); setModal("new"); };
   const openEdit = (s) => { setForm({ day: s.day, start: s.start, end: s.end, title: s.title, lecturer: s.lecturer || "", room: s.room || "", unitId: s.unitId || "" }); setModal(s); };
   const saveSlot = async () => {
@@ -10110,6 +10135,41 @@ function AdminTimetable({ store }) {
 
       <p className="mb-3 flex items-start gap-1.5 rounded-xl bg-blue-50 px-3 py-2 text-[11px] leading-snug text-blue-700 ring-1 ring-blue-100"><Info size={13} className="mt-px shrink-0" /> Auto-fill reads each unit's registers to place its lectures and tutorials on the right day and time, using the unit's tutor. Then edit any row's time, lecturer or room, and add workshops or study-support rows by hand. Nothing shows to students until you press <b>Publish</b>.</p>
 
+      {/* Units in the chosen scope: their dates, the days/times read from their registers,
+          and an inline lecturer box — so you pick course + term, see the units, type who
+          teaches each, and add it in one tap. Day/time come from the unit's registers. */}
+      {!loading && data.units.length > 0 && (
+        <div className="mb-4 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
+          <div className="border-b border-slate-100 bg-slate-50 px-4 py-2.5">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Units in {term ? "this term" : year ? "this year" : "this course"} — set the lecturer, then add each to the timetable</p>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {data.units.map(u => {
+              const inTT = u.slotCount > 0;
+              const noReg = u.sessionCount === 0;
+              return (
+                <div key={u.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  <div className="min-w-[220px] flex-1">
+                    <p className="text-sm font-semibold text-slate-800">{u.name} <span className="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">{u.code}</span></p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      {u.year != null && `Year ${u.year} · `}{u.termNumber != null && `Term ${u.termNumber}`}
+                      {(u.startDate || u.endDate) && <> · {fmtDate(u.startDate)}–{fmtDate(u.endDate)}</>}
+                    </p>
+                    {u.schedule?.length > 0
+                      ? <p className="mt-0.5 text-[11px] text-slate-400">{u.schedule.map(s => `${TT_DAY_SHORT[s.day]} ${s.start}–${s.end}${String(s.kind || "").toLowerCase() === "seminar" ? " (Tutorial)" : ""}`).join(" · ")}</p>
+                      : <p className="mt-0.5 text-[11px] text-amber-600">No registers yet — add registers to this unit to read its days and times.</p>}
+                  </div>
+                  <div className="w-44"><input value={unitLecturers[u.id] ?? u.tutor ?? ""} onChange={e => setUnitLecturers(m => ({ ...m, [u.id]: e.target.value }))} placeholder="Lecturer name" className={inputCls} disabled={inTT} /></div>
+                  {inTT
+                    ? <span className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200"><Check size={14} /> In timetable</span>
+                    : <button onClick={() => addUnit(u)} disabled={busy || noReg} title={noReg ? "This unit has no registers to read days/times from" : ""} className="press inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-bold text-white transition hover:bg-blue-700 disabled:opacity-50"><Plus size={14} /> Add</button>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Publish state for the scope in view. Students only ever see published rows, so
           this bar is where a built timetable is released — or pulled back to draft. */}
       {pubState !== "empty" && (
@@ -10129,7 +10189,7 @@ function AdminTimetable({ store }) {
       {loading ? <div className="skeleton h-64 rounded-2xl" /> : (
         <>
           {data.slots.length === 0 && (
-            <Card><EmptyState Icon={CalendarClock} title="No timetable yet" msg={data.units.length ? "Tap “Auto-fill from units” to build it from the registers, or add rows by hand." : "Add units (with registers) to this course/year/term first, or add rows by hand."} /></Card>
+            <Card><EmptyState Icon={CalendarClock} title="No timetable yet" msg={data.units.length ? "Use the units above — set the lecturer and tap Add — or add a row by hand. Then Publish so students see it." : "Add units (with registers) to this course/year/term first, or add rows by hand."} /></Card>
           )}
 
           {/* Weekly grid, grouped by day */}
