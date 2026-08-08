@@ -70,8 +70,14 @@ export function AuthProvider({ children }) {
   // When any API call hits a 401 (expired/invalid token), drop the user so the
   // app falls back to <Login> instead of getting stuck on a broken session.
   useEffect(() => {
-    const onUnauthorized = () => {
+    const onUnauthorized = (e) => {
       setUser(null);
+      // Only a rejection FROM the login endpoint means the password was tried and is
+      // wrong. A 401 from any other request is just an expired/revoked token — the
+      // remembered password (and the biometric prefs) are still valid and must be kept,
+      // or every routine session expiry would force a full retype.
+      const fromLogin = e?.detail?.fromLogin === true;
+      if (!fromLogin) return;
       // A 401 means the token is dead — expired, or revoked by a password change or
       // reset bumping tokenVersion.
       //

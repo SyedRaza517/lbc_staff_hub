@@ -26,8 +26,13 @@ router.get("/", requireAuth, async (req, res) => {
 
   if (canReadAll) return res.json(rows.map(sDoc));
   if (needsCount) {
+    // A redacted stub carries NO detail of a document this admin may not read — not
+    // its name, its assignee, its category, nor its date. `type` is free text that can
+    // hold a sensitive label ("Disciplinary outcome", "Payslip"), so leaking it (and
+    // the date) still let an overview/settings-only admin enumerate the category and
+    // timing of every private HR record. Only enough to keep the COUNT correct travels.
     return res.json(rows.map((d) => (mine(d) ? sDoc(d) : {
-      id: d.id, name: "Private document", type: d.type, date: d.date, scope: "personal", assignedTo: null, redacted: true,
+      id: d.id, name: "Private document", type: "Document", date: null, scope: "personal", assignedTo: null, redacted: true,
     })));
   }
   res.json(rows.filter(mine).map(sDoc));

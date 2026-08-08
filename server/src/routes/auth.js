@@ -4,6 +4,9 @@ const crypto = require("crypto");
 const prisma = require("../db");
 const { sStaff, sStudent } = require("../serializers");
 const { verifyPassword, hashPassword, signToken, signStudentToken, requireAuth, SECRET } = require("../auth");
+// A fixed hash to compare against on the login miss path, so a non-existent account
+// costs the same bcrypt time as a real one (see the /login handler). Computed once.
+const DUMMY_HASH = hashPassword("timing-equalizer-not-a-real-password");
 const { sendEmail } = require("../email");
 const { notifyStaff, notifyAdmins } = require("../notify");
 const totp = require("../totp");
@@ -231,7 +234,15 @@ router.post("/login", async (req, res) => {
     return res.json({ token: signStudentToken(student), user: { ...sStudent(student), kind: "student" } });
   }
 
-  // Neither a staff nor a student match — count the failure and return generically.
+  // Neither a staff nor a student match. Run one bcrypt against a fixed dummy hash so
+  // a miss costs the same ~100ms as a real password check. Without this, an unknown
+  // email returns in a few milliseconds (both findUnique calls short-circuit before
+  // any bcrypt) while a real account pays for the compare — a timing oracle that tells
+  // an attacker which addresses have activated accounts, defeating the generic error
+  // message. The result is discarded; only the elapsed time matters.
+  verifyPassword(String(password), DUMMY_HASH);
+
+  // count the failure and return generically.
   s.count += 1;
   if (s.count >= MAX_ATTEMPTS) s.lockedUntil = now + LOCK_MS;
   acct.count += 1;

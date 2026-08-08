@@ -199,6 +199,12 @@ router.put("/:id/grades", requireAuth, requireAdmin, async (req, res) => {
   if (!a) return res.status(404).json({ error: "Assessment not found" });
   const grades = Array.isArray(req.body?.grades) ? req.body.grades : null;
   if (!grades) return res.status(400).json({ error: "grades array required" });
+  // Same cap the identical register endpoint (hnd.js) enforces: a grade save can never
+  // legitimately carry more rows than the unit has students. Without it a 1MB body of
+  // ~20,000 studentIds forces a 20k-iteration loop plus two huge IN() queries before
+  // the enrolment check rejects it — pre-check work heavy enough to stall the API.
+  const MAX_GRADE_ROWS = 500;
+  if (grades.length > MAX_GRADE_ROWS) return res.status(400).json({ error: `Too many rows in one save (limit ${MAX_GRADE_ROWS})` });
 
   const rows = [];
   for (const g of grades) {

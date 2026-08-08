@@ -604,8 +604,15 @@ const STAFF_TIPS = [
   "Your holiday balance updates the moment a request is approved.",
 ];
 
+// Can this user actually decide leave? Mirrors the server's requireAnyPage over the
+// leave-management pages, so the Manager Approval tile and screen only appear for an
+// admin who can really act — not for any admin (a timesheets-only admin would just
+// hit a 403). Used by HomeGrid and ApprovalScreen.
+const canDecideLeaveFor = (user) => ["requests", "approvals", "calendar"].some(p => canAccessPage(user, p));
+
 function HomeGrid({ setScreen, store, me }) {
   const today = todayISO();
+  const canDecideLeave = canDecideLeaveFor(store.currentUser);
   const myToday = store.checkins.find(c => c.staffId === me.id && c.date === today && c.in);
   const pending = store.leave.filter(l => l.staffId === me.id && l.status === "pending").length;
   const left = store.remaining(me.id);
@@ -630,7 +637,11 @@ function HomeGrid({ setScreen, store, me }) {
       </div>
       <p className="mb-3 text-center text-sm font-semibold italic text-slate-500" style={{ fontFamily: "'Lora', serif" }}>Please select one of the buttons below</p>
       <div className="grid grid-cols-2 gap-3">
-        {TILES.filter(t => t.key !== "approval" || store.isAdmin).map((t, i) => {
+        {/* The Manager Approval tile needs a LEAVE page, not merely being an admin.
+            Gated on store.isAdmin, a page-scoped admin (e.g. finance, timesheets-only)
+            saw the tile, opened an empty/misleading queue, and every Approve/Decline
+            tap 403'd — a dead-end button. canDecideLeave mirrors the server guard. */}
+        {TILES.filter(t => t.key !== "approval" || canDecideLeave).map((t, i) => {
           const badge = t.key === "approval" ? store.leave.filter(l => l.status === "pending").length : t.key === "request" ? pending : 0;
           return (
             <button key={t.key} onClick={() => setScreen(t.key)} className="shine hover-lift group relative flex flex-col items-center justify-center gap-2.5 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:shadow-xl hover:ring-blue-200 active:scale-95 pop" style={{ animationDelay: `${i * 60}ms` }}>
@@ -1314,7 +1325,8 @@ function DocumentsScreen({ store, me }) {
 
 /* ----- Manager Approval (in app) ----- */
 function ApprovalScreen({ store, me }) {
-  if (!store.isAdmin) return <div className="p-4 text-slate-400">Access denied</div>;
+  // A leave page, not merely being an admin — matches the tile gate and the server.
+  if (!canDecideLeaveFor(store.currentUser)) return <div className="p-4 text-slate-400">Access denied</div>;
   const pending = store.leave.filter(l => l.status === "pending");
   const act = (l, status) => store.decideLeave(l.id, status);
   return (

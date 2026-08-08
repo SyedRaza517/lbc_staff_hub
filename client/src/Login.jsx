@@ -121,7 +121,18 @@ export default function Login({ onBack }) {
             <div className="group relative mt-1">
               <Lock size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-blue-500" />
               <input id="login-password" name="password" type={pwFromStore ? "password" : pw.type} autoComplete="current-password"
-                value={password} onChange={(e) => { setPassword(e.target.value); setPwFromStore(false); }} disabled={busy}
+                value={password}
+                onChange={(e) => {
+                  // The FIRST edit of a prefilled-from-storage password clears the
+                  // whole field — it does not append. Otherwise the next person at a
+                  // shared machine typed one character, which un-suppressed the reveal
+                  // button while the stored plaintext was still in the value, and could
+                  // then reveal the previous user's password. Clearing on first touch
+                  // means a stored password can never be shown, only replaced.
+                  if (pwFromStore) { setPassword(""); setPwFromStore(false); return; }
+                  setPassword(e.target.value);
+                }}
+                disabled={busy}
                 className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-9 pr-11 text-sm outline-none transition-all duration-200 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:opacity-60" />
               {/* No reveal button while the value came from storage — otherwise the
                   next person at a shared machine reads the previous user's password. */}

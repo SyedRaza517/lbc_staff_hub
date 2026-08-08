@@ -1144,7 +1144,11 @@ router.get("/attendance", requireAuth, async (req, res) => {
 // how attendance is running on each, how much marking is outstanding, and the dates
 // that matter. Answers "how are my units doing" without opening four screens.
 router.get("/staff/:id/teaching", requireAuth, async (req, res) => {
-  const staff = await prisma.staff.findUnique({ where: { id: req.params.id }, select: { id: true, name: true, jobTitle: true, dept: true, email: true, initials: true, colour: true } });
+  // No email. This route is behind registers/students/executive — pages that GET
+  // /staff deliberately DENY colleagues' email addresses to. Returning it here let a
+  // page-scoped admin harvest every staff email by looping the roster ids. The
+  // teaching-load view only needs a name and job title.
+  const staff = await prisma.staff.findUnique({ where: { id: req.params.id }, select: { id: true, name: true, jobTitle: true, dept: true, initials: true, colour: true } });
   if (!staff) return res.status(404).json({ error: "Staff member not found" });
 
   const units = await prisma.unit.findMany({

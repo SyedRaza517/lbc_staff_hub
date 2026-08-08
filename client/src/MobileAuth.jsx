@@ -150,7 +150,12 @@ function SignIn({ onNeedSecondStep, goSignUp, goForgot }) {
       <Labelled label="Password" Icon={Lock}>
         <div className="relative">
           <input type={pwFromStore ? "password" : pw.type} name="password" value={password} disabled={busy}
-            onChange={(e) => { setPassword(e.target.value); setPwFromStore(false); }}
+            onChange={(e) => {
+              // First edit of a stored password clears it — see Login.jsx. Prevents the
+              // next person on a shared device from revealing the previous user's password.
+              if (pwFromStore) { setPassword(""); setPwFromStore(false); return; }
+              setPassword(e.target.value);
+            }}
             autoComplete="current-password" className={`${inputClass} pr-11`} style={{ "--tw-ring-color": NAVY }} />
           {/* Withheld while the value came from storage — see Login.jsx. */}
           {!pwFromStore && pw.button}

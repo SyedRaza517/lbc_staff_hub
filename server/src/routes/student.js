@@ -150,6 +150,9 @@ router.post("/me/query", async (req, res) => {
   const subject = str(req.body?.subject) || "Student query";
   if (message.length < 3) return res.status(400).json({ error: "Please write your query" });
   if (message.length > 4000) return res.status(400).json({ error: "Query is too long" });
+  // Cap the subject too — message was bounded but subject wasn't, so a student could
+  // push a 1MB blob into StudentQuery.subject and into every admin's notification row.
+  if (subject.length > 200) return res.status(400).json({ error: "Subject is too long (200 characters maximum)" });
 
   const query = await prisma.studentQuery.create({
     data: { studentId: req.user.id, subject, message, status: "open" },

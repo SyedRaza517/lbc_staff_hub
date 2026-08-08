@@ -78,7 +78,15 @@ async function request(path, { method = "GET", body, timeoutMs = DEFAULT_TIMEOUT
     setToken(null);
     // Signal the app to drop the user and show <Login>, rather than leaving a
     // broken authenticated UI where every subsequent request also 401s.
-    if (typeof window !== "undefined") window.dispatchEvent(new Event("auth:unauthorized"));
+    //
+    // Carry WHICH request 401'd. A 401 from /auth/login means a password was actually
+    // submitted and rejected — clear the remembered credential. A 401 from any OTHER
+    // path means an existing token expired or was revoked; the password was never sent
+    // and is still valid, so the handler must keep it. Without this distinction, a
+    // routine token expiry wiped a correct remembered password and forced a retype on
+    // every session end — defeating the feature the user just turned on.
+    const fromLogin = path.startsWith("/auth/login");
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("auth:unauthorized", { detail: { fromLogin } }));
   }
   let data = null;
   try { data = await res.json(); } catch (_) {}

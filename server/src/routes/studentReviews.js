@@ -74,7 +74,12 @@ router.get("/roster", async (_req, res) => {
   const [students, units] = await Promise.all([
     prisma.student.findMany({
       select: {
-        id: true, firstName: true, lastName: true, studentRef: true, email: true, initials: true, colour: true,
+        // No email. This roster is open to ANY authenticated staff member (a lecturer
+        // with no admin page), and the comment above says "no contact details" — but
+        // email was being returned, leaking every student's address to the whole staff
+        // body. The picker needs a name and reference to identify a student, not a
+        // contact detail.
+        id: true, firstName: true, lastName: true, studentRef: true, initials: true, colour: true,
         // Both routes to a course, so the app can pick the student and have their
         // course follow. Only 4 of 136 students have a cohort, so the enrolments are
         // what actually answers it for almost everyone.
