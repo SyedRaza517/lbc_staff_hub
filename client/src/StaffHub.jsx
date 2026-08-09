@@ -38,6 +38,12 @@ import useReveal from "./RevealButton";
 const NAVY = "#1a3a8f";
 const NAVY_DARK = "#14306f";
 const MAROON = "#9e1b32";
+// The brand royal blue (matches the new fanlight logo). Used for vibrant gradients
+// across the admin dashboard.
+const BLUE = "#1e40af";
+const BLUE_LT = "#3b82f6";
+// A tone's soft gradient (for icon badges, accents) and a translucent tint.
+const grad = (c) => `linear-gradient(135deg, ${c}, ${c}cc)`;
 
 // Today as YYYY-MM-DD in the college's own timezone (Europe/London), matching the
 // server's localDate(). Using the browser's UTC date instead put the client a day
@@ -674,12 +680,12 @@ function MiniStat({ label, value, tone, Icon }) {
   );
 }
 function Screen({ children }) { return <div className="p-4 fade-up">{children}</div>; }
-function EmptyState({ Icon = Inbox, title = "Nothing here yet", msg = "", className = "" }) {
+function EmptyState({ Icon = Inbox, title = "Nothing here yet", msg = "", className = "", tone = BLUE }) {
   return (
-    <div className={`flex flex-col items-center justify-center px-4 py-8 text-center ${className}`}>
-      <span className="mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-50 ring-1 ring-slate-100"><Icon size={22} className="text-slate-300" /></span>
-      <p className="text-sm font-bold text-slate-500">{title}</p>
-      {msg && <p className="mt-0.5 max-w-[220px] text-xs text-slate-400">{msg}</p>}
+    <div className={`flex flex-col items-center justify-center px-4 py-10 text-center fade-up ${className}`}>
+      <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl shadow-sm" style={{ background: tone + "12", color: tone, boxShadow: `inset 0 0 0 1px ${tone}22` }}><Icon size={26} /></span>
+      <p className="text-sm font-bold text-slate-600">{title}</p>
+      {msg && <p className="mt-1 max-w-[240px] text-xs text-slate-400">{msg}</p>}
     </div>
   );
 }
@@ -2599,7 +2605,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
         </div>
         <nav className="flex-1 space-y-1">
           {nav.map((n, i) => (
-            <button key={n.key} onClick={() => setTab(n.key)} className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all duration-200 active:scale-[0.98] slide-in ${activeKey === n.key ? "text-white shadow-md" : "text-slate-500 hover:translate-x-1 hover:bg-slate-100"}`} style={activeKey === n.key ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})`, boxShadow: "0 6px 18px -6px rgba(26,58,143,.6)", animationDelay: `${i * 35}ms` } : { animationDelay: `${i * 35}ms` }}>
+            <button key={n.key} onClick={() => setTab(n.key)} className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all duration-200 active:scale-[0.98] slide-in ${activeKey === n.key ? "text-white shadow-md" : "text-slate-500 hover:translate-x-1 hover:bg-blue-50 hover:text-blue-700"}`} style={activeKey === n.key ? { background: `linear-gradient(135deg, ${BLUE}, ${NAVY_DARK})`, boxShadow: `0 8px 20px -6px ${BLUE}99`, animationDelay: `${i * 35}ms` } : { animationDelay: `${i * 35}ms` }}>
               <n.I size={18} className="transition-transform duration-200 group-hover:scale-110" /><span className="flex-1 text-left">{n.label}</span>
               {(n.key === "requests" || n.key === "approvals") && pendingCount > 0 && <span className="pop rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-900 shadow-sm">{pendingCount}</span>}
               {n.key === "signups" && pendingSignups > 0 && <span className="pop rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-900 shadow-sm">{pendingSignups}</span>}
@@ -2615,7 +2621,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
           {/* On a phone, a way back to the staff app — admins (incl. limited admins
               who registered on the app) keep both their staff view and the console. */}
           {onExitToStaffApp && <button onClick={onExitToStaffApp} className="flex shrink-0 items-center gap-1.5 rounded-full border-2 border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 active:scale-95"><ChevronLeft size={14} /> Staff App</button>}
-          {nav.map(n => <button key={n.key} onClick={() => setTab(n.key)} className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm transition-all active:scale-95 ${activeKey === n.key ? "text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`} style={activeKey === n.key ? { background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` } : {}}><n.I size={14} /> {n.label}</button>)}
+          {nav.map(n => <button key={n.key} onClick={() => setTab(n.key)} className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm transition-all active:scale-95 ${activeKey === n.key ? "text-white" : "bg-white text-slate-500 hover:bg-blue-50 hover:text-blue-700"}`} style={activeKey === n.key ? { background: `linear-gradient(135deg, ${BLUE}, ${NAVY_DARK})`, boxShadow: `0 6px 16px -6px ${BLUE}99` } : {}}><n.I size={14} /> {n.label}</button>)}
         </div>
         {activeKey === "executive" && <ExecutiveDashboard store={store} />}
         {activeKey === "overview" && <AdminOverview store={store} setTab={setTab} />}
@@ -2894,12 +2900,35 @@ function AdminTimesheets({ store }) {
   );
 }
 
-function AdminHeader({ title, subtitle, action, Icon }) {
+// A vibrant welcome banner for the main dashboards: greeting, first name, date, and an
+// optional right-hand slot (a refresh button, a headline figure, filters…).
+function DashboardHero({ name, subtitle, right, tone = BLUE }) {
+  const greet = greetingFor();
+  const G = greet.Icon;
+  const today = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  return (
+    <div className="relative mb-5 overflow-hidden rounded-3xl p-5 text-white shadow-xl fade-up sm:p-6" style={{ background: `linear-gradient(120deg, ${tone} 0%, ${NAVY_DARK} 100%)`, boxShadow: `0 22px 44px -20px ${tone}` }}>
+      <div className="pointer-events-none absolute -right-10 -top-16 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
+      <div className="pointer-events-none absolute -bottom-24 right-28 h-56 w-56 rounded-full bg-white/5 blur-2xl" />
+      <div className="relative flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/15 ring-1 ring-white/25 backdrop-blur"><G size={24} /></span>
+          <div>
+            <p className="text-xl font-extrabold leading-tight sm:text-2xl">{greet.word}{name ? `, ${String(name).split(" ")[0]}` : ""}</p>
+            <p className="mt-0.5 text-[13px] font-medium text-white/75">{subtitle || today}</p>
+          </div>
+        </div>
+        {right && <div className="relative">{right}</div>}
+      </div>
+    </div>
+  );
+}
+function AdminHeader({ title, subtitle, action, Icon, tone = BLUE }) {
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3 fade-up">
-      <div className="flex items-start gap-3">
-        <span className="mt-1 h-9 w-1.5 shrink-0 rounded-full" style={{ background: `linear-gradient(180deg, ${NAVY}, ${MAROON})` }} />
-        {Icon && <span className="hidden h-11 w-11 items-center justify-center rounded-xl shadow-sm sm:flex" style={{ background: NAVY + "12" }}><Icon size={22} style={{ color: NAVY }} /></span>}
+      <div className="flex items-center gap-3">
+        <span className="h-10 w-1.5 shrink-0 rounded-full" style={{ background: `linear-gradient(180deg, ${tone}, ${NAVY_DARK})` }} />
+        {Icon && <span className="hidden h-12 w-12 items-center justify-center rounded-2xl text-white shadow-lg transition-transform duration-300 hover:scale-105 hover:-rotate-3 sm:flex" style={{ background: grad(tone), boxShadow: `0 10px 22px -8px ${tone}90` }}><Icon size={24} /></span>}
         <div>
           <h2 className="text-2xl font-extrabold tracking-tight" style={{ color: NAVY_DARK }}>{title}</h2>
           {subtitle && <p className="text-sm text-slate-500">{subtitle}</p>}
@@ -2909,18 +2938,26 @@ function AdminHeader({ title, subtitle, action, Icon }) {
     </div>
   );
 }
-function StatCard({ label, value, sub, Icon, tone = NAVY, delay = 0, animate }) {
+function StatCard({ label, value, sub, Icon, tone = NAVY, delay = 0, animate, trend }) {
   // Only count-up real numbers. Some cards pass a formatted string ("28d", "85%"),
   // and animating that multiplied a string by a number → NaN, which rendered
   // literally as "NaN". Strings (and non-finite numbers) now render as-is.
   const canAnimate = animate && typeof value === "number" && Number.isFinite(value);
   const av = useCountUp(canAnimate ? value : 0);
+  // Optional trend chip: { up: bool, text: "+12", tone?: "#..." }. Up is green, down rose.
+  const tc = trend ? (trend.tone || (trend.up ? "#059669" : "#e11d48")) : null;
   return (
-    <div className="hover-lift group relative overflow-hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:shadow-lg hover:ring-slate-300/80 fade-up" style={{ animationDelay: `${delay}ms` }}>
-      <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full opacity-50 transition-transform duration-500 group-hover:scale-150" style={{ background: tone + "0d" }} />
+    <div className="hover-lift group relative overflow-hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:ring-slate-300/80 fade-up" style={{ animationDelay: `${delay}ms` }}>
+      <div className="absolute inset-x-0 top-0 h-1" style={{ background: grad(tone) }} />
+      <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full opacity-60 transition-transform duration-500 group-hover:scale-150" style={{ background: tone + "12" }} />
       <div className="relative flex items-start justify-between">
-        <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p><p className="mt-1 text-3xl font-extrabold tabular-nums" style={{ color: tone }}>{canAnimate ? av : value}</p>{sub && <p className="mt-0.5 text-xs text-slate-400">{sub}</p>}</div>
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl shadow-sm transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6" style={{ background: tone + "14" }}><Icon size={22} style={{ color: tone }} /></span>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+          <p className="mt-1 text-3xl font-extrabold tabular-nums" style={{ color: tone }}>{canAnimate ? av : value}</p>
+          {sub && <p className="mt-0.5 text-xs text-slate-400">{sub}</p>}
+          {trend && <span className="mt-1.5 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-extrabold" style={{ background: tc + "1a", color: tc }}>{trend.up ? "▲" : "▼"} {trend.text}</span>}
+        </div>
+        <span className="flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow-md transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6" style={{ background: grad(tone), boxShadow: `0 8px 18px -6px ${tone}80` }}><Icon size={22} /></span>
       </div>
     </div>
   );
@@ -2939,16 +2976,16 @@ function AdminOverview({ store, setTab }) {
   const attendancePct = total > 0 ? Math.round((present / total) * 100) : 0;
   const avgIn = avgCheckInTime(inToday) || "—";
   const approvedThisPeriod = store.leave.filter(l => l.status === "approved").length;
-  const greet = greetingFor();
-  const Greet = greet.Icon;
+  // Day-over-day change in how many were present, for the trend chip.
+  const presentDelta = trend.length >= 2 ? present - trend[trend.length - 2].present : 0;
   return (
     <>
-      <AdminHeader title="Overview" subtitle={`${greet.word} · ${fmtDay(today)} · live across all departments`} Icon={LayoutDashboard} />
+      <DashboardHero name={store.currentUser?.name} subtitle={`${fmtDay(today)} · live across all departments`} />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Present today" value={present} sub={`of ${total} staff`} Icon={CheckCircle2} tone="#059669" delay={0} animate />
-        <StatCard label="On leave" value={onLeave.length} sub="approved absences" Icon={Plane} tone={MAROON} delay={60} animate />
+        <StatCard label="Present today" value={present} sub={`of ${total} staff`} Icon={CheckCircle2} tone="#059669" delay={0} animate trend={{ up: presentDelta >= 0, text: `${presentDelta >= 0 ? "+" : ""}${presentDelta} vs yesterday` }} />
+        <StatCard label="On leave" value={onLeave.length} sub="approved absences" Icon={Plane} tone="#e11d48" delay={60} animate />
         <StatCard label="Pending requests" value={pending.length} sub="awaiting approval" Icon={Inbox} tone="#b45309" delay={120} animate />
-        <StatCard label="Total staff" value={total} sub="active members" Icon={Users} tone={NAVY} delay={180} animate />
+        <StatCard label="Total staff" value={total} sub="active members" Icon={Users} tone={BLUE} delay={180} animate />
       </div>
       <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Attendance" value={attendancePct} sub="of staff present" Icon={TrendingUp} tone="#0d7a5f" delay={0} />
