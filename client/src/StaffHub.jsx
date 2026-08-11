@@ -2120,8 +2120,8 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
 /* ============================================================ ADMIN DASHBOARD ============================================================ */
 // The assignable admin pages, in nav order. "access" is intentionally excluded —
 // it is Super-Admin-only and never granted. Keep in sync with server validate.js.
-const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "timetable", "passwords", "settings"];
-const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentreviews: "Student Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", timetable: "Timetable", passwords: "Reset Passwords", settings: "Settings" };
+const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "timetable", "admissions", "passwords", "settings"];
+const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentreviews: "Student Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", timetable: "Timetable", admissions: "Admissions", passwords: "Reset Passwords", settings: "Settings" };
 
 // Can this user see/use a given admin page? The Super Admin gets everything,
 // including the Super-Admin-only Access tab. A page-scoped admin gets only their
@@ -2557,6 +2557,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
     { key: "summaries", label: "Daily Summaries", I: UserPlus },
     { key: "registers", label: "Registers — HND", I: ClipboardList },
     { key: "students", label: "Students", I: GraduationCap },
+    { key: "admissions", label: "Admissions", I: ClipboardList },
     { key: "assessments", label: "Assessments", I: Award },
     { key: "pat", label: "PAT", I: MessageSquare },
     { key: "staffreviews", label: "Staff Reviews", I: ClipboardList },
@@ -2645,6 +2646,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
         {activeKey === "staff" && <AdminStaff store={store} />}
         {activeKey === "timesheets" && <AdminTimesheets store={store} />}
         {activeKey === "timetable" && <AdminTimetable store={store} />}
+        {activeKey === "admissions" && <AdminAdmissions store={store} />}
         {activeKey === "settings" && <AdminSettings store={store} />}
         {activeKey === "access" && <AdminAccess store={store} />}
       </main>
@@ -10041,6 +10043,309 @@ const TT_DAY_SHORT = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 // The period label the college's timetable uses, derived from the start hour.
 const periodOf = (start) => { const h = Number(String(start).slice(0, 2)); return h < 12 ? "Morning" : h < 17 ? "Afternoon" : "Evening"; };
 const fmtSlotTime = (s) => `${periodOf(s.start)} ${s.start} – ${s.end}`;
+
+/* ============================================================ ADMISSIONS ============================================================ */
+// The college's HND application form, rebuilt as one long entry form an admin fills in.
+// The sections and field order mirror the paper/online form so an admin can copy it
+// top-to-bottom. Every field is stored as free text on the Admission model; `type`
+// only changes the input widget (a date picker, an email keyboard, a Yes/No dropdown).
+// `span: 2` makes a field take the full width of the two-column grid (used for the long
+// "if yes, give details" answers). Adding a question here + on the Prisma model is all
+// it takes to extend the form — the server copies fields off a fixed whitelist.
+const YES_NO = ["Yes", "No"];
+const ADMISSION_SECTIONS = [
+  { title: "Course details", fields: [
+    { key: "course", label: "Course applying for", type: "text", placeholder: "e.g. HND Business" },
+    { key: "foundVia", label: "How did you hear about us?", type: "text" },
+    { key: "classOption", label: "Class option", type: "text", placeholder: "e.g. Weekday / Weekend" },
+    { key: "firstName", label: "First name", type: "text" },
+    { key: "middleName", label: "Middle name", type: "text" },
+    { key: "surname", label: "Surname", type: "text" },
+    { key: "dob", label: "Date of birth", type: "date" },
+    { key: "gender", label: "Gender", type: "select", options: ["Male", "Female", "Other", "Prefer not to say"] },
+    { key: "email", label: "Email address", type: "email" },
+    { key: "phone", label: "Phone number", type: "tel" },
+    { key: "countryOfBirth", label: "Country of birth", type: "text" },
+    { key: "countryOfCitizenship", label: "Country of citizenship", type: "text" },
+    { key: "idDocNo", label: "ID document number (passport / BRP)", type: "text" },
+    { key: "idDateOfIssue", label: "ID date of issue", type: "date" },
+    { key: "idDateOfExpiry", label: "ID date of expiry", type: "date" },
+    { key: "idIssuingCountry", label: "ID issuing country", type: "text" },
+    { key: "niNumber", label: "National Insurance number", type: "text" },
+  ] },
+  { title: "Home address", fields: [
+    { key: "houseNo", label: "House number / name", type: "text" },
+    { key: "street", label: "Street", type: "text" },
+    { key: "city", label: "City / town", type: "text" },
+    { key: "postCode", label: "Postcode", type: "text" },
+    { key: "mailingAddress", label: "Mailing address (if different)", type: "textarea", span: 2 },
+    { key: "emergencyName", label: "Emergency contact — name", type: "text" },
+    { key: "emergencyPhone", label: "Emergency contact — phone", type: "tel" },
+    { key: "emergencyRelationship", label: "Emergency contact — relationship", type: "text" },
+    { key: "emergencyEmail", label: "Emergency contact — email", type: "email" },
+  ] },
+  { title: "Criminal record declaration", fields: [
+    { key: "criminalConviction", label: "Do you have any criminal convictions?", type: "select", options: YES_NO },
+    { key: "criminalDetails", label: "If yes, please give details", type: "textarea", span: 2 },
+  ] },
+  { title: "Disabilities & medical", fields: [
+    { key: "medicalConditions", label: "Do you have any medical conditions?", type: "select", options: YES_NO },
+    { key: "medicalDetails", label: "If yes, please give details", type: "textarea", span: 2 },
+    { key: "learningDifficulty", label: "Do you have a learning difficulty / disability?", type: "select", options: YES_NO },
+    { key: "learningDetails", label: "If yes, please give details", type: "textarea", span: 2 },
+  ] },
+  { title: "Education & employment", fields: [
+    { key: "englishFirstLanguage", label: "Is English your first language?", type: "select", options: YES_NO },
+    { key: "englishProof", label: "Proof of English proficiency", type: "text" },
+    { key: "englishProofOther", label: "Other English proof (specify)", type: "text" },
+    { key: "highestEducation", label: "Highest level of education", type: "text" },
+    { key: "overseasQualification", label: "Do you have overseas qualifications?", type: "select", options: YES_NO },
+    { key: "appliedElsewhere", label: "Have you applied elsewhere?", type: "select", options: YES_NO },
+    { key: "previousStudentFinance", label: "Have you received student finance before?", type: "select", options: YES_NO },
+    { key: "previousFinanceDetails", label: "If yes, please give details", type: "textarea", span: 2 },
+    { key: "fundingIntent", label: "How do you intend to fund your studies?", type: "text" },
+    { key: "fundingOther", label: "Other funding (specify)", type: "text" },
+    { key: "employmentStatus", label: "Employment status", type: "text" },
+    { key: "employmentDetails", label: "Employment details", type: "textarea", span: 2 },
+    { key: "jobTitle", label: "Job title", type: "text" },
+    { key: "companyName", label: "Company name", type: "text" },
+    { key: "dateStarted", label: "Date started", type: "date" },
+    { key: "workedPast", label: "Have you worked in the past?", type: "select", options: YES_NO },
+    { key: "workedPastDetails", label: "If yes, please give details", type: "textarea", span: 2 },
+  ] },
+  { title: "Reference 1", fields: [
+    { key: "ref1Name", label: "Name", type: "text" },
+    { key: "ref1Contact", label: "Contact number", type: "tel" },
+    { key: "ref1Email", label: "Email", type: "email" },
+    { key: "ref1Relationship", label: "Relationship to you", type: "text" },
+  ] },
+  { title: "Reference 2", fields: [
+    { key: "ref2Name", label: "Name", type: "text" },
+    { key: "ref2Role", label: "Role / job title", type: "text" },
+    { key: "ref2Organisation", label: "Organisation", type: "text" },
+    { key: "ref2Relationship", label: "Relationship to you", type: "text" },
+  ] },
+  { title: "Equality, diversity & inclusion", fields: [
+    { key: "ethnicity", label: "Ethnicity", type: "text" },
+    { key: "religion", label: "Religion", type: "text" },
+  ] },
+  { title: "Declaration", fields: [
+    { key: "signature", label: "Signature (full name)", type: "text" },
+    { key: "declarationDate", label: "Declaration date", type: "date" },
+  ] },
+];
+// Every field key, flattened — used to build a blank form and to map a saved row back.
+const ADMISSION_KEYS = ADMISSION_SECTIONS.flatMap(s => s.fields.map(f => f.key));
+const blankAdmission = () => Object.fromEntries(ADMISSION_KEYS.map(k => [k, ""]));
+// A saved row (nulls) → a form (empty strings), so inputs stay controlled.
+const admissionForm = (r) => Object.fromEntries(ADMISSION_KEYS.map(k => [k, r[k] ?? ""]));
+const admissionName = (r) => `${r.firstName || ""} ${r.surname || ""}`.trim();
+
+function AdmissionField({ f, value, onChange }) {
+  const common = { value, onChange: (e) => onChange(f.key, e.target.value), className: inputCls };
+  let control;
+  if (f.type === "select") {
+    control = <select {...common}><option value="">— select —</option>{f.options.map(o => <option key={o} value={o}>{o}</option>)}</select>;
+  } else if (f.type === "textarea") {
+    control = <textarea rows={3} {...common} className={`${inputCls} resize-y`} placeholder={f.placeholder || ""} />;
+  } else {
+    control = <input type={f.type || "text"} {...common} placeholder={f.placeholder || ""} />;
+  }
+  return <div className={f.span === 2 ? "sm:col-span-2" : ""}><Field label={f.label}>{control}</Field></div>;
+}
+
+// Read-only view of one application — the same sections, but only the answered fields.
+function AdmissionDetail({ r }) {
+  return (
+    <div className="space-y-4">
+      {ADMISSION_SECTIONS.map(sec => {
+        const answered = sec.fields.filter(f => (r[f.key] ?? "") !== "");
+        if (!answered.length) return null;
+        return (
+          <div key={sec.title}>
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-wide" style={{ color: NAVY }}>{sec.title}</p>
+            <dl className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+              {answered.map(f => (
+                <div key={f.key} className={f.type === "textarea" ? "sm:col-span-2" : ""}>
+                  <dt className="text-[11px] font-semibold text-slate-400">{f.label}</dt>
+                  <dd className="text-sm text-slate-700 whitespace-pre-wrap break-words">{f.type === "date" ? fmtDate(r[f.key]) : r[f.key]}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AdminAdmissions({ store }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [query, setQuery] = useState("");
+  const [modal, setModal] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(blankAdmission);
+  const [formErr, setFormErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [viewing, setViewing] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr("");
+    try { setRows(await api.admissions()); }
+    catch (e) { setErr(e.message || "Could not load admissions"); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const openAdd = () => { setEditing(null); setForm(blankAdmission()); setFormErr(""); setModal(true); };
+  const openEdit = (r) => { setEditing(r); setForm(admissionForm(r)); setFormErr(""); setModal(true); };
+
+  const save = async () => {
+    if (!form.firstName.trim() && !form.surname.trim()) { setFormErr("Please enter at least a first name or surname."); return; }
+    setBusy(true); setFormErr("");
+    try {
+      if (editing) await api.updateAdmission(editing.id, form);
+      else await api.addAdmission(form);
+      store.notify(editing ? "Application updated" : "Application saved");
+      setModal(false);
+      await load();
+    } catch (e) { setFormErr(e.message || "Could not save the application"); }
+    setBusy(false);
+  };
+
+  const confirmRemove = async () => {
+    setBusy(true);
+    try { await api.removeAdmission(deleteTarget.id); setDeleteTarget(null); store.notify("Application deleted", "error"); await load(); }
+    catch (e) { store.notify(e.message || "Could not delete the application", "error"); }
+    setBusy(false);
+  };
+
+  const ql = query.trim().toLowerCase();
+  const list = rows.filter(r => {
+    if (!ql) return true;
+    return admissionName(r).toLowerCase().includes(ql)
+      || (r.email || "").toLowerCase().includes(ql)
+      || (r.phone || "").toLowerCase().includes(ql)
+      || (r.course || "").toLowerCase().includes(ql);
+  });
+  const paged = usePaged(list, 10, ql);
+
+  const exportCsv = () => {
+    if (!list.length) { store.notify("Nothing to export in the current view", "error"); return; }
+    downloadCSV("admissions.csv",
+      [{ key: "applied", label: "Applied" }, ...ADMISSION_SECTIONS.flatMap(s => s.fields.map(f => ({ key: f.key, label: f.label })))],
+      list.map(r => ({ applied: fmtDate(String(r.createdAt).slice(0, 10)), ...Object.fromEntries(ADMISSION_KEYS.map(k => [k, r[k] || ""])) })));
+    store.notify(`Exported ${list.length} application${list.length === 1 ? "" : "s"}`);
+  };
+
+  return (
+    <>
+      <AdminHeader title="Admissions" subtitle="HND application entries — create, review, edit and remove"
+        Icon={ClipboardList}
+        action={<div className="flex flex-wrap items-center gap-2"><ExportBtn onClick={exportCsv} /><PrimaryBtn onClick={openAdd}><Plus size={16} /> Create new entry</PrimaryBtn></div>} />
+
+      {err && <div className="mb-4 flex items-start gap-2 rounded-xl bg-rose-50 px-3.5 py-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={16} className="mt-px shrink-0" />{err}</div>}
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+          <Search size={15} className="text-slate-400" />
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, email, phone or course…" className="w-60 bg-transparent text-sm outline-none" />
+        </div>
+      </div>
+
+      {loading ? <div className="skeleton h-64 rounded-2xl" /> : (
+        <>
+          <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 fade-up">
+            <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
+              <table className="w-full min-w-[820px] text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
+                  <tr>
+                    <th className="px-5 py-3">Applicant</th><th className="px-5 py-3">Course</th>
+                    <th className="px-5 py-3">Email</th><th className="px-5 py-3 whitespace-nowrap">Phone</th>
+                    <th className="px-5 py-3 whitespace-nowrap">Applied</th><th className="px-5 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paged.slice.map(r => {
+                    const name = admissionName(r) || "—";
+                    const initials = ((r.firstName || " ")[0] + (r.surname || " ")[0]).trim().toUpperCase() || "?";
+                    return (
+                      <tr key={r.id} onClick={() => setViewing(r)} className="cursor-pointer border-t border-slate-100 transition-colors duration-150 hover:bg-blue-50/40">
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-sm" style={{ background: NAVY }}>{initials}</span>
+                            <p className="font-semibold text-slate-700">{name}</p>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3 text-slate-500">{r.course || <span className="text-slate-300">—</span>}</td>
+                        <td className="px-5 py-3 text-slate-500">{r.email || <span className="text-slate-300">—</span>}</td>
+                        <td className="px-5 py-3 whitespace-nowrap text-slate-500">{r.phone || <span className="text-slate-300">—</span>}</td>
+                        <td className="px-5 py-3 whitespace-nowrap text-slate-500">{fmtDate(String(r.createdAt).slice(0, 10))}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-1 whitespace-nowrap">
+                            <button onClick={(e) => { e.stopPropagation(); setViewing(r); }} title="View" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><FileText size={15} /></button>
+                            <button onClick={(e) => { e.stopPropagation(); openEdit(r); }} title="Edit" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button>
+                            <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }} title="Delete" className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {paged.slice.length === 0 && (
+                    <tr><td colSpan={6} className="px-5 py-12">
+                      <EmptyState Icon={ClipboardList} title={rows.length ? "No applications match" : "No applications yet"}
+                        msg={rows.length ? "Try a different search." : "Press “Create new entry” to add the first application."} />
+                    </td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
+        </>
+      )}
+
+      {/* Create / edit — the full application form, grouped into the same sections. */}
+      <Modal open={modal} onClose={() => !busy && setModal(false)} title={editing ? "Edit application" : "New application"} width={760}>
+        <div className="space-y-5">
+          {ADMISSION_SECTIONS.map(sec => (
+            <div key={sec.title}>
+              <div className="mb-2.5 flex items-center gap-2">
+                <span className="h-4 w-1 rounded-full" style={{ background: `linear-gradient(${NAVY}, ${MAROON})` }} />
+                <p className="text-xs font-bold uppercase tracking-wide" style={{ color: NAVY_DARK }}>{sec.title}</p>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {sec.fields.map(f => <AdmissionField key={f.key} f={f} value={form[f.key]} onChange={set} />)}
+              </div>
+            </div>
+          ))}
+          {formErr && <p className="flex items-start gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={13} className="mt-px shrink-0" />{formErr}</p>}
+          <PrimaryBtn onClick={save} disabled={busy} className="w-full">{busy ? <><Loader size={16} /> Saving…</> : <><Save size={16} /> {editing ? "Save changes" : "Save application"}</>}</PrimaryBtn>
+        </div>
+      </Modal>
+
+      {/* View */}
+      <Modal open={!!viewing} onClose={() => setViewing(null)} title={viewing ? (admissionName(viewing) || "Application") : "Application"} width={720}>
+        {viewing && <AdmissionDetail r={viewing} />}
+      </Modal>
+
+      {/* Delete confirmation — asked before any application is removed. */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete this application?"
+        message={`${deleteTarget ? (admissionName(deleteTarget) || "This applicant") : "This applicant"}'s application will be removed permanently. This cannot be undone.`}
+        confirmLabel={busy ? "Deleting…" : "Delete application"}
+        danger
+        onConfirm={confirmRemove}
+        onCancel={() => !busy && setDeleteTarget(null)}
+      />
+    </>
+  );
+}
 
 function AdminTimetable({ store }) {
   const { notify } = store;

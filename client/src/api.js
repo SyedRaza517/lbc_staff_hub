@@ -156,6 +156,12 @@ export const api = {
   updateTimetableSlot: (id, data) => request(`/timetable/slots/${id}`, { method: "PUT", body: data }),
   removeTimetableSlot: (id) => request(`/timetable/slots/${id}`, { method: "DELETE" }),
 
+  // admissions (admin) — HND application entries: create, list, edit, delete
+  admissions: () => request("/admissions"),
+  addAdmission: (data) => request("/admissions", { method: "POST", body: data }),
+  updateAdmission: (id, data) => request(`/admissions/${id}`, { method: "PUT", body: data }),
+  removeAdmission: (id) => request(`/admissions/${id}`, { method: "DELETE" }),
+
   // admin: student queries tab
   listStudentQueries: (status) => request(`/student-queries${status ? `?status=${status}` : ""}`),
   respondStudentQuery: (id, response) => request(`/student-queries/${id}/respond`, { method: "PUT", body: { response } }),

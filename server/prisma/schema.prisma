@@ -744,3 +744,84 @@ model StudentReview {
   @@index([followUp])
   @@index([date])
 }
+
+// A submitted HND application (admissions). One row per applicant, entered by an admin
+// from the college's application form. All fields are free text (dates kept as strings)
+// so the form can evolve without migrations; the admin fills what they have.
+model Admission {
+  id                     String   @id @default(cuid())
+  // Course details
+  course                 String?
+  foundVia               String?
+  classOption            String?
+  firstName              String?
+  middleName             String?
+  surname                String?
+  dob                    String?
+  gender                 String?
+  email                  String?
+  phone                  String?
+  countryOfBirth         String?
+  countryOfCitizenship   String?
+  idDocNo                String?
+  idDateOfIssue          String?
+  idDateOfExpiry         String?
+  idIssuingCountry       String?
+  niNumber               String?
+  // Home address
+  houseNo                String?
+  street                 String?
+  city                   String?
+  postCode               String?
+  mailingAddress         String?
+  emergencyName          String?
+  emergencyPhone         String?
+  emergencyRelationship  String?
+  emergencyEmail         String?
+  // Criminal record declaration
+  criminalConviction     String?
+  criminalDetails        String?
+  // Disabilities
+  medicalConditions      String?
+  medicalDetails         String?
+  learningDifficulty     String?
+  learningDetails        String?
+  // Education & employment
+  englishFirstLanguage   String?
+  englishProof           String?
+  englishProofOther      String?
+  highestEducation       String?
+  overseasQualification  String?
+  appliedElsewhere       String?
+  previousStudentFinance String?
+  previousFinanceDetails String?
+  fundingIntent          String?
+  fundingOther           String?
+  employmentStatus       String?
+  employmentDetails      String?
+  jobTitle               String?
+  companyName            String?
+  dateStarted            String?
+  workedPast             String?
+  workedPastDetails      String?
+  // Reference 1
+  ref1Name               String?
+  ref1Contact            String?
+  ref1Email              String?
+  ref1Relationship       String?
+  // Reference 2
+  ref2Name               String?
+  ref2Role               String?
+  ref2Organisation       String?
+  ref2Relationship       String?
+  // EDI
+  ethnicity              String?
+  religion               String?
+  // Declaration
+  signature              String?
+  declarationDate        String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([surname, firstName])
+}
