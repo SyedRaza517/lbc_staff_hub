@@ -10216,6 +10216,9 @@ function AdminAdmissions({ store }) {
   const [viewing, setViewing] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [missing, setMissing] = useState(() => new Set()); // required keys left blank on last save attempt
+  const [selected, setSelected] = useState(() => new Set()); // ids ticked for bulk delete / export
+  const [bulkDelete, setBulkDelete] = useState(false);
+  const selectAllRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -10268,6 +10271,35 @@ function AdminAdmissions({ store }) {
       || (r.course || "").toLowerCase().includes(ql);
   });
   const paged = usePaged(list, 10, ql);
+
+  // ---- selection (checkboxes) ----
+  // "Select all" spans every application in the current (filtered) list, not just the
+  // page in view, so one tick can select them all for a bulk delete.
+  const allSelected = list.length > 0 && list.every(r => selected.has(r.id));
+  const someSelected = !allSelected && list.some(r => selected.has(r.id));
+  useEffect(() => { if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected; }, [someSelected]);
+  const toggleAll = () => setSelected(prev => { const n = new Set(prev); list.forEach(r => allSelected ? n.delete(r.id) : n.add(r.id)); return n; });
+  const toggleOne = (id) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const clearSelection = () => setSelected(new Set());
+  const selectedRows = rows.filter(r => selected.has(r.id));
+
+  const exportSelectedCsv = () => {
+    if (!selectedRows.length) return;
+    downloadCSV("admissions-selected.csv",
+      [{ key: "applied", label: "Applied" }, ...ADMISSION_SECTIONS.flatMap(s => s.fields.map(f => ({ key: f.key, label: f.label })))],
+      selectedRows.map(r => ({ applied: fmtDate(String(r.createdAt).slice(0, 10)), ...Object.fromEntries(ADMISSION_KEYS.map(k => [k, r[k] || ""])) })));
+    store.notify(`Exported ${selectedRows.length} application${selectedRows.length === 1 ? "" : "s"}`);
+  };
+
+  const confirmBulkRemove = async () => {
+    setBusy(true);
+    try {
+      await Promise.all(selectedRows.map(r => api.removeAdmission(r.id)));
+      store.notify(`Deleted ${selectedRows.length} application${selectedRows.length === 1 ? "" : "s"}`, "error");
+      setBulkDelete(false); clearSelection(); await load();
+    } catch (e) { store.notify(e.message || "Could not delete the selected applications", "error"); }
+    setBusy(false);
+  };
 
   const exportCsv = () => {
     if (!list.length) { store.notify("Nothing to export in the current view", "error"); return; }
@@ -10349,6 +10381,18 @@ function AdminAdmissions({ store }) {
         </div>
       </div>
 
+      {/* Bulk action bar — shown only while one or more applications are ticked. */}
+      {selected.size > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-blue-50 px-3.5 py-2.5 ring-1 ring-blue-100 fade-up">
+          <span className="text-sm font-bold text-blue-800">{selected.size} selected</span>
+          <button onClick={clearSelection} className="text-xs font-semibold text-blue-600 hover:underline">Clear</button>
+          <div className="ml-auto flex items-center gap-2">
+            <button onClick={exportSelectedCsv} className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><Download size={14} /> Export selected</button>
+            <button onClick={() => setBulkDelete(true)} className="press flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold text-white transition hover:opacity-95" style={{ background: MAROON }}><Trash2 size={14} /> Delete selected</button>
+          </div>
+        </div>
+      )}
+
       {loading ? <div className="skeleton h-64 rounded-2xl" /> : (
         <>
           <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 fade-up">
@@ -10356,6 +10400,7 @@ function AdminAdmissions({ store }) {
               <table className="w-full min-w-[820px] text-sm">
                 <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
                   <tr>
+                    <th className="w-10 px-4 py-3"><input ref={selectAllRef} type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all applications" className="h-4 w-4 cursor-pointer align-middle accent-blue-600" /></th>
                     <th className="px-5 py-3">Applicant</th><th className="px-5 py-3">Course</th>
                     <th className="px-5 py-3">Email</th><th className="px-5 py-3 whitespace-nowrap">Phone</th>
                     <th className="px-5 py-3 whitespace-nowrap">Applied</th><th className="px-5 py-3 text-right">Actions</th>
@@ -10366,7 +10411,10 @@ function AdminAdmissions({ store }) {
                     const name = admissionName(r) || "—";
                     const initials = ((r.firstName || " ")[0] + (r.surname || " ")[0]).trim().toUpperCase() || "?";
                     return (
-                      <tr key={r.id} onClick={() => setViewing(r)} className="cursor-pointer border-t border-slate-100 transition-colors duration-150 hover:bg-blue-50/40">
+                      <tr key={r.id} onClick={() => setViewing(r)} className={`cursor-pointer border-t border-slate-100 transition-colors duration-150 hover:bg-blue-50/40 ${selected.has(r.id) ? "bg-blue-50/60" : ""}`}>
+                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                          <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} aria-label={`Select ${name}`} className="h-4 w-4 cursor-pointer align-middle accent-blue-600" />
+                        </td>
                         <td className="px-5 py-3">
                           <div className="flex items-center gap-2.5">
                             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-sm" style={{ background: NAVY }}>{initials}</span>
@@ -10388,7 +10436,7 @@ function AdminAdmissions({ store }) {
                     );
                   })}
                   {paged.slice.length === 0 && (
-                    <tr><td colSpan={6} className="px-5 py-12">
+                    <tr><td colSpan={7} className="px-5 py-12">
                       <EmptyState Icon={ClipboardList} title={rows.length ? "No applications match" : "No applications yet"}
                         msg={rows.length ? "Try a different search." : "Press “Create new entry” to add the first application."} />
                     </td></tr>
@@ -10433,6 +10481,17 @@ function AdminAdmissions({ store }) {
           </>
         )}
       </Modal>
+
+      {/* Bulk delete confirmation — for the ticked applications. */}
+      <ConfirmDialog
+        open={bulkDelete}
+        title={`Delete ${selected.size} application${selected.size === 1 ? "" : "s"}?`}
+        message={`${selected.size} selected application${selected.size === 1 ? "" : "s"} will be removed permanently. This cannot be undone.`}
+        confirmLabel={busy ? "Deleting…" : `Delete ${selected.size}`}
+        danger
+        onConfirm={confirmBulkRemove}
+        onCancel={() => !busy && setBulkDelete(false)}
+      />
 
       {/* Delete confirmation — asked before any application is removed. */}
       <ConfirmDialog
