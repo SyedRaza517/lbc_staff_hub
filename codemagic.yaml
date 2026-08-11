@@ -22,8 +22,8 @@ workflows:
     max_build_duration: 60
     integrations:
       # Must match the App Store Connect integration name in Codemagic → Teams →
-      # Integrations exactly. Confirmed set up under this name.
-      app_store_connect: CodemagicAppStoreKey
+      # Integrations exactly (the label you give the key when you connect it there).
+      app_store_connect: Codemagic-Admin
     environment:
       # Codemagic-managed signing. This replaces a hand-rolled
       # `fetch-signing-files --create`, which could never have worked:
