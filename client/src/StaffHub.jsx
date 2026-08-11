@@ -10053,87 +10053,102 @@ const fmtSlotTime = (s) => `${periodOf(s.start)} ${s.start} – ${s.end}`;
 // "if yes, give details" answers). Adding a question here + on the Prisma model is all
 // it takes to extend the form — the server copies fields off a fixed whitelist.
 const YES_NO = ["Yes", "No"];
+// Transcribed verbatim from the college's "London Brookes College HND Application Form"
+// (Microsoft Forms, 61 questions across 9 pages). Question text, option lists, required
+// flags and the page/section help notes match the original one-for-one so an admin can
+// copy a paper/online application straight down the screen. Fields expecting "N/A" as an
+// answer stay as text (a date picker can't hold "N/A").
 const ADMISSION_SECTIONS = [
-  { title: "Course details", fields: [
-    { key: "course", label: "Course applying for", type: "text", placeholder: "e.g. HND Business" },
-    { key: "foundVia", label: "How did you hear about us?", type: "text" },
-    { key: "classOption", label: "Class option", type: "text", placeholder: "e.g. Weekday / Weekend" },
-    { key: "firstName", label: "First name", type: "text" },
-    { key: "middleName", label: "Middle name", type: "text" },
-    { key: "surname", label: "Surname", type: "text" },
-    { key: "dob", label: "Date of birth", type: "date" },
-    { key: "gender", label: "Gender", type: "select", options: ["Male", "Female", "Other", "Prefer not to say"] },
-    { key: "email", label: "Email address", type: "email" },
-    { key: "phone", label: "Phone number", type: "tel" },
-    { key: "countryOfBirth", label: "Country of birth", type: "text" },
-    { key: "countryOfCitizenship", label: "Country of citizenship", type: "text" },
-    { key: "idDocNo", label: "ID document number (passport / BRP)", type: "text" },
-    { key: "idDateOfIssue", label: "ID date of issue", type: "date" },
-    { key: "idDateOfExpiry", label: "ID date of expiry", type: "date" },
-    { key: "idIssuingCountry", label: "ID issuing country", type: "text" },
-    { key: "niNumber", label: "National Insurance number", type: "text" },
+  { title: "Course Details", fields: [
+    { key: "course", label: "Which course are you applying for", type: "select", required: true, options: ["HND - Business", "HND - Sustainable Business Management", "HND - Leadership and Management"] },
+    { key: "foundVia", label: "How did you find out about London Brookes College?", type: "select", required: true, options: ["College Website/Social Media", "Agent", "Family Member", "Friend", "Other"] },
+    { key: "classOption", label: "Select the class option you would prefer:", type: "select", hint: "You are required to complete 12hrs of onsite study.", options: ["Two days per week - 10 a.m.-5 p.m (12hrs)", "Two evenings online - 6 p.m.-9 p.m. (6hrs) plus One day In-Campus 10 a.m. - 5 p.m. (6hrs)"] },
+    { key: "firstName", label: "First Name", type: "text", required: true },
+    { key: "middleName", label: "Middle Name (if any)", type: "text" },
+    { key: "surname", label: "Surname", type: "text", required: true },
+    { key: "dob", label: "Date of Birth", type: "date", required: true },
+    { key: "gender", label: "Gender", type: "select", required: true, options: ["Woman", "Man", "Non-binary", "Prefer not to say"] },
+    { key: "email", label: "Email Address", type: "email", required: true },
+    { key: "phone", label: "Primary telephone/Mobile Phone", type: "tel", required: true },
+    { key: "countryOfBirth", label: "Country of Birth", type: "text", required: true },
+    { key: "countryOfCitizenship", label: "Country of citizenship", type: "text", required: true },
+    { key: "idDocNo", label: "ID Document (Passport/ID/Driving Licence Etc.) No.", type: "text", required: true },
+    { key: "idDateOfIssue", label: "Date of Issue", type: "date", required: true },
+    { key: "idDateOfExpiry", label: "Date of Expiry", type: "date", required: true },
+    { key: "idIssuingCountry", label: "ID issuing country", type: "text", required: true },
+    { key: "niNumber", label: "National Insurance Number (NI Number) (if not held, explain the reason)", type: "text", required: true, span: 2 },
   ] },
-  { title: "Home address", fields: [
-    { key: "houseNo", label: "House number / name", type: "text" },
-    { key: "street", label: "Street", type: "text" },
-    { key: "city", label: "City / town", type: "text" },
-    { key: "postCode", label: "Postcode", type: "text" },
-    { key: "mailingAddress", label: "Mailing address (if different)", type: "textarea", span: 2 },
-    { key: "emergencyName", label: "Emergency contact — name", type: "text" },
-    { key: "emergencyPhone", label: "Emergency contact — phone", type: "tel" },
-    { key: "emergencyRelationship", label: "Emergency contact — relationship", type: "text" },
-    { key: "emergencyEmail", label: "Emergency contact — email", type: "email" },
+  { title: "Home Address", fields: [
+    { key: "houseNo", label: "House/Flat No", type: "text", required: true },
+    { key: "street", label: "Street", type: "text", required: true },
+    { key: "city", label: "City", type: "text", required: true },
+    { key: "postCode", label: "Post Code", type: "text", required: true },
+    { key: "mailingAddress", label: "Mailing Address (if different from Home address)", type: "textarea", span: 2 },
+    { key: "emergencyName", label: "Emergency Contact Name", type: "text", required: true },
+    { key: "emergencyPhone", label: "Emergency Contact Phone/Mobile Number", type: "tel", required: true },
+    { key: "emergencyRelationship", label: "Emergency Contact Relationship", type: "text", required: true },
+    { key: "emergencyEmail", label: "Emergency Contact Email Address", type: "email", required: true },
   ] },
-  { title: "Criminal record declaration", fields: [
-    { key: "criminalConviction", label: "Do you have any criminal convictions?", type: "select", options: YES_NO },
-    { key: "criminalDetails", label: "If yes, please give details", type: "textarea", span: 2 },
+  { title: "Declaration of a criminal record rehabilitation of offender's acts.",
+    note: "You are required to state whether you have any criminal convictions, excluding spent sentences (as defined by the Rehabilitation of Offenders Act 1974).",
+    fields: [
+    { key: "criminalConviction", label: "Have you ever had a criminal conviction?", type: "select", required: true, options: YES_NO },
+    { key: "criminalDetails", label: "If yes, please provide further details, including date(s), nature of conviction and punishment imposed. If no, then please write N/A.", type: "textarea", required: true, span: 2 },
   ] },
-  { title: "Disabilities & medical", fields: [
-    { key: "medicalConditions", label: "Do you have any medical conditions?", type: "select", options: YES_NO },
-    { key: "medicalDetails", label: "If yes, please give details", type: "textarea", span: 2 },
-    { key: "learningDifficulty", label: "Do you have a learning difficulty / disability?", type: "select", options: YES_NO },
-    { key: "learningDetails", label: "If yes, please give details", type: "textarea", span: 2 },
+  { title: "Disabilities",
+    note: "The information you provide will be kept confidential and used to support our equal opportunities monitoring, routine academic and administration processes. It may be shared with statutory bodies such as the Higher Education Statistics Agency and the Office for Students in line with data protection laws. London Brookes College is committed to ensuring that every student is as comfortable as possible during their time with us.",
+    fields: [
+    { key: "medicalConditions", label: "Do you have any medical conditions that may require special adjustments or arrangements?", type: "select", required: true, options: YES_NO },
+    { key: "medicalDetails", label: "If yes, please describe your condition(s) and adjustments/arrangements that London Brookes College would need to make to support your studies. If no, please write N/A.", type: "textarea", required: true, span: 2 },
+    { key: "learningDifficulty", label: "Do you have any learning difficulty?", type: "select", required: true, options: YES_NO },
+    { key: "learningDetails", label: "If yes, give details of learning difficulty? (If NO, enter N/A).", type: "textarea", required: true, span: 2 },
   ] },
-  { title: "Education & employment", fields: [
-    { key: "englishFirstLanguage", label: "Is English your first language?", type: "select", options: YES_NO },
-    { key: "englishProof", label: "Proof of English proficiency", type: "text" },
-    { key: "englishProofOther", label: "Other English proof (specify)", type: "text" },
-    { key: "highestEducation", label: "Highest level of education", type: "text" },
-    { key: "overseasQualification", label: "Do you have overseas qualifications?", type: "select", options: YES_NO },
-    { key: "appliedElsewhere", label: "Have you applied elsewhere?", type: "select", options: YES_NO },
-    { key: "previousStudentFinance", label: "Have you received student finance before?", type: "select", options: YES_NO },
-    { key: "previousFinanceDetails", label: "If yes, please give details", type: "textarea", span: 2 },
-    { key: "fundingIntent", label: "How do you intend to fund your studies?", type: "text" },
-    { key: "fundingOther", label: "Other funding (specify)", type: "text" },
-    { key: "employmentStatus", label: "Employment status", type: "text" },
-    { key: "employmentDetails", label: "Employment details", type: "textarea", span: 2 },
-    { key: "jobTitle", label: "Job title", type: "text" },
-    { key: "companyName", label: "Company name", type: "text" },
-    { key: "dateStarted", label: "Date started", type: "date" },
-    { key: "workedPast", label: "Have you worked in the past?", type: "select", options: YES_NO },
-    { key: "workedPastDetails", label: "If yes, please give details", type: "textarea", span: 2 },
+  { title: "Education and Employment", fields: [
+    { key: "englishFirstLanguage", label: "Is English your first language?", type: "select", required: true, options: YES_NO },
+    { key: "englishProof", label: "If no, how will you provide proof of your English language proficiency?", type: "select", required: true, options: ["IELTS", "B2 level English or Equivalent", "Functional Skills or level 2", "Other"] },
+    { key: "englishProofOther", label: "If you have selected others please specify, otherwise enter N/A.", type: "text", required: true, span: 2 },
+    { key: "highestEducation", label: "What is the Highest level of education that you have completed?", type: "select", required: true, options: ["Level 3", "Level 2", "High School", "GCSE/ A levels", "Other"] },
+    { key: "overseasQualification", label: "If overseas, please provide details of the qualification; otherwise, write N/A.", type: "textarea", required: true, span: 2 },
+    { key: "appliedElsewhere", label: "Have you applied for HND business in any other College/University?", type: "select", required: true, options: YES_NO },
+    { key: "previousStudentFinance", label: "Have you previously received student finance for any higher education course?", type: "select", required: true, options: YES_NO },
+    { key: "previousFinanceDetails", label: "If Yes to above question, please provide details: Course Name, Institution, and Admission Year. Note: Full disclosure is mandatory. Previous study may affect your future student finance entitlement (Tuition and Maintenance Loans). Non-disclosure will result in the revocation of your admission. (If you said No to previous question, just put N/A)", type: "textarea", required: true, span: 2 },
+    { key: "fundingIntent", label: "Please let us know how you intend to fund (£6185 per year)", type: "select", required: true, options: ["Student Loans Company", "Other"] },
+    { key: "fundingOther", label: "If you have selected other, please specify; Otherwise enter N/A.", type: "text", required: true, span: 2 },
+    { key: "employmentStatus", label: "What is your current employment status", type: "select", required: true, options: ["Employed", "Unemployed", "Self-Employed"] },
+    { key: "employmentDetails", label: "If you are currently working, give details of your employment. (If you are not working put N/A)", type: "textarea", required: true, span: 2 },
+    { key: "jobTitle", label: "Job title (If you are not working put N/A)", type: "text", required: true },
+    { key: "companyName", label: "Company Name (If you are not working put N/A)", type: "text", required: true },
+    { key: "dateStarted", label: "Date Started (If not working put N/A)", type: "text", required: true },
+    { key: "workedPast", label: "Have you worked as employed or self employed person in past?", type: "select", required: true, options: YES_NO },
+    { key: "workedPastDetails", label: "If you have been employed or self employed in past, (you may include voluntary work) give details here:", type: "textarea", span: 2 },
   ] },
   { title: "Reference 1", fields: [
-    { key: "ref1Name", label: "Name", type: "text" },
-    { key: "ref1Contact", label: "Contact number", type: "tel" },
-    { key: "ref1Email", label: "Email", type: "email" },
-    { key: "ref1Relationship", label: "Relationship to you", type: "text" },
+    { key: "ref1Name", label: "Name", type: "text", required: true },
+    { key: "ref1Contact", label: "Contact No", type: "tel", required: true },
+    { key: "ref1Email", label: "Email", type: "email", required: true },
+    { key: "ref1Relationship", label: "Relationship to you (Family, Friend, brother, sister, etc.)", type: "text", required: true, span: 2 },
   ] },
   { title: "Reference 2", fields: [
-    { key: "ref2Name", label: "Name", type: "text" },
-    { key: "ref2Role", label: "Role / job title", type: "text" },
-    { key: "ref2Organisation", label: "Organisation", type: "text" },
-    { key: "ref2Relationship", label: "Relationship to you", type: "text" },
+    { key: "ref2Name", label: "Name", type: "text", required: true },
+    { key: "ref2Role", label: "Role", type: "text", required: true },
+    { key: "ref2Organisation", label: "Institution/Organisation", type: "text", required: true },
+    { key: "ref2Relationship", label: "Relationship to you (Manager, Supervisor, Colleague, owner)", type: "text", required: true, span: 2 },
   ] },
-  { title: "Equality, diversity & inclusion", fields: [
-    { key: "ethnicity", label: "Ethnicity", type: "text" },
-    { key: "religion", label: "Religion", type: "text" },
+  { title: "EDI",
+    note: "The data in the EDI section is being collected to meet legal/statutory duties and improve support to students. All data collected will be handled securely in line with GDPR.",
+    fields: [
+    { key: "ethnicity", label: "Ethnicity", type: "select", required: true, options: ["White British", "European", "White other", "Asian, British Asian", "Black, Black British", "Mixed", "Other", "Prefer not to say"] },
+    { key: "religion", label: "Religion", type: "select", required: true, options: ["Christianity", "Hinduism", "Islam", "Buddhism", "Sikhism", "Judaism", "Other", "Prefer not to say"] },
   ] },
-  { title: "Declaration", fields: [
-    { key: "signature", label: "Signature (full name)", type: "text" },
-    { key: "declarationDate", label: "Declaration date", type: "date" },
+  { title: "Declaration",
+    note: "I, the undersigned, hereby declare that the information provided in this application form is true and accurate to the best of my knowledge. I understand that any false or incorrect information may result in the rejection of my application for admission and/or the withdrawal of my registration at London Brookes College. Furthermore, I authorise London Brookes College to carry out any necessary checks to verify the information provided, including contacting previous employers, educational institutions, referees, and any other organisations listed in my application. I also confirm that I have been informed of and understand the following requirements of London Brookes College: (1) A minimum attendance of 85% is required. (2) If I have been referred by an agent, I confirm that all the above information has been clearly explained to me. (3) All assignments must be submitted by the stated deadlines in order to progress to the second year and successfully complete the course. By signing this application form, I confirm that I have read, understood, and agree to the above declaration.",
+    fields: [
+    { key: "signature", label: "Signature — write down your full name here", type: "text", required: true, span: 2 },
+    { key: "declarationDate", label: "Date", type: "date", required: true },
   ] },
 ];
+// The keys the form requires (asterisked in the original). Used to block save until filled.
+const ADMISSION_REQUIRED = ADMISSION_SECTIONS.flatMap(s => s.fields.filter(f => f.required).map(f => f.key));
 // Every field key, flattened — used to build a blank form and to map a saved row back.
 const ADMISSION_KEYS = ADMISSION_SECTIONS.flatMap(s => s.fields.map(f => f.key));
 const blankAdmission = () => Object.fromEntries(ADMISSION_KEYS.map(k => [k, ""]));
@@ -10141,17 +10156,26 @@ const blankAdmission = () => Object.fromEntries(ADMISSION_KEYS.map(k => [k, ""])
 const admissionForm = (r) => Object.fromEntries(ADMISSION_KEYS.map(k => [k, r[k] ?? ""]));
 const admissionName = (r) => `${r.firstName || ""} ${r.surname || ""}`.trim();
 
-function AdmissionField({ f, value, onChange }) {
-  const common = { value, onChange: (e) => onChange(f.key, e.target.value), className: inputCls };
+function AdmissionField({ f, value, onChange, missing }) {
+  // Labels are full questions (not short field names), so they read in normal case; a
+  // blank required field gets a rose ring when the admin tries to save without it.
+  const cls = `${inputCls}${missing ? " border-rose-300 ring-2 ring-rose-100" : ""}`;
+  const common = { value, onChange: (e) => onChange(f.key, e.target.value), className: cls };
   let control;
   if (f.type === "select") {
-    control = <select {...common}><option value="">— select —</option>{f.options.map(o => <option key={o} value={o}>{o}</option>)}</select>;
+    control = <select {...common}><option value="">Select your answer</option>{f.options.map(o => <option key={o} value={o}>{o}</option>)}</select>;
   } else if (f.type === "textarea") {
-    control = <textarea rows={3} {...common} className={`${inputCls} resize-y`} placeholder={f.placeholder || ""} />;
+    control = <textarea rows={3} {...common} className={`${cls} resize-y`} placeholder={f.placeholder || ""} />;
   } else {
     control = <input type={f.type || "text"} {...common} placeholder={f.placeholder || ""} />;
   }
-  return <div className={f.span === 2 ? "sm:col-span-2" : ""}><Field label={f.label}>{control}</Field></div>;
+  return (
+    <div data-akey={f.key} className={f.span === 2 ? "sm:col-span-2" : ""}>
+      <label className="text-[13px] font-semibold leading-snug text-slate-600">{f.label}{f.required && <span className="ml-0.5 text-rose-500">*</span>}</label>
+      {f.hint && <p className="mt-0.5 text-[11px] leading-snug text-slate-400">{f.hint}</p>}
+      <div className="mt-1.5">{control}</div>
+    </div>
+  );
 }
 
 // Read-only view of one application — the same sections, but only the answered fields.
@@ -10191,6 +10215,7 @@ function AdminAdmissions({ store }) {
   const [busy, setBusy] = useState(false);
   const [viewing, setViewing] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [missing, setMissing] = useState(() => new Set()); // required keys left blank on last save attempt
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -10200,12 +10225,22 @@ function AdminAdmissions({ store }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const openAdd = () => { setEditing(null); setForm(blankAdmission()); setFormErr(""); setModal(true); };
-  const openEdit = (r) => { setEditing(r); setForm(admissionForm(r)); setFormErr(""); setModal(true); };
+  // Editing a field clears its "missing" flag so the rose ring disappears as it's filled.
+  const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setMissing(m => { if (!m.has(k)) return m; const n = new Set(m); n.delete(k); return n; }); };
+  const openAdd = () => { setEditing(null); setForm(blankAdmission()); setFormErr(""); setMissing(new Set()); setModal(true); };
+  const openEdit = (r) => { setEditing(r); setForm(admissionForm(r)); setFormErr(""); setMissing(new Set()); setModal(true); };
 
   const save = async () => {
-    if (!form.firstName.trim() && !form.surname.trim()) { setFormErr("Please enter at least a first name or surname."); return; }
+    // Mirror the form's own required questions: block save until every asterisked field
+    // is filled, mark the blanks, and jump the dialog to the first one.
+    const blanks = ADMISSION_REQUIRED.filter(k => !String(form[k] || "").trim());
+    if (blanks.length) {
+      setMissing(new Set(blanks));
+      setFormErr(`Please complete all required fields (marked *). ${blanks.length} still need${blanks.length === 1 ? "s" : ""} an answer.`);
+      const el = typeof document !== "undefined" && document.querySelector(`[data-akey="${blanks[0]}"]`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
     setBusy(true); setFormErr("");
     try {
       if (editing) await api.updateAdmission(editing.id, form);
@@ -10314,12 +10349,13 @@ function AdminAdmissions({ store }) {
         <div className="space-y-5">
           {ADMISSION_SECTIONS.map(sec => (
             <div key={sec.title}>
-              <div className="mb-2.5 flex items-center gap-2">
-                <span className="h-4 w-1 rounded-full" style={{ background: `linear-gradient(${NAVY}, ${MAROON})` }} />
+              <div className="mb-1.5 flex items-start gap-2">
+                <span className="mt-0.5 h-4 w-1 shrink-0 rounded-full" style={{ background: `linear-gradient(${NAVY}, ${MAROON})` }} />
                 <p className="text-xs font-bold uppercase tracking-wide" style={{ color: NAVY_DARK }}>{sec.title}</p>
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {sec.fields.map(f => <AdmissionField key={f.key} f={f} value={form[f.key]} onChange={set} />)}
+              {sec.note && <p className="mb-2.5 rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-snug text-slate-500 ring-1 ring-slate-100">{sec.note}</p>}
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+                {sec.fields.map(f => <AdmissionField key={f.key} f={f} value={form[f.key]} onChange={set} missing={missing.has(f.key)} />)}
               </div>
             </div>
           ))}
