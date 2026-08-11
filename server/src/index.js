@@ -82,6 +82,7 @@ app.use("/api/my-reviews", wrapAsync(require("./routes/myReviews")));
 app.use("/api/student-reviews", wrapAsync(require("./routes/studentReviews")));
 app.use("/api/timetable", wrapAsync(require("./routes/timetable")));
 app.use("/api/admissions", wrapAsync(require("./routes/admissions")));
+app.use("/api/admission-uploads", wrapAsync(require("./routes/admissionsUpload")));
 
 // 404 + error handlers
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
@@ -111,6 +112,7 @@ app.listen(PORT, () => {
   console.log(`Email: ${require("./email").describeEmail()}`);
   console.log(`Push:  ${require("./push").describePush()}`);
   console.log(`Files: ${require("./storage").describeStorage()}`);
+  console.log(`SharePoint: ${require("./sharepoint").describe()}`);
   startKeepAlive();
   require("./scheduler").startScheduler();
 });

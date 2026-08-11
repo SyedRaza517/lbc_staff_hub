@@ -1,0 +1,365 @@
+// SharePoint document storage, via Microsoft Graph (app-only / client credentials).
+//
+// Talks to the Microsoft Graph REST API with plain fetch rather than pulling in
+// @microsoft/microsoft-graph-client or @azure/identity — the same choice moodle.js
+// and storage.js make, and for the same reason: a handful of endpoints do not justify
+// two dependencies (plus their transitive weight), and it keeps the server's install
+// small on a free-tier host running Node 22, whose global fetch is all we need.
+//
+// AUTH IS APP-ONLY. There is no signed-in user here — the server authenticates AS
+// itself with a client id + secret (the OAuth2 client-credentials grant) and acts with
+// whatever application permissions the tenant admin has granted the app registration
+// (typically Sites.ReadWrite.All or a Sites.Selected grant scoped to the one site). The
+// client secret bypasses any per-user access and so must never reach the browser; it is
+// read here only, server-side, behind the route guards.
+//
+// WHAT THIS STORES. Admissions keeps a folder per applicant under one base folder in a
+// SharePoint document library; each applicant's supporting documents (ID, quals, etc.)
+// are uploaded into their folder. This module resolves the site → drive → base folder
+// once, then creates the per-applicant folders and uploads files into them.
+//
+// Env is read at CALL TIME (via the little `() =>` readers below and direct process.env
+// reads), exactly like storage.js, so a value set late in boot — or in a test — still
+// takes effect rather than being frozen at require() time.
+
+// --- Configuration (all read at call time) ---------------------------------------
+const TENANT_ID = () => process.env.SP_TENANT_ID || "";
+const CLIENT_ID = () => process.env.SP_CLIENT_ID || "";
+const CLIENT_SECRET = () => process.env.SP_CLIENT_SECRET || "";
+
+// Site can be given directly as an id, or resolved from a host + server-relative path.
+const SITE_ID = () => process.env.SP_SITE_ID || "";
+const SITE_HOST = () => process.env.SP_SITE_HOST || "";
+const SITE_PATH = () => process.env.SP_SITE_PATH || "";
+
+// Optional overrides: a specific drive (document library) id, and the base folder under
+// which per-applicant folders live. Default matches how Admissions has been set up.
+const DRIVE_ID = () => process.env.SP_DRIVE_ID || "";
+const ROOT_FOLDER = () => process.env.SP_ROOT_FOLDER || "Admissions";
+
+// The Graph service root. v1.0 is the stable channel; nothing here needs /beta.
+const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+
+// A single request may not exceed this. Applicant documents are photos and PDFs of a
+// few MB; 15MB is generous while keeping one upload from exhausting a small instance.
+// A simple PUT upload is also only valid up to 250MB, so staying well under that means
+// we never need the (much more involved) chunked upload-session path.
+const MAX_BYTES = 15 * 1024 * 1024;
+
+// All three credentials are required, AND a way to identify the site: either an explicit
+// SP_SITE_ID, or both halves of the host+path pair to resolve one. Anything less and the
+// module can't do useful work, so the app treats it as switched off.
+function isConfigured() {
+  const creds = Boolean(TENANT_ID() && CLIENT_ID() && CLIENT_SECRET());
+  const site = Boolean(SITE_ID() || (SITE_HOST() && SITE_PATH()));
+  return creds && site;
+}
+
+// One line for the startup banner, so a deployment missing its SharePoint config says so
+// out loud rather than failing the first time somebody uploads an applicant's documents.
+function describe() {
+  if (!isConfigured()) {
+    return 'not configured (set SP_TENANT_ID, SP_CLIENT_ID, SP_CLIENT_SECRET and SP_SITE_ID to enable SharePoint uploads)';
+  }
+  const site = SITE_ID() || `${SITE_HOST()}${SITE_PATH()}`;
+  return `SharePoint (site ${site}, folder "${ROOT_FOLDER()}")`;
+}
+
+// --- Access token (client-credentials grant, cached) -----------------------------
+// One token serves every request until it is close to expiring. Fetching a fresh token
+// on every call would triple the traffic and slow each upload; caching it — and renewing
+// ~60s before Azure's stated expiry to leave a safety margin against clock skew and
+// in-flight requests — keeps things quick without ever presenting a stale token.
+let tokenCache = { value: null, expiresAt: 0 };
+
+async function getAccessToken() {
+  if (tokenCache.value && Date.now() < tokenCache.expiresAt) return tokenCache.value;
+
+  const tenant = TENANT_ID();
+  if (!tenant || !CLIENT_ID() || !CLIENT_SECRET()) {
+    throw new Error("SharePoint credentials are not configured (set SP_TENANT_ID, SP_CLIENT_ID and SP_CLIENT_SECRET).");
+  }
+
+  const body = new URLSearchParams({
+    client_id: CLIENT_ID(),
+    client_secret: CLIENT_SECRET(),
+    grant_type: "client_credentials",
+    // ".default" asks for exactly the application permissions granted to the app
+    // registration in Azure AD — you don't list scopes for app-only, you consent to them
+    // once as an admin and ".default" says "give me all of those".
+    scope: "https://graph.microsoft.com/.default",
+  });
+
+  let res;
+  try {
+    res = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+  } catch (e) {
+    throw new Error(`Could not reach Microsoft's login endpoint to get a SharePoint token: ${e.message}`);
+  }
+
+  const text = await res.text();
+  if (!res.ok) {
+    // Azure returns a JSON body with error + error_description that names the actual
+    // problem (wrong secret, wrong tenant, consent not granted…). Surface it so an admin
+    // can act rather than guess.
+    let detail = text.slice(0, 300);
+    try {
+      const j = JSON.parse(text);
+      if (j.error_description || j.error) detail = `${j.error || ""}: ${j.error_description || ""}`.trim();
+    } catch (_) { /* not JSON — keep the raw snippet */ }
+    throw new Error(`Failed to get a SharePoint access token (HTTP ${res.status}). Check SP_TENANT_ID / SP_CLIENT_ID / SP_CLIENT_SECRET and that admin consent was granted. ${detail}`);
+  }
+
+  let data;
+  try { data = JSON.parse(text); }
+  catch { throw new Error(`Microsoft's token endpoint returned a non-JSON response (HTTP ${res.status}).`); }
+  if (!data.access_token) {
+    throw new Error("Microsoft's token endpoint did not return an access_token.");
+  }
+
+  const ttlSeconds = Number(data.expires_in) || 3600;
+  tokenCache = {
+    value: data.access_token,
+    // Renew 60s early so a request never sets out with a token about to expire.
+    expiresAt: Date.now() + Math.max(0, ttlSeconds - 60) * 1000,
+  };
+  return tokenCache.value;
+}
+
+// --- Graph fetch helper ----------------------------------------------------------
+// Attaches the bearer token, calls Graph, and returns the parsed JSON — throwing a clear,
+// admin-facing error on any non-2xx. `init.body` may be a string (JSON we stringified) OR
+// a raw Buffer (a file upload); either is passed through untouched, so this one helper
+// covers both the metadata calls and the file PUT without a separate "raw" function.
+async function graphFetch(path, init = {}) {
+  const token = await getAccessToken();
+  let res;
+  try {
+    res = await fetch(`${GRAPH_BASE}${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(init.headers || {}),
+      },
+    });
+  } catch (e) {
+    throw new Error(`Could not reach Microsoft Graph (${init.method || "GET"} ${path}): ${e.message}`);
+  }
+
+  if (!res.ok) {
+    const raw = await res.text().catch(() => "");
+    // Graph errors are JSON shaped as { error: { code, message } }. Prefer that message;
+    // fall back to a snippet of whatever came back.
+    let detail = raw.slice(0, 300);
+    try {
+      const j = JSON.parse(raw);
+      if (j.error && (j.error.message || j.error.code)) {
+        detail = `${j.error.code || ""} ${j.error.message || ""}`.trim();
+      }
+    } catch (_) { /* not JSON — keep the raw snippet */ }
+    const err = new Error(`Microsoft Graph request failed (HTTP ${res.status}) for ${init.method || "GET"} ${path}: ${detail}`);
+    // Callers (folder creation, root lookup) branch on the status — a 404 means "not
+    // there yet" and a 409 means "someone else just created it" — so carry it along.
+    err.status = res.status;
+    throw err;
+  }
+
+  // 204 No Content (e.g. DELETE) and empty bodies have nothing to parse.
+  if (res.status === 204) return null;
+  const text = await res.text();
+  if (!text) return null;
+  try { return JSON.parse(text); }
+  catch { throw new Error(`Microsoft Graph returned a non-JSON response (HTTP ${res.status}) for ${path}.`); }
+}
+
+// --- Lazy resolution of site → drive → root folder -------------------------------
+// Each is resolved once on first use and cached in a module variable — these ids never
+// change for the life of the process, and re-resolving them on every upload would add two
+// or three needless round-trips to Graph before the request that actually matters.
+let siteIdCache = null;
+let driveIdCache = null;
+let rootFolderIdCache = null;
+
+async function resolveSiteId() {
+  if (siteIdCache) return siteIdCache;
+  if (SITE_ID()) { siteIdCache = SITE_ID(); return siteIdCache; }
+
+  const host = SITE_HOST();
+  let path = SITE_PATH();
+  if (!host || !path) {
+    throw new Error("SharePoint site is not configured (set SP_SITE_ID, or both SP_SITE_HOST and SP_SITE_PATH).");
+  }
+  // Graph addresses a site by path as /sites/{host}:/{server-relative-path}. Normalise a
+  // missing leading slash so both "sites/Admissions" and "/sites/Admissions" work.
+  if (!path.startsWith("/")) path = `/${path}`;
+
+  const site = await graphFetch(`/sites/${host}:${path}`);
+  if (!site || !site.id) {
+    throw new Error(`Could not resolve the SharePoint site "${host}${path}". Check SP_SITE_HOST and SP_SITE_PATH.`);
+  }
+  siteIdCache = site.id;
+  return siteIdCache;
+}
+
+async function resolveDriveId() {
+  if (driveIdCache) return driveIdCache;
+  if (DRIVE_ID()) { driveIdCache = DRIVE_ID(); return driveIdCache; }
+
+  const siteId = await resolveSiteId();
+  const drive = await graphFetch(`/sites/${siteId}/drive`);
+  if (!drive || !drive.id) {
+    throw new Error("The SharePoint site has no default document library (drive). Set SP_DRIVE_ID explicitly.");
+  }
+  driveIdCache = drive.id;
+  return driveIdCache;
+}
+
+// The base folder under which every applicant folder lives. Fetch it if it's there; if
+// not, create it once under the drive root. A concurrent creator racing us produces a
+// 409, which simply means "it exists now" — so re-fetch and use theirs.
+async function resolveRootFolderId() {
+  if (rootFolderIdCache) return rootFolderIdCache;
+
+  const driveId = await resolveDriveId();
+  const rootFolder = ROOT_FOLDER();
+
+  try {
+    const item = await graphFetch(`/drives/${driveId}/root:/${encodeURIComponent(rootFolder)}`);
+    if (item && item.id) { rootFolderIdCache = item.id; return rootFolderIdCache; }
+  } catch (e) {
+    if (e.status !== 404) throw e; // a 404 just means it doesn't exist yet; anything else is real
+  }
+
+  try {
+    const created = await graphFetch(`/drives/${driveId}/root/children`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: rootFolder, folder: {}, "@microsoft.graph.conflictBehavior": "fail" }),
+    });
+    rootFolderIdCache = created.id;
+    return rootFolderIdCache;
+  } catch (e) {
+    if (e.status === 409) {
+      const item = await graphFetch(`/drives/${driveId}/root:/${encodeURIComponent(rootFolder)}`);
+      rootFolderIdCache = item.id;
+      return rootFolderIdCache;
+    }
+    throw e;
+  }
+}
+
+// --- Name sanitising -------------------------------------------------------------
+// A folder name reaches both a Graph URL path and SharePoint's own storage, which rejects
+// a fixed set of characters ( \ / : * ? " < > | ) plus # and % (which break URL/webUrl
+// handling). Control characters and runs of whitespace are collapsed, the name is trimmed,
+// trailing dots are removed (SharePoint forbids a name ending in "."), and the whole thing
+// is capped so a very long applicant name can't produce an over-length path segment.
+function sanitizeFolderName(name) {
+  const cleaned = String(name || "")
+    .replace(/[\\/:*?"<>|#%]/g, " ")        // characters SharePoint / URLs forbid
+    .replace(/[\u0000-\u001f\u007f]/g, " ")  // control characters
+    .replace(/\s+/g, " ")                    // collapse whitespace runs
+    .trim()
+    .slice(0, 120)                           // cap the length
+    .replace(/[.\s]+$/, "")                  // no trailing dot or space (re-trim after the cap)
+    .trim();
+  return cleaned;
+}
+
+// --- Public operations -----------------------------------------------------------
+
+/**
+ * Ensure a folder for one applicant exists directly under the base (root) folder, and
+ * return its { id, webUrl }. Safe to call repeatedly for the same applicant — it returns
+ * the existing folder rather than creating a duplicate, and tolerates a concurrent create.
+ */
+async function ensureApplicantFolder(folderName) {
+  if (!isConfigured()) throw new Error("SharePoint isn't set up on the server yet.");
+
+  const name = sanitizeFolderName(folderName);
+  if (!name) throw new Error("An applicant folder name is required.");
+
+  const driveId = await resolveDriveId();
+  const rootId = await resolveRootFolderId();
+
+  // Look for an existing child by path relative to the root folder's id.
+  try {
+    const existing = await graphFetch(`/drives/${driveId}/items/${rootId}:/${encodeURIComponent(name)}`);
+    if (existing && existing.id) return { id: existing.id, webUrl: existing.webUrl };
+  } catch (e) {
+    if (e.status !== 404) throw e; // 404 = not there yet; fall through to create it
+  }
+
+  // Create it. conflictBehavior "fail" makes a race surface as a 409 rather than silently
+  // renaming the folder to "Name 1" — which would scatter one applicant's documents across
+  // two folders. On that 409 we fetch and return the folder the other writer just made.
+  try {
+    const created = await graphFetch(`/drives/${driveId}/items/${rootId}/children`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, folder: {}, "@microsoft.graph.conflictBehavior": "fail" }),
+    });
+    return { id: created.id, webUrl: created.webUrl };
+  } catch (e) {
+    if (e.status === 409) {
+      const existing = await graphFetch(`/drives/${driveId}/items/${rootId}:/${encodeURIComponent(name)}`);
+      return { id: existing.id, webUrl: existing.webUrl };
+    }
+    throw e;
+  }
+}
+
+/**
+ * Upload one file into an applicant's folder and return { id, webUrl, size }. Uses a
+ * simple content PUT, which replaces any existing file of the same name in that folder
+ * (re-uploading corrects rather than orphaning). Rejects empty and over-limit files with
+ * a message the route can show the user.
+ */
+async function uploadFile(folderId, fileName, buffer, contentType) {
+  if (!isConfigured()) throw new Error("SharePoint isn't set up on the server yet.");
+  if (!buffer?.length) throw new Error("The file is empty.");
+  if (buffer.length > MAX_BYTES) {
+    throw new Error(`That file is too large (limit ${Math.round(MAX_BYTES / 1024 / 1024)}MB).`);
+  }
+
+  const driveId = await resolveDriveId();
+  const safeName = String(fileName || "").trim() || "file";
+
+  const item = await graphFetch(
+    `/drives/${driveId}/items/${folderId}:/${encodeURIComponent(safeName)}:/content`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": contentType || "application/octet-stream" },
+      body: buffer,
+    }
+  );
+  return { id: item.id, webUrl: item.webUrl, size: buffer.length };
+}
+
+/**
+ * Best-effort delete of a drive item. A database row going away must never fail because
+ * its SharePoint file didn't — an orphaned file is harmless — so this swallows every
+ * error (a missing item, a transient Graph blip) and returns quietly.
+ */
+async function deleteItem(itemId) {
+  if (!isConfigured() || !itemId) return;
+  try {
+    const driveId = await resolveDriveId();
+    await graphFetch(`/drives/${driveId}/items/${itemId}`, { method: "DELETE" });
+  } catch (_) {
+    /* the row is what matters; an orphaned file, or a delete of something already gone, is harmless */
+  }
+}
+
+module.exports = {
+  isConfigured,
+  describe,
+  ensureApplicantFolder,
+  uploadFile,
+  deleteItem,
+  MAX_BYTES,
+};

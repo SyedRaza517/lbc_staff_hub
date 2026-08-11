@@ -11,7 +11,7 @@ import {
   Sun, Sunrise, Sunset, TrendingUp, Timer, Info, Phone,
   CalendarCheck, UserCheck, Layers, Activity, Award, ShieldCheck,
   BookOpen, Percent, PlayCircle, RefreshCw, MoreHorizontal, MessageSquare, ChevronDown, Loader2, KeyRound, Send, Wallet,
-  Fingerprint, ScanFace
+  Fingerprint, ScanFace, ExternalLink, Copy
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis,
@@ -10203,6 +10203,112 @@ function AdmissionDetail({ r }) {
   );
 }
 
+// The documents an applicant is asked to upload. MUST match server/src/admissionDocs.js.
+const ADMISSION_DOC_TYPES = [
+  { key: "passport", label: "Passport / ID / BRP" },
+  { key: "english", label: "Proof of English" },
+  { key: "qualifications", label: "Qualification certificates" },
+  { key: "address", label: "Proof of address" },
+  { key: "ni", label: "National Insurance number" },
+  { key: "immigration", label: "Immigration status" },
+];
+const admDocLabel = (key) => (ADMISSION_DOC_TYPES.find(d => d.key === key) || {}).label || key;
+
+// The documents panel inside an application's View modal: request the upload email,
+// then track / view / verify each file. `r` is the admission (with its .documents);
+// `onChanged` re-fetches so the panel reflects new uploads and verifications.
+function AdmissionDocsPanel({ r, store, onChanged }) {
+  const [busy, setBusy] = useState("");   // "" | "request" | a document id
+  const [link, setLink] = useState("");    // the upload link, shown so it can be copied
+
+  const byType = Object.fromEntries((r.documents || []).map(d => [d.docType, d]));
+  const uploaded = (r.documents || []).length;
+  const verified = (r.documents || []).filter(d => d.confirmed).length;
+  const requested = !!r.docsRequestedAt;
+
+  const request = async () => {
+    setBusy("request");
+    try {
+      const res = await api.requestAdmissionDocuments(r.id);
+      setLink(res.link || "");
+      store.notify(res.emailed ? `Upload link emailed to ${r.email}` : "Email isn't set up on the server — copy the link below to send it", res.emailed ? "success" : "info");
+      if (res.warning) store.notify(res.warning, "error");
+      onChanged?.();
+    } catch (e) { store.notify(e.message || "Could not send the request", "error"); }
+    setBusy("");
+  };
+  const toggleConfirm = async (doc) => {
+    setBusy(doc.id);
+    try { await api.confirmAdmissionDocument(doc.id, !doc.confirmed); onChanged?.(); }
+    catch (e) { store.notify(e.message || "Could not update", "error"); }
+    setBusy("");
+  };
+  const removeDoc = async (doc) => {
+    if (!window.confirm(`Delete the uploaded "${admDocLabel(doc.docType)}" file?\n\nThe applicant would need to upload it again. This cannot be undone.`)) return;
+    setBusy(doc.id);
+    try { await api.removeAdmissionDocument(doc.id); store.notify("Document deleted", "error"); onChanged?.(); }
+    catch (e) { store.notify(e.message || "Could not delete", "error"); }
+    setBusy("");
+  };
+  const viewDoc = async (doc) => {
+    try { const { url } = await api.admissionDocumentUrl(doc.id); if (url) window.open(url, "_blank", "noopener"); }
+    catch (e) { store.notify(e.message || "Could not open the file", "error"); }
+  };
+  const copyLink = async () => { try { await navigator.clipboard.writeText(link); store.notify("Link copied"); } catch { /* ignore */ } };
+
+  return (
+    <div className="mt-5 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200/70">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <FileUp size={16} style={{ color: NAVY }} />
+        <p className="text-sm font-extrabold" style={{ color: NAVY_DARK }}>Documents</p>
+        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-slate-500 ring-1 ring-slate-200">{uploaded}/{ADMISSION_DOC_TYPES.length} uploaded{verified ? ` · ${verified} verified` : ""}</span>
+        <div className="ml-auto flex items-center gap-2">
+          {r.spFolderUrl && <a href={r.spFolderUrl} target="_blank" rel="noopener" className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"><ExternalLink size={13} /> SharePoint folder</a>}
+          <button onClick={request} disabled={busy === "request" || !r.email} title={!r.email ? "Add an email address to this application first" : ""} className="press flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white transition hover:opacity-95 disabled:opacity-40" style={{ background: NAVY }}>
+            {busy === "request" ? <Loader2 size={13} className="animate-spin" /> : requested ? <Send size={13} /> : <Mail size={13} />} {requested ? "Resend link" : "Request documents"}
+          </button>
+        </div>
+      </div>
+
+      {!r.email && <p className="mb-2 flex items-start gap-1.5 text-[11px] font-semibold text-amber-600"><AlertCircle size={12} className="mt-px shrink-0" /> This application has no email address — add one (Edit) before requesting documents.</p>}
+      {requested && <p className="mb-2 text-[11px] text-slate-400">Requested {fmtDate(String(r.docsRequestedAt).slice(0, 10))}. The applicant can upload any time until the link expires (30 days).</p>}
+      {link && (
+        <div className="mb-3 flex items-center gap-2 rounded-lg bg-white px-2.5 py-2 ring-1 ring-slate-200">
+          <input readOnly value={link} className="min-w-0 flex-1 bg-transparent text-[11px] text-slate-500 outline-none" onFocus={e => e.target.select()} />
+          <button onClick={copyLink} className="press flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-200"><Copy size={12} /> Copy</button>
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        {ADMISSION_DOC_TYPES.map(t => {
+          const d = byType[t.key];
+          const rowBusy = d && busy === d.id;
+          return (
+            <div key={t.key} className="flex flex-wrap items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200/70">
+              <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${d ? (d.confirmed ? "bg-emerald-100 text-emerald-600" : "bg-blue-100 text-blue-600") : "bg-slate-100 text-slate-300"}`}>
+                {d ? (d.confirmed ? <ShieldCheck size={13} /> : <CheckCircle2 size={13} />) : <FileText size={13} />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-slate-700">{t.label}</p>
+                {d ? <p className="truncate text-[11px] text-slate-400">{d.fileName}{d.confirmed ? " · verified" : ""}</p> : <p className="text-[11px] text-slate-300">Not uploaded</p>}
+              </div>
+              {d && (
+                <div className="flex items-center gap-1">
+                  <button onClick={() => viewDoc(d)} title="View file" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><ExternalLink size={14} /></button>
+                  <button onClick={() => toggleConfirm(d)} disabled={rowBusy} className={`press rounded-lg px-2 py-1 text-[11px] font-bold transition ${d.confirmed ? "bg-slate-100 text-slate-500 hover:bg-slate-200" : "text-white"}`} style={d.confirmed ? {} : { background: "#059669" }}>
+                    {rowBusy ? <Loader2 size={12} className="animate-spin" /> : d.confirmed ? "Unverify" : "Confirm"}
+                  </button>
+                  <button onClick={() => removeDoc(d)} disabled={rowBusy} title="Delete file" className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={14} /></button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AdminAdmissions({ store }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -10227,6 +10333,16 @@ function AdminAdmissions({ store }) {
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Silent reload after a document action, keeping the open View modal in sync with the
+  // fresh row (so a new upload / verification appears without closing the dialog).
+  const refresh = useCallback(async () => {
+    try {
+      const fresh = await api.admissions();
+      setRows(fresh);
+      setViewing(v => v ? (fresh.find(x => x.id === v.id) || v) : v);
+    } catch (_) { /* a transient failure shouldn't disturb the panel */ }
+  }, []);
 
   // Editing a field clears its "missing" flag so the rose ring disappears as it's filled.
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setMissing(m => { if (!m.has(k)) return m; const n = new Set(m); n.delete(k); return n; }); };
@@ -10397,19 +10513,20 @@ function AdminAdmissions({ store }) {
         <>
           <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 fade-up">
             <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
-              <table className="w-full min-w-[820px] text-sm">
+              <table className="w-full min-w-[960px] text-sm">
                 <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
                   <tr>
                     <th className="w-10 px-4 py-3"><input ref={selectAllRef} type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all applications" className="h-4 w-4 cursor-pointer align-middle accent-blue-600" /></th>
                     <th className="px-5 py-3">Applicant</th><th className="px-5 py-3">Course</th>
                     <th className="px-5 py-3">Email</th><th className="px-5 py-3 whitespace-nowrap">Phone</th>
-                    <th className="px-5 py-3 whitespace-nowrap">Applied</th><th className="px-5 py-3 text-right">Actions</th>
+                    <th className="px-5 py-3 whitespace-nowrap">Applied</th><th className="px-5 py-3 whitespace-nowrap">Documents</th><th className="px-5 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paged.slice.map(r => {
                     const name = admissionName(r) || "—";
                     const initials = ((r.firstName || " ")[0] + (r.surname || " ")[0]).trim().toUpperCase() || "?";
+                    const dUp = (r.documents || []).length, dVer = (r.documents || []).filter(d => d.confirmed).length, dTot = ADMISSION_DOC_TYPES.length;
                     return (
                       <tr key={r.id} onClick={() => setViewing(r)} className={`cursor-pointer border-t border-slate-100 transition-colors duration-150 hover:bg-blue-50/40 ${selected.has(r.id) ? "bg-blue-50/60" : ""}`}>
                         <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -10425,6 +10542,11 @@ function AdminAdmissions({ store }) {
                         <td className="px-5 py-3 text-slate-500">{r.email || <span className="text-slate-300">—</span>}</td>
                         <td className="px-5 py-3 whitespace-nowrap text-slate-500">{r.phone || <span className="text-slate-300">—</span>}</td>
                         <td className="px-5 py-3 whitespace-nowrap text-slate-500">{fmtDate(String(r.createdAt).slice(0, 10))}</td>
+                        <td className="px-5 py-3 whitespace-nowrap">
+                          {!r.docsRequestedAt && dUp === 0
+                            ? <span className="text-slate-300">—</span>
+                            : <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${dUp === 0 ? "bg-slate-100 text-slate-400" : dUp === dTot ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{dUp === dTot && dVer === dTot && <ShieldCheck size={11} />}{dUp}/{dTot}</span>}
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-1 whitespace-nowrap">
                             <button onClick={(e) => { e.stopPropagation(); setViewing(r); }} title="View" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><FileText size={15} /></button>
@@ -10436,7 +10558,7 @@ function AdminAdmissions({ store }) {
                     );
                   })}
                   {paged.slice.length === 0 && (
-                    <tr><td colSpan={7} className="px-5 py-12">
+                    <tr><td colSpan={8} className="px-5 py-12">
                       <EmptyState Icon={ClipboardList} title={rows.length ? "No applications match" : "No applications yet"}
                         msg={rows.length ? "Try a different search." : "Press “Create new entry” to add the first application."} />
                     </td></tr>
@@ -10474,6 +10596,7 @@ function AdminAdmissions({ store }) {
         {viewing && (
           <>
             <AdmissionDetail r={viewing} />
+            <AdmissionDocsPanel r={viewing} store={store} onChanged={refresh} />
             <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
               <button onClick={() => exportOneCsv(viewing)} className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><Download size={14} /> Export CSV</button>
               <button onClick={() => exportPdf(viewing)} className="press flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold text-white transition hover:opacity-95" style={{ background: MAROON }}><FileText size={14} /> Export PDF</button>

@@ -161,6 +161,28 @@ export const api = {
   addAdmission: (data) => request("/admissions", { method: "POST", body: data }),
   updateAdmission: (id, data) => request(`/admissions/${id}`, { method: "PUT", body: data }),
   removeAdmission: (id) => request(`/admissions/${id}`, { method: "DELETE" }),
+  // admissions — documents workflow (admin)
+  requestAdmissionDocuments: (id) => request(`/admissions/${id}/request-documents`, { method: "POST" }),
+  confirmAdmissionDocument: (docId, confirmed = true) => request(`/admissions/documents/${docId}/confirm`, { method: "PUT", body: { confirmed } }),
+  removeAdmissionDocument: (docId) => request(`/admissions/documents/${docId}`, { method: "DELETE" }),
+  admissionDocumentUrl: (docId) => request(`/admissions/documents/${docId}/file`),
+  // admissions — applicant upload page (PUBLIC: authed by the emailed token, no login)
+  admissionUploadInfo: async (token) => {
+    const res = await fetch(`${BASE}/admission-uploads/${encodeURIComponent(token)}`);
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { const e = new Error(data?.error || `Could not load (${res.status})`); e.status = res.status; throw e; }
+    return data;
+  },
+  uploadAdmissionDoc: async (token, type, file) => {
+    const res = await fetch(`${BASE}/admission-uploads/${encodeURIComponent(token)}?type=${encodeURIComponent(type)}`, {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) },
+      body: file,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { const e = new Error(data?.error || `Upload failed (${res.status})`); e.status = res.status; throw e; }
+    return data;
+  },
 
   // admin: student queries tab
   listStudentQueries: (status) => request(`/student-queries${status ? `?status=${status}` : ""}`),

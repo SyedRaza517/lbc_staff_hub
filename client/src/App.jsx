@@ -8,6 +8,7 @@ import Landing from "./Landing";
 import MobileAuth from "./MobileAuth";
 import ResetPasswordPage from "./ResetPassword";
 import AcceptInvite from "./AcceptInvite";
+import AdmissionUpload from "./AdmissionUpload";
 import { useIsHandset, isNativeApp } from "./PhoneShell";
 import { BrandMark } from "./Brand";
 import StudentApp from "./StudentApp";
@@ -215,6 +216,12 @@ export default function App() {
     if (typeof window === "undefined") return null;
     return new URLSearchParams(window.location.search).get("invite");
   });
+  // "?upload=<token>" — an HND applicant opening the document-upload link from their
+  // email. A public page: no account, no session.
+  const [uploadToken, setUploadToken] = useState(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("upload");
+  });
   // Biometric app lock — only ever active inside the packaged app, and only when
   // the user has switched it on.
   const { locked, unlock } = useAppLock(Boolean(user));
@@ -225,11 +232,13 @@ export default function App() {
     if (typeof window !== "undefined") window.history.replaceState({}, "", window.location.pathname);
     setResetToken(null);
     setInviteToken(null);
+    setUploadToken(null);
     setEntry(null);
   };
 
-  // Both of these are valid whether or not a stale session exists, and deliberately
-  // run before the auth gate below.
+  // These public token pages are valid whether or not a stale session exists, and
+  // deliberately run before the auth gate below.
+  if (uploadToken) return (<><style>{GLOBAL_STYLE}</style><AdmissionUpload token={uploadToken} onDone={clearTokenFromUrl} /></>);
   if (inviteToken) return (<><style>{GLOBAL_STYLE}</style><AcceptInvite token={inviteToken} onDone={clearTokenFromUrl} /></>);
   if (resetToken) return (<><style>{GLOBAL_STYLE}</style><ResetPasswordPage token={resetToken} onDone={clearTokenFromUrl} /></>);
 

@@ -820,8 +820,53 @@ model Admission {
   // Declaration
   signature              String?
   declarationDate        String?
+
+  // --- Document upload (after the application is entered) ---
+  // Set when an admin emails the applicant asking them to upload their documents.
+  docsRequestedAt   DateTime?
+  // The applicant's upload link is a single long-lived, reusable token (they may add
+  // documents over several days). Only the SHA-256 HASH is stored — the raw value
+  // lives solely in the emailed link, so this table leaks nothing usable.
+  uploadTokenHash   String?   @unique
+  uploadTokenExpires DateTime?
+  // The applicant's folder in SharePoint (Graph driveItem id + web URL), created the
+  // first time documents are requested/uploaded. Null until then / if SharePoint is
+  // not configured (the Supabase fallback needs no folder).
+  spFolderId        String?
+  spFolderUrl       String?
+
+  documents AdmissionDocument[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([surname, firstName])
+}
+
+// One uploaded document belonging to an application. There is at most one row per
+// (application, docType) — re-uploading replaces the file and clears verification.
+// The bytes live in SharePoint (spItemId/webUrl) or, when SharePoint is not yet
+// configured, in Supabase Storage (storagePath) — backend is an implementation detail
+// the admin UI does not need to care about.
+model AdmissionDocument {
+  id          String   @id @default(cuid())
+  admission   Admission @relation(fields: [admissionId], references: [id], onDelete: Cascade)
+  admissionId String
+  docType     String   // passport | english | qualifications | address | ni | immigration
+  fileName    String
+  mimeType    String?
+  sizeBytes   Int?
+  // SharePoint (Microsoft Graph) location, when stored there.
+  spItemId    String?
+  webUrl      String?
+  // Supabase Storage key, when SharePoint is not configured (fallback).
+  storagePath String?
+  uploadedAt  DateTime @default(now())
+  // An admin has eyeballed the file in SharePoint and signed it off.
+  confirmed   Boolean  @default(false)
+  confirmedAt DateTime?
+  confirmedBy String?
+
+  @@unique([admissionId, docType])
+  @@index([admissionId])
 }
