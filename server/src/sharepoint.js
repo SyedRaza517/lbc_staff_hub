@@ -42,7 +42,11 @@ const SITE_URL = () => process.env.SP_SITE_URL || "";
 // dropped. Otherwise the split host + path are used as given.
 function siteHostAndPath() {
   const cand = [SITE_URL(), SITE_ID(), SITE_HOST(), SITE_PATH()].map((s) => String(s || "").trim());
-  const urlLike = cand.find((s) => /:\/\/|sharepoint\.com/i.test(s));
+  // Treat a candidate as a FULL URL only if it has a scheme (://) OR a "domain/sites/…"
+  // (or /teams/) shape. A BARE host ("x.sharepoint.com") or a BARE path ("/sites/x") must
+  // NOT match — otherwise a split SP_SITE_HOST + SP_SITE_PATH gets parsed as a pathless URL
+  // and the path is silently dropped.
+  const urlLike = cand.find((s) => s.includes("://") || /[a-z0-9][a-z0-9.-]*\.[a-z]{2,}\/(sites|teams)\//i.test(s));
   if (urlLike) {
     try {
       const u = new URL(urlLike.includes("://") ? urlLike : `https://${urlLike}`);
