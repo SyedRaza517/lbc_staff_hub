@@ -27,10 +27,36 @@ const TENANT_ID = () => process.env.SP_TENANT_ID || "";
 const CLIENT_ID = () => process.env.SP_CLIENT_ID || "";
 const CLIENT_SECRET = () => process.env.SP_CLIENT_SECRET || "";
 
-// Site can be given directly as an id, or resolved from a host + server-relative path.
+// Site can be given a few ways (whichever is easiest): the full site URL in SP_SITE_URL
+// (e.g. https://contoso.sharepoint.com/sites/Admissions), an explicit Graph site id in
+// SP_SITE_ID, or the split SP_SITE_HOST + SP_SITE_PATH. A full URL pasted into ANY of the
+// SP_SITE_* vars is also understood, so a copy from the browser's address bar just works.
 const SITE_ID = () => process.env.SP_SITE_ID || "";
 const SITE_HOST = () => process.env.SP_SITE_HOST || "";
 const SITE_PATH = () => process.env.SP_SITE_PATH || "";
+const SITE_URL = () => process.env.SP_SITE_URL || "";
+
+// Derive { host, path } from whatever site config was supplied. A full URL (in SP_SITE_URL
+// or accidentally in SP_SITE_ID/HOST/PATH) is parsed; a "/sites/<name>" or "/teams/<name>"
+// path is kept and any trailing library/view segment (…/Documents/Forms/AllItems.aspx) is
+// dropped. Otherwise the split host + path are used as given.
+function siteHostAndPath() {
+  const cand = [SITE_URL(), SITE_ID(), SITE_HOST(), SITE_PATH()].map((s) => String(s || "").trim());
+  const urlLike = cand.find((s) => /:\/\/|sharepoint\.com/i.test(s));
+  if (urlLike) {
+    try {
+      const u = new URL(urlLike.includes("://") ? urlLike : `https://${urlLike}`);
+      let p = u.pathname || "";
+      const m = p.match(/\/(sites|teams)\/[^/]+/i); // keep just /sites/<name>
+      p = m ? m[0] : p.replace(/\/+$/, "");
+      return { host: u.hostname, path: p };
+    } catch (_) { /* fall through to the split host/path */ }
+  }
+  let host = SITE_HOST().trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+  let path = SITE_PATH().trim();
+  if (path && !path.startsWith("/")) path = `/${path}`;
+  return { host, path };
+}
 
 // Optional overrides for which document library to use. Either the opaque drive id, OR
 // its display name (e.g. "09  Admissions"), which the server resolves among the site's
@@ -57,8 +83,11 @@ const MAX_BYTES = 15 * 1024 * 1024;
 // module can't do useful work, so the app treats it as switched off.
 function isConfigured() {
   const creds = Boolean(TENANT_ID() && CLIENT_ID() && CLIENT_SECRET());
-  const site = Boolean(SITE_ID() || (SITE_HOST() && SITE_PATH()));
-  return creds && site;
+  // A real Graph site id contains commas (host,siteGuid,webGuid). Otherwise we need a
+  // host + path, which siteHostAndPath derives from a URL or the split vars.
+  const idIsReal = SITE_ID().includes(",");
+  const { host, path } = siteHostAndPath();
+  return creds && Boolean(idIsReal || (host && path));
 }
 
 // One line for the startup banner, so a deployment missing its SharePoint config says so
@@ -67,7 +96,8 @@ function describe() {
   if (!isConfigured()) {
     return 'not configured (set SP_TENANT_ID, SP_CLIENT_ID, SP_CLIENT_SECRET and SP_SITE_ID to enable SharePoint uploads)';
   }
-  const site = SITE_ID() || `${SITE_HOST()}${SITE_PATH()}`;
+  const { host, path } = siteHostAndPath();
+  const site = SITE_ID().includes(",") ? SITE_ID() : `${host}${path}`;
   const lib = DRIVE_ID() ? `drive ${DRIVE_ID()}` : DRIVE_NAME() ? `library "${DRIVE_NAME()}"` : "default library";
   const base = ROOT_FOLDER().trim() ? `folder "${ROOT_FOLDER().trim()}"` : "library root";
   return `SharePoint (site ${site}, ${lib}, base ${base})`;
@@ -194,20 +224,18 @@ let rootFolderIdCache = null;
 
 async function resolveSiteId() {
   if (siteIdCache) return siteIdCache;
-  if (SITE_ID()) { siteIdCache = SITE_ID(); return siteIdCache; }
+  // Use SP_SITE_ID directly ONLY if it's a real Graph id (has commas). A URL pasted into
+  // it is handled as a URL by siteHostAndPath instead.
+  if (SITE_ID().includes(",")) { siteIdCache = SITE_ID().trim(); return siteIdCache; }
 
-  const host = SITE_HOST();
-  let path = SITE_PATH();
+  const { host, path } = siteHostAndPath();
   if (!host || !path) {
-    throw new Error("SharePoint site is not configured (set SP_SITE_ID, or both SP_SITE_HOST and SP_SITE_PATH).");
+    throw new Error("SharePoint site is not configured. Set SP_SITE_URL to the site address (e.g. https://contoso.sharepoint.com/sites/Admissions), or SP_SITE_HOST + SP_SITE_PATH.");
   }
-  // Graph addresses a site by path as /sites/{host}:/{server-relative-path}. Normalise a
-  // missing leading slash so both "sites/Admissions" and "/sites/Admissions" work.
-  if (!path.startsWith("/")) path = `/${path}`;
-
+  // Graph addresses a site by path as /sites/{host}:/{server-relative-path}.
   const site = await graphFetch(`/sites/${host}:${path}`);
   if (!site || !site.id) {
-    throw new Error(`Could not resolve the SharePoint site "${host}${path}". Check SP_SITE_HOST and SP_SITE_PATH.`);
+    throw new Error(`Could not resolve the SharePoint site "${host}${path}". Check the site address (SP_SITE_URL).`);
   }
   siteIdCache = site.id;
   return siteIdCache;
