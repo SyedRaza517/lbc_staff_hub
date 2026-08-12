@@ -270,6 +270,44 @@ function sanitizeFolderName(name) {
   return cleaned;
 }
 
+// --- Ensuring a child folder exists under a parent -------------------------------
+// The single place that turns "a folder named N should exist directly under parent P"
+// into a driveItem { id, webUrl }. Both ensureApplicantFolder (one level under root) and
+// ensureFolderPath (walking a nested path) go through here so there's one implementation.
+// `name` is assumed ALREADY sanitised by the caller — this helper doesn't second-guess it.
+//
+// Look for an existing child by path relative to the parent's id; a 404 just means it
+// isn't there yet, so fall through and create it. conflictBehavior "fail" makes a race
+// surface as a 409 rather than silently renaming the folder to "Name 1" — which would
+// scatter documents across two folders — so on that 409 we fetch and return the folder the
+// other writer just made.
+async function ensureChildFolder(parentId, name) {
+  const driveId = await resolveDriveId();
+
+  // Look for an existing child by path relative to the parent folder's id.
+  try {
+    const existing = await graphFetch(`/drives/${driveId}/items/${parentId}:/${encodeURIComponent(name)}`);
+    if (existing && existing.id) return { id: existing.id, webUrl: existing.webUrl };
+  } catch (e) {
+    if (e.status !== 404) throw e; // 404 = not there yet; fall through to create it
+  }
+
+  try {
+    const created = await graphFetch(`/drives/${driveId}/items/${parentId}/children`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, folder: {}, "@microsoft.graph.conflictBehavior": "fail" }),
+    });
+    return { id: created.id, webUrl: created.webUrl };
+  } catch (e) {
+    if (e.status === 409) {
+      const existing = await graphFetch(`/drives/${driveId}/items/${parentId}:/${encodeURIComponent(name)}`);
+      return { id: existing.id, webUrl: existing.webUrl };
+    }
+    throw e;
+  }
+}
+
 // --- Public operations -----------------------------------------------------------
 
 /**
@@ -283,34 +321,35 @@ async function ensureApplicantFolder(folderName) {
   const name = sanitizeFolderName(folderName);
   if (!name) throw new Error("An applicant folder name is required.");
 
-  const driveId = await resolveDriveId();
   const rootId = await resolveRootFolderId();
+  return ensureChildFolder(rootId, name);
+}
 
-  // Look for an existing child by path relative to the root folder's id.
-  try {
-    const existing = await graphFetch(`/drives/${driveId}/items/${rootId}:/${encodeURIComponent(name)}`);
-    if (existing && existing.id) return { id: existing.id, webUrl: existing.webUrl };
-  } catch (e) {
-    if (e.status !== 404) throw e; // 404 = not there yet; fall through to create it
+/**
+ * Ensure a NESTED folder path exists under the base (root) folder and return the deepest
+ * folder's { id, webUrl }. Given e.g. ["HND - Business", "Sep 2026", "Aaliyah Khan (a1b2c3)"]
+ * it yields Course / Intake / Student, creating each missing level and reusing any that
+ * already exist. Each segment is sanitised exactly like an applicant folder name; a segment
+ * that sanitises to nothing becomes "Unspecified" so a missing course or intake can't
+ * collapse the path or produce an empty name. Idempotent: repeated calls with the same
+ * segments reuse the existing folders and never create duplicates.
+ */
+async function ensureFolderPath(segments) {
+  if (!isConfigured()) throw new Error("SharePoint isn't set up on the server yet.");
+  if (!Array.isArray(segments) || segments.length === 0) {
+    throw new Error("A folder path (at least one segment) is required.");
   }
 
-  // Create it. conflictBehavior "fail" makes a race surface as a 409 rather than silently
-  // renaming the folder to "Name 1" — which would scatter one applicant's documents across
-  // two folders. On that 409 we fetch and return the folder the other writer just made.
-  try {
-    const created = await graphFetch(`/drives/${driveId}/items/${rootId}/children`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, folder: {}, "@microsoft.graph.conflictBehavior": "fail" }),
-    });
-    return { id: created.id, webUrl: created.webUrl };
-  } catch (e) {
-    if (e.status === 409) {
-      const existing = await graphFetch(`/drives/${driveId}/items/${rootId}:/${encodeURIComponent(name)}`);
-      return { id: existing.id, webUrl: existing.webUrl };
-    }
-    throw e;
+  // Start at the base folder, then ensure one child level per segment, descending into
+  // each as we go so it becomes the parent for the next.
+  let parentId = await resolveRootFolderId();
+  let current = null;
+  for (const segment of segments) {
+    const name = sanitizeFolderName(segment) || "Unspecified";
+    current = await ensureChildFolder(parentId, name);
+    parentId = current.id;
   }
+  return current; // the deepest (last-segment) folder
 }
 
 /**
@@ -359,6 +398,7 @@ module.exports = {
   isConfigured,
   describe,
   ensureApplicantFolder,
+  ensureFolderPath,
   uploadFile,
   deleteItem,
   MAX_BYTES,

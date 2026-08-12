@@ -17,4 +17,20 @@ const ADMISSION_DOC_TYPES = [
 const DOC_KEYS = ADMISSION_DOC_TYPES.map((d) => d.key);
 const docLabel = (key) => (ADMISSION_DOC_TYPES.find((d) => d.key === key) || {}).label || key;
 
-module.exports = { ADMISSION_DOC_TYPES, DOC_KEYS, docLabel };
+// The SharePoint folder path for one application, as an array of segments:
+//   Admissions / <course> / <intake> / <student name>
+// The base "Admissions" folder is the SharePoint root (SP_ROOT_FOLDER); these are the
+// levels created beneath it. Missing course/intake fall back to a named bucket so a
+// half-complete application still files somewhere sensible rather than at the root. The
+// student folder carries a short id suffix so two applicants with the same name in the
+// same intake don't collide into one folder.
+function admissionFolderSegments(a) {
+  const name = [a.firstName, a.surname].filter(Boolean).join(" ").trim() || "Applicant";
+  return [
+    (a.course || "").trim() || "Unspecified course",
+    (a.intake || "").trim() || "Unspecified intake",
+    `${name} (${String(a.id).slice(-6)})`,
+  ];
+}
+
+module.exports = { ADMISSION_DOC_TYPES, DOC_KEYS, docLabel, admissionFolderSegments };

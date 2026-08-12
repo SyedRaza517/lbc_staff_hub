@@ -11,7 +11,7 @@ const { requireAuth, requirePage } = require("../auth");
 const email = require("../email");
 const sharepoint = require("../sharepoint");
 const storage = require("../storage");
-const { ADMISSION_DOC_TYPES } = require("../admissionDocs");
+const { ADMISSION_DOC_TYPES, admissionFolderSegments } = require("../admissionDocs");
 
 // Where the applicant's upload page lives (the SPA reads ?upload=<token>).
 const CLIENT_URL = (process.env.CLIENT_URL || "http://localhost:5173").replace(/\/$/, "");
@@ -28,7 +28,7 @@ const sAdmission = (r) => { const { uploadTokenHash, ...rest } = r; return rest;
 // into Prisma (which would throw), and adding a form field is a one-line change here.
 const FIELDS = [
   // Course details
-  "course", "foundVia", "classOption", "firstName", "middleName", "surname", "dob",
+  "course", "intake", "foundVia", "classOption", "firstName", "middleName", "surname", "dob",
   "gender", "email", "phone", "countryOfBirth", "countryOfCitizenship", "idDocNo",
   "idDateOfIssue", "idDateOfExpiry", "idIssuingCountry", "niNumber",
   // Home address
@@ -150,7 +150,8 @@ router.post("/:id/request-documents", async (req, res) => {
   let warning = null;
   if (sharepoint.isConfigured()) {
     try {
-      const folder = await sharepoint.ensureApplicantFolder(`${name} (${a.id.slice(-6)})`);
+      // Admissions / <course> / <intake> / <student name>
+      const folder = await sharepoint.ensureFolderPath(admissionFolderSegments(a));
       patch.spFolderId = folder.id; patch.spFolderUrl = folder.webUrl;
     } catch (e) { warning = `Could not create the SharePoint folder yet: ${e.message}`; }
   }

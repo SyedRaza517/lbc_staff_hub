@@ -10061,6 +10061,7 @@ const YES_NO = ["Yes", "No"];
 const ADMISSION_SECTIONS = [
   { title: "Course Details", fields: [
     { key: "course", label: "Which course are you applying for", type: "select", required: true, options: ["HND - Business", "HND - Sustainable Business Management", "HND - Leadership and Management"] },
+    { key: "intake", label: "Which intake are you applying for?", type: "select", required: true, options: ["Sep 2026", "Jan 2027", "May 2027", "Sep 2027", "Jan 2028"] },
     { key: "foundVia", label: "How did you find out about London Brookes College?", type: "select", required: true, options: ["College Website/Social Media", "Agent", "Family Member", "Friend", "Other"] },
     { key: "classOption", label: "Select the class option you would prefer:", type: "select", hint: "You are required to complete 12hrs of onsite study.", options: ["Two days per week - 10 a.m.-5 p.m (12hrs)", "Two evenings online - 6 p.m.-9 p.m. (6hrs) plus One day In-Campus 10 a.m. - 5 p.m. (6hrs)"] },
     { key: "firstName", label: "First Name", type: "text", required: true },

@@ -13,7 +13,7 @@ const router = express.Router();
 const prisma = require("../db");
 const sharepoint = require("../sharepoint");
 const storage = require("../storage");
-const { ADMISSION_DOC_TYPES, DOC_KEYS, docLabel } = require("../admissionDocs");
+const { ADMISSION_DOC_TYPES, DOC_KEYS, docLabel, admissionFolderSegments } = require("../admissionDocs");
 
 const hashToken = (raw) => crypto.createHash("sha256").update(String(raw)).digest("hex");
 const extOf = (name) => (String(name || "").match(/\.[A-Za-z0-9]{1,8}$/) || [""])[0];
@@ -82,8 +82,8 @@ router.post("/:token", express.raw({ type: "*/*", limit: sharepoint.MAX_BYTES })
       // Ensure the applicant's folder exists (created on request, but be defensive).
       let folderId = admission.spFolderId;
       if (!folderId) {
-        const nm = [admission.firstName, admission.surname].filter(Boolean).join(" ") || "Applicant";
-        const folder = await sharepoint.ensureApplicantFolder(`${nm} (${admission.id.slice(-6)})`);
+        // Admissions / <course> / <intake> / <student name>
+        const folder = await sharepoint.ensureFolderPath(admissionFolderSegments(admission));
         folderId = folder.id;
         await prisma.admission.update({ where: { id: admission.id }, data: { spFolderId: folder.id, spFolderUrl: folder.webUrl } });
       }
