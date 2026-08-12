@@ -256,7 +256,11 @@ async function resolveDriveId() {
   // as it appears in the URL) still matches "09 Admissions".
   const wanted = DRIVE_NAME();
   if (wanted) {
-    const norm = (s) => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+    // Compare loosely: lowercase and collapse every run of non-alphanumeric characters
+    // (spaces, any kind of dash/hyphen, underscores) to one space — so "09 Admissions"
+    // matches a library actually named "09 - Admissions" or "09 – Admissions". ASCII-only
+    // regex, so no exotic dash character has to survive the file/deploy pipeline.
+    const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const list = await graphFetch(`/sites/${siteId}/drives`);
     const drives = (list && list.value) || [];
     const match = drives.find((d) => norm(d.name) === norm(wanted));
