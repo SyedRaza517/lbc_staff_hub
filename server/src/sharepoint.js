@@ -32,10 +32,16 @@ const SITE_ID = () => process.env.SP_SITE_ID || "";
 const SITE_HOST = () => process.env.SP_SITE_HOST || "";
 const SITE_PATH = () => process.env.SP_SITE_PATH || "";
 
-// Optional overrides: a specific drive (document library) id, and the base folder under
-// which per-applicant folders live. Default matches how Admissions has been set up.
+// Optional overrides for which document library to use. Either the opaque drive id, OR
+// its display name (e.g. "09  Admissions"), which the server resolves among the site's
+// libraries — much friendlier than looking up an id. If neither is set, the site's
+// default library ("Documents") is used.
 const DRIVE_ID = () => process.env.SP_DRIVE_ID || "";
-const ROOT_FOLDER = () => process.env.SP_ROOT_FOLDER || "Admissions";
+const DRIVE_NAME = () => process.env.SP_DRIVE_NAME || "";
+// The base folder under which the Course / Intake / Student tree is created. EMPTY (the
+// default) means create that tree DIRECTLY in the chosen library's root. Set this only if
+// you want an extra wrapper folder inside the library.
+const ROOT_FOLDER = () => process.env.SP_ROOT_FOLDER || "";
 
 // The Graph service root. v1.0 is the stable channel; nothing here needs /beta.
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
@@ -62,7 +68,9 @@ function describe() {
     return 'not configured (set SP_TENANT_ID, SP_CLIENT_ID, SP_CLIENT_SECRET and SP_SITE_ID to enable SharePoint uploads)';
   }
   const site = SITE_ID() || `${SITE_HOST()}${SITE_PATH()}`;
-  return `SharePoint (site ${site}, folder "${ROOT_FOLDER()}")`;
+  const lib = DRIVE_ID() ? `drive ${DRIVE_ID()}` : DRIVE_NAME() ? `library "${DRIVE_NAME()}"` : "default library";
+  const base = ROOT_FOLDER().trim() ? `folder "${ROOT_FOLDER().trim()}"` : "library root";
+  return `SharePoint (site ${site}, ${lib}, base ${base})`;
 }
 
 // --- Access token (client-credentials grant, cached) -----------------------------
@@ -210,9 +218,27 @@ async function resolveDriveId() {
   if (DRIVE_ID()) { driveIdCache = DRIVE_ID(); return driveIdCache; }
 
   const siteId = await resolveSiteId();
+
+  // Selected by name: list the site's document libraries and match on display name.
+  // Comparison collapses whitespace and ignores case, so "09  Admissions" (two spaces,
+  // as it appears in the URL) still matches "09 Admissions".
+  const wanted = DRIVE_NAME();
+  if (wanted) {
+    const norm = (s) => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const list = await graphFetch(`/sites/${siteId}/drives`);
+    const drives = (list && list.value) || [];
+    const match = drives.find((d) => norm(d.name) === norm(wanted));
+    if (!match) {
+      const names = drives.map((d) => `"${d.name}"`).join(", ") || "(none)";
+      throw new Error(`No SharePoint document library named "${wanted}" on this site. Available libraries: ${names}. Fix SP_DRIVE_NAME (or set SP_DRIVE_ID).`);
+    }
+    driveIdCache = match.id;
+    return driveIdCache;
+  }
+
   const drive = await graphFetch(`/sites/${siteId}/drive`);
   if (!drive || !drive.id) {
-    throw new Error("The SharePoint site has no default document library (drive). Set SP_DRIVE_ID explicitly.");
+    throw new Error("The SharePoint site has no default document library (drive). Set SP_DRIVE_ID or SP_DRIVE_NAME explicitly.");
   }
   driveIdCache = drive.id;
   return driveIdCache;
@@ -225,7 +251,16 @@ async function resolveRootFolderId() {
   if (rootFolderIdCache) return rootFolderIdCache;
 
   const driveId = await resolveDriveId();
-  const rootFolder = ROOT_FOLDER();
+  const rootFolder = ROOT_FOLDER().trim();
+
+  // No base folder configured → the Course/Intake/Student tree lives directly in the
+  // chosen library's root. Return the drive root item's id and skip creating a wrapper.
+  if (!rootFolder) {
+    const root = await graphFetch(`/drives/${driveId}/root`);
+    if (!root || !root.id) throw new Error("Could not read the SharePoint library root.");
+    rootFolderIdCache = root.id;
+    return rootFolderIdCache;
+  }
 
   try {
     const item = await graphFetch(`/drives/${driveId}/root:/${encodeURIComponent(rootFolder)}`);
