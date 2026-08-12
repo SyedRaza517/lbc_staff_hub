@@ -26,14 +26,23 @@ const useResend = () => Boolean(process.env.RESEND_API_KEY);
 const isConfigured = () => Boolean(process.env.RESEND_API_KEY || process.env.SMTP_URL || process.env.SMTP_HOST);
 
 // Send via Resend's HTTP API with a hard timeout so it can never hang a request.
-async function sendViaResend(to, subject, text, html) {
+// `attachments` (optional) is [{ filename, content }] where content is a Buffer or a
+// base64 string — Resend wants base64, so a Buffer is encoded here.
+async function sendViaResend(to, subject, text, html, attachments) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12000);
+  const timer = setTimeout(() => ctrl.abort(), 20000);
   try {
+    const payload = { from: FROM, to, subject, text, html: html || defaultHtml(subject, text) };
+    if (attachments && attachments.length) {
+      payload.attachments = attachments.map((a) => ({
+        filename: a.filename,
+        content: Buffer.isBuffer(a.content) ? a.content.toString("base64") : a.content,
+      }));
+    }
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: FROM, to, subject, text, html: html || defaultHtml(subject, text) }),
+      body: JSON.stringify(payload),
       signal: ctrl.signal,
     });
     const data = await res.json().catch(() => ({}));
@@ -98,19 +107,21 @@ function defaultHtml(subject, text) {
 
 // Send a message. Returns { sent, stubbed, messageId?, previewUrl?, error? } so
 // callers and the check script can report what happened; nothing throws.
-async function sendEmail(to, subject, body, { html } = {}) {
+async function sendEmail(to, subject, body, { html, attachments } = {}) {
   if (!to) return { sent: false, stubbed: false, error: "no recipient" };
 
   if (!isConfigured()) {
     console.log(`\n[email:stub] would send →`);
     console.log(`  To:      ${to}`);
     console.log(`  Subject: ${subject}`);
-    console.log(`  Body:    ${body}\n`);
+    console.log(`  Body:    ${body}`);
+    if (attachments?.length) console.log(`  Attach:  ${attachments.map((a) => a.filename).join(", ")}`);
+    console.log("");
     return { sent: false, stubbed: true };
   }
 
   // Prefer the HTTP API when configured (works where SMTP is blocked).
-  if (useResend()) return sendViaResend(to, subject, body, html);
+  if (useResend()) return sendViaResend(to, subject, body, html, attachments);
 
   try {
     const info = await getTransport().sendMail({
@@ -119,6 +130,8 @@ async function sendEmail(to, subject, body, { html } = {}) {
       subject,
       text: body,
       html: html || defaultHtml(subject, body),
+      // nodemailer takes a Buffer (or base64 with encoding) directly.
+      attachments: attachments?.map((a) => ({ filename: a.filename, content: a.content })),
     });
     // Ethereal and other test transports expose a browsable copy of the message.
     const previewUrl = nodemailer.getTestMessageUrl ? nodemailer.getTestMessageUrl(info) || undefined : undefined;

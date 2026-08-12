@@ -838,6 +838,21 @@ model Admission {
   spFolderId        String?
   spFolderUrl       String?
 
+  // --- Admissions decision (set manually by an admin) ---
+  interviewStatus String?   // "Not interviewed" | "Passed" | "Reject" | "Refer"
+  enrollStatus    String?   // "Enroll" | "Rejected" | null (= pending)
+  studentId       String?   // college student ID, typed in by an admin
+
+  // --- Offer letter ---
+  // offerStatus: null (not sent) | "sent" | "accepted". The applicant accepts via a
+  // secure link (hashed token, like the upload link); the raw value lives only in the
+  // email. offerInductionDate is the first-day date the admin picked when sending.
+  offerStatus        String?
+  offerSentAt        DateTime?
+  offerAcceptedAt    DateTime?
+  offerInductionDate String?
+  offerTokenHash     String?   @unique
+
   documents AdmissionDocument[]
 
   createdAt DateTime @default(now())

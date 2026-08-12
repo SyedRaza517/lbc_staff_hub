@@ -10291,7 +10291,7 @@ function AdmissionDocsPanel({ r, store, onChanged }) {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-bold text-slate-700">{t.label}</p>
-                {d ? <p className="truncate text-[11px] text-slate-400">{d.fileName}{d.confirmed ? " · verified" : ""}</p> : <p className="text-[11px] text-slate-300">Not uploaded</p>}
+                {d ? <p className="truncate text-[11px] text-slate-400">{d.fileName}{d.confirmed ? ` · verified${d.confirmedBy ? ` by ${d.confirmedBy}` : ""}` : ""}</p> : <p className="text-[11px] text-slate-300">Not uploaded</p>}
               </div>
               {d && (
                 <div className="flex items-center gap-1">
@@ -10306,6 +10306,88 @@ function AdmissionDocsPanel({ r, store, onChanged }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// Interview outcome options for the list dropdown (first = the "unset" default).
+const INTERVIEW_OPTIONS = ["Not interviewed", "Passed", "Reject", "Refer"];
+const interviewTone = (v) => v === "Passed" ? "text-emerald-700 bg-emerald-50" : v === "Reject" ? "text-rose-700 bg-rose-50" : v === "Refer" ? "text-amber-700 bg-amber-50" : "text-slate-500 bg-white";
+
+// Inline, click-to-save student-ID cell — local state so typing isn't clobbered by a
+// list refresh; commits on blur / Enter only when the value actually changed.
+function StudentIdCell({ r, onSave }) {
+  const [v, setV] = useState(r.studentId || "");
+  useEffect(() => { setV(r.studentId || ""); }, [r.studentId]);
+  const commit = () => { const t = v.trim(); if ((r.studentId || "") !== t) onSave(r.id, { studentId: t }); };
+  return (
+    <input value={v} onChange={e => setV(e.target.value)} onBlur={commit}
+      onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} onClick={e => e.stopPropagation()}
+      placeholder="Add ID" className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-xs outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+  );
+}
+
+// The offer-letter panel inside an application's View modal: pick the induction date,
+// send the letter (PDF + Accept link) by email, and see whether it's been accepted.
+function AdmissionOfferPanel({ r, store, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [dialog, setDialog] = useState(false);
+  const [inductionDate, setInductionDate] = useState("");
+  const [link, setLink] = useState("");
+
+  const sent = r.offerStatus === "sent";
+  const accepted = r.offerStatus === "accepted";
+
+  const send = async () => {
+    if (!inductionDate) { store.notify("Please pick the induction (first) day.", "error"); return; }
+    setBusy(true);
+    try {
+      const res = await api.sendAdmissionOffer(r.id, { inductionDate });
+      setLink(res.link || "");
+      store.notify(res.emailed ? `Offer letter emailed to ${r.email}` : "Email isn't set up — copy the link below to send it", res.emailed ? "success" : "info");
+      if (res.warning) store.notify(res.warning, "error");
+      setDialog(false);
+      onChanged?.();
+    } catch (e) { store.notify(e.message || "Could not send the offer", "error"); }
+    setBusy(false);
+  };
+  const copyLink = async () => { try { await navigator.clipboard.writeText(link); store.notify("Link copied"); } catch { /* ignore */ } };
+
+  return (
+    <div className="mt-4 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200/70">
+      <div className="flex flex-wrap items-center gap-2">
+        <Award size={16} style={{ color: MAROON }} />
+        <p className="text-sm font-extrabold" style={{ color: NAVY_DARK }}>Offer letter</p>
+        {accepted
+          ? <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">Accepted{r.offerAcceptedAt ? ` · ${fmtDate(String(r.offerAcceptedAt).slice(0, 10))}` : ""}</span>
+          : sent
+            ? <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-[11px] font-bold text-blue-700">Sent{r.offerSentAt ? ` · ${fmtDate(String(r.offerSentAt).slice(0, 10))}` : ""}</span>
+            : <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-400">Not sent</span>}
+        <div className="ml-auto">
+          <button onClick={() => { setDialog(d => !d); setInductionDate(""); }} disabled={!r.email} title={!r.email ? "Add an email address first" : ""}
+            className="press flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white transition hover:opacity-95 disabled:opacity-40" style={{ background: MAROON }}>
+            <Send size={13} /> {sent || accepted ? "Resend offer" : "Send offer letter"}
+          </button>
+        </div>
+      </div>
+      {!r.email && <p className="mt-2 flex items-start gap-1.5 text-[11px] font-semibold text-amber-600"><AlertCircle size={12} className="mt-px shrink-0" /> This application has no email address — add one (Edit) before sending an offer.</p>}
+      {accepted && <p className="mt-2 text-[11px] text-slate-400">The applicant accepted their place. Enrolment stays a manual decision in the Enroll column.</p>}
+
+      {dialog && (
+        <div className="mt-3 rounded-xl bg-white p-3 ring-1 ring-slate-200">
+          <Field label="Induction / first day">
+            <input type="date" value={inductionDate} onChange={e => setInductionDate(e.target.value)} className={inputCls} />
+          </Field>
+          <p className="mt-1.5 text-[11px] text-slate-400">Report time 09:45 am · session starts 10:00 am (as per the standard letter). The PDF is generated with the applicant's name, address and course, and emailed with an Accept link.</p>
+          <PrimaryBtn colour={MAROON} onClick={send} disabled={busy} className="mt-3 w-full">{busy ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Generate & send offer letter</>}</PrimaryBtn>
+        </div>
+      )}
+      {link && (
+        <div className="mt-3 flex items-center gap-2 rounded-lg bg-white px-2.5 py-2 ring-1 ring-slate-200">
+          <input readOnly value={link} className="min-w-0 flex-1 bg-transparent text-[11px] text-slate-500 outline-none" onFocus={e => e.target.select()} />
+          <button onClick={copyLink} className="press flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-200"><Copy size={12} /> Copy</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -10344,6 +10426,12 @@ function AdminAdmissions({ store }) {
       setViewing(v => v ? (fresh.find(x => x.id === v.id) || v) : v);
     } catch (_) { /* a transient failure shouldn't disturb the panel */ }
   }, []);
+
+  // Save an inline decision field (interview / enrol / student ID) from the list.
+  const saveStatus = async (id, patch) => {
+    try { await api.updateAdmissionStatus(id, patch); await refresh(); }
+    catch (e) { store.notify(e.message || "Could not save that change", "error"); }
+  };
 
   // Editing a field clears its "missing" flag so the rose ring disappears as it's filled.
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setMissing(m => { if (!m.has(k)) return m; const n = new Set(m); n.delete(k); return n; }); };
@@ -10514,13 +10602,15 @@ function AdminAdmissions({ store }) {
         <>
           <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 fade-up">
             <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
-              <table className="w-full min-w-[960px] text-sm">
+              <table className="w-full min-w-[1320px] text-sm">
                 <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
                   <tr>
                     <th className="w-10 px-4 py-3"><input ref={selectAllRef} type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all applications" className="h-4 w-4 cursor-pointer align-middle accent-blue-600" /></th>
                     <th className="px-5 py-3">Applicant</th><th className="px-5 py-3">Course</th>
                     <th className="px-5 py-3">Email</th><th className="px-5 py-3 whitespace-nowrap">Phone</th>
-                    <th className="px-5 py-3 whitespace-nowrap">Applied</th><th className="px-5 py-3 whitespace-nowrap">Documents</th><th className="px-5 py-3 text-right">Actions</th>
+                    <th className="px-5 py-3 whitespace-nowrap">Applied</th><th className="px-5 py-3 whitespace-nowrap">Documents</th>
+                    <th className="px-5 py-3 whitespace-nowrap">Interview</th><th className="px-5 py-3 whitespace-nowrap">Student ID</th>
+                    <th className="px-5 py-3 text-right">Actions</th><th className="px-5 py-3 whitespace-nowrap">Enroll</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -10548,6 +10638,13 @@ function AdminAdmissions({ store }) {
                             ? <span className="text-slate-300">—</span>
                             : <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${dUp === 0 ? "bg-slate-100 text-slate-400" : dUp === dTot ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{dUp === dTot && dVer === dTot && <ShieldCheck size={11} />}{dUp}/{dTot}</span>}
                         </td>
+                        <td className="px-5 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                          <select value={r.interviewStatus || "Not interviewed"} onChange={(e) => saveStatus(r.id, { interviewStatus: e.target.value })}
+                            className={`cursor-pointer rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold outline-none transition focus:border-blue-400 ${interviewTone(r.interviewStatus)}`}>
+                            {INTERVIEW_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-5 py-3 whitespace-nowrap"><StudentIdCell r={r} onSave={saveStatus} /></td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-1 whitespace-nowrap">
                             <button onClick={(e) => { e.stopPropagation(); setViewing(r); }} title="View" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><FileText size={15} /></button>
@@ -10555,11 +10652,19 @@ function AdminAdmissions({ store }) {
                             <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }} title="Delete" className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button>
                           </div>
                         </td>
+                        <td className="px-5 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex gap-1">
+                            <button onClick={() => saveStatus(r.id, { enrollStatus: r.enrollStatus === "Enroll" ? "" : "Enroll" })}
+                              className={`press rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${r.enrollStatus === "Enroll" ? "text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`} style={r.enrollStatus === "Enroll" ? { background: "#059669" } : {}}>Enroll</button>
+                            <button onClick={() => saveStatus(r.id, { enrollStatus: r.enrollStatus === "Rejected" ? "" : "Rejected" })}
+                              className={`press rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${r.enrollStatus === "Rejected" ? "text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`} style={r.enrollStatus === "Rejected" ? { background: MAROON } : {}}>Reject</button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
                   {paged.slice.length === 0 && (
-                    <tr><td colSpan={8} className="px-5 py-12">
+                    <tr><td colSpan={11} className="px-5 py-12">
                       <EmptyState Icon={ClipboardList} title={rows.length ? "No applications match" : "No applications yet"}
                         msg={rows.length ? "Try a different search." : "Press “Create new entry” to add the first application."} />
                     </td></tr>
@@ -10598,6 +10703,7 @@ function AdminAdmissions({ store }) {
           <>
             <AdmissionDetail r={viewing} />
             <AdmissionDocsPanel r={viewing} store={store} onChanged={refresh} />
+            <AdmissionOfferPanel r={viewing} store={store} onChanged={refresh} />
             <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
               <button onClick={() => exportOneCsv(viewing)} className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><Download size={14} /> Export CSV</button>
               <button onClick={() => exportPdf(viewing)} className="press flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold text-white transition hover:opacity-95" style={{ background: MAROON }}><FileText size={14} /> Export PDF</button>

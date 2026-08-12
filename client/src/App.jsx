@@ -9,6 +9,7 @@ import MobileAuth from "./MobileAuth";
 import ResetPasswordPage from "./ResetPassword";
 import AcceptInvite from "./AcceptInvite";
 import AdmissionUpload from "./AdmissionUpload";
+import AdmissionOffer from "./AdmissionOffer";
 import { useIsHandset, isNativeApp } from "./PhoneShell";
 import { BrandMark } from "./Brand";
 import StudentApp from "./StudentApp";
@@ -222,6 +223,11 @@ export default function App() {
     if (typeof window === "undefined") return null;
     return new URLSearchParams(window.location.search).get("upload");
   });
+  // "?offer=<token>" — an applicant opening the "Accept your offer" link from their email.
+  const [offerToken, setOfferToken] = useState(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("offer");
+  });
   // Biometric app lock — only ever active inside the packaged app, and only when
   // the user has switched it on.
   const { locked, unlock } = useAppLock(Boolean(user));
@@ -233,11 +239,13 @@ export default function App() {
     setResetToken(null);
     setInviteToken(null);
     setUploadToken(null);
+    setOfferToken(null);
     setEntry(null);
   };
 
   // These public token pages are valid whether or not a stale session exists, and
   // deliberately run before the auth gate below.
+  if (offerToken) return (<><style>{GLOBAL_STYLE}</style><AdmissionOffer token={offerToken} onDone={clearTokenFromUrl} /></>);
   if (uploadToken) return (<><style>{GLOBAL_STYLE}</style><AdmissionUpload token={uploadToken} onDone={clearTokenFromUrl} /></>);
   if (inviteToken) return (<><style>{GLOBAL_STYLE}</style><AcceptInvite token={inviteToken} onDone={clearTokenFromUrl} /></>);
   if (resetToken) return (<><style>{GLOBAL_STYLE}</style><ResetPasswordPage token={resetToken} onDone={clearTokenFromUrl} /></>);

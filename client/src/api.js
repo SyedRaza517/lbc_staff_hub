@@ -166,6 +166,22 @@ export const api = {
   confirmAdmissionDocument: (docId, confirmed = true) => request(`/admissions/documents/${docId}/confirm`, { method: "PUT", body: { confirmed } }),
   removeAdmissionDocument: (docId) => request(`/admissions/documents/${docId}`, { method: "DELETE" }),
   admissionDocumentUrl: (docId) => request(`/admissions/documents/${docId}/file`),
+  // admissions — decision (interview/enrol/studentId) + offer letter (admin)
+  updateAdmissionStatus: (id, data) => request(`/admissions/${id}/status`, { method: "PUT", body: data }),
+  sendAdmissionOffer: (id, data) => request(`/admissions/${id}/send-offer`, { method: "POST", body: data }),
+  // admissions — applicant offer acceptance (PUBLIC: authed by the emailed token)
+  offerInfo: async (token) => {
+    const res = await fetch(`${BASE}/admission-offers/${encodeURIComponent(token)}`);
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { const e = new Error(data?.error || `Could not load (${res.status})`); e.status = res.status; throw e; }
+    return data;
+  },
+  acceptOffer: async (token) => {
+    const res = await fetch(`${BASE}/admission-offers/${encodeURIComponent(token)}/accept`, { method: "POST" });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { const e = new Error(data?.error || `Could not accept (${res.status})`); e.status = res.status; throw e; }
+    return data;
+  },
   // admissions — applicant upload page (PUBLIC: authed by the emailed token, no login)
   admissionUploadInfo: async (token) => {
     const res = await fetch(`${BASE}/admission-uploads/${encodeURIComponent(token)}`);
