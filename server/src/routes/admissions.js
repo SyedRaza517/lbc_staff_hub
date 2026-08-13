@@ -154,17 +154,22 @@ router.put("/:id/status", async (req, res) => {
   if ("studentId" in b) data.studentId = str(b.studentId).slice(0, 100) || null;
   let row = await prisma.admission.update({ where: { id: req.params.id }, data });
 
-  // Once enrolled, name the folder after the student: "<studentId> - <name>".
+  // On enrolment, the applicant's SharePoint folder is named "<studentId> - <name>".
+  // If the folder already exists it's renamed; if it doesn't (documents were never
+  // requested), it's created now in the right Course/Intake path with that name.
   let warning = null;
-  if (row.enrollStatus === "Enroll" && row.spFolderId && sharepoint.isConfigured()) {
+  if (row.enrollStatus === "Enroll" && sharepoint.isConfigured()) {
     if (!row.studentId) {
-      warning = "Enrolled — add a Student ID to rename the SharePoint folder.";
+      warning = "Enrolled — add a Student ID so the folder can be named after the student.";
     } else {
       const name = [row.firstName, row.surname].filter(Boolean).join(" ") || "Applicant";
       try {
-        const folder = await sharepoint.renameItem(row.spFolderId, `${row.studentId} - ${name}`);
-        row = await prisma.admission.update({ where: { id: row.id }, data: { spFolderUrl: folder.webUrl } });
-      } catch (e) { warning = `Enrolled, but the SharePoint folder couldn't be renamed: ${e.message}`; }
+        // admissionFolderSegments now yields "<studentId> - <name>" because the row is enrolled.
+        const folder = row.spFolderId
+          ? await sharepoint.renameItem(row.spFolderId, `${row.studentId} - ${name}`)
+          : await sharepoint.ensureFolderPath(admissionFolderSegments(row));
+        row = await prisma.admission.update({ where: { id: row.id }, data: { spFolderId: folder.id, spFolderUrl: folder.webUrl } });
+      } catch (e) { warning = `Enrolled, but the SharePoint folder couldn't be set: ${e.message}`; }
     }
   }
 

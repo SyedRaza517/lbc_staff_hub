@@ -10623,15 +10623,20 @@ function AdminAdmissions({ store }) {
   const openEdit = (r) => { setEditing(r); setForm(admissionForm(r)); setFormErr(""); setMissing(new Set()); setModal(true); };
 
   const save = async () => {
-    // Mirror the form's own required questions: block save until every asterisked field
-    // is filled, mark the blanks, and jump the dialog to the first one.
-    const blanks = ADMISSION_REQUIRED.filter(k => !String(form[k] || "").trim());
-    if (blanks.length) {
-      setMissing(new Set(blanks));
-      setFormErr(`Please complete all required fields (marked *). ${blanks.length} still need${blanks.length === 1 ? "s" : ""} an answer.`);
-      const el = typeof document !== "undefined" && document.querySelector(`[data-akey="${blanks[0]}"]`);
-      el?.scrollIntoView({ behavior: "smooth", block: "center" });
-      return;
+    // For a NEW entry, mirror the form's required questions (block until each asterisked
+    // field is filled). For an EDIT, don't — an admin must be able to change one field
+    // (e.g. course/intake) without back-filling every required answer; only a name is needed.
+    if (editing) {
+      if (!form.firstName.trim() && !form.surname.trim()) { setFormErr("Enter at least a first name or surname."); return; }
+    } else {
+      const blanks = ADMISSION_REQUIRED.filter(k => !String(form[k] || "").trim());
+      if (blanks.length) {
+        setMissing(new Set(blanks));
+        setFormErr(`Please complete all required fields (marked *). ${blanks.length} still need${blanks.length === 1 ? "s" : ""} an answer.`);
+        const el = typeof document !== "undefined" && document.querySelector(`[data-akey="${blanks[0]}"]`);
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
     }
     setBusy(true); setFormErr("");
     try {
@@ -10796,7 +10801,7 @@ function AdminAdmissions({ store }) {
                     <th className="px-5 py-3">Email</th><th className="px-5 py-3 whitespace-nowrap">Phone</th>
                     <th className="px-5 py-3 whitespace-nowrap">Applied</th><th className="px-5 py-3 whitespace-nowrap">Documents</th>
                     <th className="px-5 py-3 whitespace-nowrap" title="From the ISM (interview) outcome">Admitted</th><th className="px-5 py-3 whitespace-nowrap">Student ID</th>
-                    <th className="px-5 py-3 text-right">Actions</th><th className="px-5 py-3 whitespace-nowrap">Enroll</th>
+                    <th className="px-5 py-3 whitespace-nowrap">Enroll</th><th className="px-5 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -10830,13 +10835,6 @@ function AdminAdmissions({ store }) {
                             : <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-5 py-3 whitespace-nowrap"><StudentIdCell r={r} onSave={saveStatus} /></td>
-                        <td className="px-4 py-3">
-                          <div className="flex justify-end gap-1 whitespace-nowrap">
-                            <button onClick={(e) => { e.stopPropagation(); setViewing(r); }} title="View" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><FileText size={15} /></button>
-                            <button onClick={(e) => { e.stopPropagation(); openEdit(r); }} title="Edit" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button>
-                            <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }} title="Delete" className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button>
-                          </div>
-                        </td>
                         <td className="px-5 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                           <div className="flex gap-1">
                             <button onClick={() => saveStatus(r.id, { enrollStatus: r.enrollStatus === "Enroll" ? "" : "Enroll" })}
@@ -10845,6 +10843,13 @@ function AdminAdmissions({ store }) {
                               className={`press rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${r.enrollStatus === "Rejected" ? "text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`} style={r.enrollStatus === "Rejected" ? { background: MAROON } : {}}>Reject</button>
                             <button onClick={() => saveStatus(r.id, { enrollStatus: r.enrollStatus === "Withdraw" ? "" : "Withdraw" })}
                               className={`press rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${r.enrollStatus === "Withdraw" ? "text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`} style={r.enrollStatus === "Withdraw" ? { background: "#d97706" } : {}}>Withdraw</button>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-1 whitespace-nowrap">
+                            <button onClick={(e) => { e.stopPropagation(); setViewing(r); }} title="View" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><FileText size={15} /></button>
+                            <button onClick={(e) => { e.stopPropagation(); openEdit(r); }} title="Edit" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button>
+                            <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }} title="Delete" className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button>
                           </div>
                         </td>
                       </tr>
