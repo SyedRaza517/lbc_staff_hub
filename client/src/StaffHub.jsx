@@ -10627,6 +10627,20 @@ function AdminAdmissions({ store }) {
     catch (e) { store.notify(e.message || "Could not save that change", "error"); }
   };
 
+  // One reusable confirm dialog for the consequential list actions — the enrol decisions
+  // and Edit. Each button opens it with a tailored message instead of acting immediately.
+  const [confirmAction, setConfirmAction] = useState(null);
+  const askEnroll = (r, status) => {
+    const nm = admissionName(r) || "this applicant";
+    const label = status === "Rejected" ? "Reject" : status;
+    if (r.enrollStatus === status) { setConfirmAction({ title: `Clear "${label}"?`, message: `Remove the "${label}" decision from ${nm}?`, confirmLabel: "Clear", run: () => saveStatus(r.id, { enrollStatus: "" }) }); return; }
+    const msg = status === "Enroll"
+      ? `Mark ${nm} as enrolled? Their SharePoint folder will be renamed to "<Student ID> - ${nm}".`
+      : status === "Rejected" ? `Mark ${nm}'s application as rejected?` : `Mark ${nm} as withdrawn?`;
+    setConfirmAction({ title: `${label} ${nm}?`, message: msg, confirmLabel: label, danger: status !== "Enroll", run: () => saveStatus(r.id, { enrollStatus: status }) });
+  };
+  const askEdit = (r) => setConfirmAction({ title: "Edit this application?", message: `Open ${admissionName(r) || "this application"} for editing?`, confirmLabel: "Edit", run: () => openEdit(r) });
+
   // Editing a field clears its "missing" flag so the rose ring disappears as it's filled.
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setMissing(m => { if (!m.has(k)) return m; const n = new Set(m); n.delete(k); return n; }); };
   const openAdd = () => { setEditing(null); setForm(blankAdmission()); setFormErr(""); setMissing(new Set()); setModal(true); };
@@ -10847,18 +10861,18 @@ function AdminAdmissions({ store }) {
                         <td className="px-5 py-3 whitespace-nowrap"><StudentIdCell r={r} onSave={saveStatus} /></td>
                         <td className="px-5 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                           <div className="flex gap-1">
-                            <button onClick={() => saveStatus(r.id, { enrollStatus: r.enrollStatus === "Enroll" ? "" : "Enroll" })}
+                            <button onClick={() => askEnroll(r, "Enroll")}
                               className={`press rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${r.enrollStatus === "Enroll" ? "text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`} style={r.enrollStatus === "Enroll" ? { background: "#059669" } : {}}>Enroll</button>
-                            <button onClick={() => saveStatus(r.id, { enrollStatus: r.enrollStatus === "Rejected" ? "" : "Rejected" })}
+                            <button onClick={() => askEnroll(r, "Rejected")}
                               className={`press rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${r.enrollStatus === "Rejected" ? "text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`} style={r.enrollStatus === "Rejected" ? { background: MAROON } : {}}>Reject</button>
-                            <button onClick={() => saveStatus(r.id, { enrollStatus: r.enrollStatus === "Withdraw" ? "" : "Withdraw" })}
+                            <button onClick={() => askEnroll(r, "Withdraw")}
                               className={`press rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${r.enrollStatus === "Withdraw" ? "text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`} style={r.enrollStatus === "Withdraw" ? { background: "#d97706" } : {}}>Withdraw</button>
                           </div>
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-1 whitespace-nowrap">
                             <button onClick={(e) => { e.stopPropagation(); setViewing(r); }} title="View" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><FileText size={15} /></button>
-                            <button onClick={(e) => { e.stopPropagation(); openEdit(r); }} title="Edit" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button>
+                            <button onClick={(e) => { e.stopPropagation(); askEdit(r); }} title="Edit" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button>
                             <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }} title="Delete" className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button>
                           </div>
                         </td>
@@ -10934,6 +10948,17 @@ function AdminAdmissions({ store }) {
         danger
         onConfirm={confirmRemove}
         onCancel={() => !busy && setDeleteTarget(null)}
+      />
+
+      {/* Confirmation for the enrol decisions (Enroll / Reject / Withdraw) and Edit. */}
+      <ConfirmDialog
+        open={!!confirmAction}
+        title={confirmAction?.title}
+        message={confirmAction?.message}
+        confirmLabel={confirmAction?.confirmLabel || "Confirm"}
+        danger={confirmAction?.danger}
+        onConfirm={() => { confirmAction?.run?.(); setConfirmAction(null); }}
+        onCancel={() => setConfirmAction(null)}
       />
     </>
   );
