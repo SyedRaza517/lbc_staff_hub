@@ -752,9 +752,11 @@ model Admission {
   id                     String   @id @default(cuid())
   // Course details
   course                 String?
-  // Which intake the applicant is applying for (e.g. "Sep 2026"). Drives the SharePoint
-  // folder path: Admissions / <course> / <intake> / <student name> / documents.
+  // The intake: a month (January | April | June | September) plus a year. Combined
+  // ("September 2026") they drive the SharePoint folder: Admissions / <course> /
+  // <intake year> / <student name> / documents.
   intake                 String?
+  intakeYear             String?
   foundVia               String?
   classOption            String?
   firstName              String?

@@ -4,7 +4,7 @@
 // unknown keys can be smuggled into Prisma).
 const FIELDS = [
   // Course details
-  "course", "intake", "foundVia", "classOption", "firstName", "middleName", "surname", "dob",
+  "course", "intake", "intakeYear", "foundVia", "classOption", "firstName", "middleName", "surname", "dob",
   "gender", "email", "phone", "countryOfBirth", "countryOfCitizenship", "idDocNo",
   "idDateOfIssue", "idDateOfExpiry", "idIssuingCountry", "niNumber",
   // Home address

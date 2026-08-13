@@ -10055,15 +10055,21 @@ const fmtSlotTime = (s) => `${periodOf(s.start)} ${s.start} – ${s.end}`;
 // "if yes, give details" answers). Adding a question here + on the Prisma model is all
 // it takes to extend the form — the server copies fields off a fixed whitelist.
 const YES_NO = ["Yes", "No"];
+// The four intake months, and a rolling range of years (this year − 1 … + 5) for the
+// intake-year picker.
+const INTAKE_MONTHS = ["January", "April", "June", "September"];
+const INTAKE_YEARS = Array.from({ length: 7 }, (_, i) => String(new Date().getFullYear() - 1 + i));
 // Transcribed verbatim from the college's "London Brookes College HND Application Form"
 // (Microsoft Forms, 61 questions across 9 pages). Question text, option lists, required
 // flags and the page/section help notes match the original one-for-one so an admin can
 // copy a paper/online application straight down the screen. Fields expecting "N/A" as an
-// answer stay as text (a date picker can't hold "N/A").
+// answer stay as text (a date picker can't hold "N/A"). The "course" field's options are
+// replaced at render time with the live courses table (fallback below if it can't load).
 export const ADMISSION_SECTIONS = [
   { title: "Course Details", fields: [
     { key: "course", label: "Which course are you applying for", type: "select", required: true, options: ["HND - Business", "HND - Sustainable Business Management", "HND - Leadership and Management"] },
-    { key: "intake", label: "Which intake are you applying for?", type: "select", required: true, options: ["Sep 2026", "Jan 2027", "May 2027", "Sep 2027", "Jan 2028"] },
+    { key: "intake", label: "Which intake are you applying for?", type: "select", required: true, options: INTAKE_MONTHS },
+    { key: "intakeYear", label: "Intake year", type: "select", required: true, options: INTAKE_YEARS },
     { key: "foundVia", label: "How did you find out about London Brookes College?", type: "select", required: true, options: ["College Website/Social Media", "Agent", "Family Member", "Friend", "Other"] },
     { key: "classOption", label: "Select the class option you would prefer:", type: "select", hint: "You are required to complete 12hrs of onsite study.", options: ["Two days per week - 10 a.m.-5 p.m (12hrs)", "Two evenings online - 6 p.m.-9 p.m. (6hrs) plus One day In-Campus 10 a.m. - 5 p.m. (6hrs)"] },
     { key: "firstName", label: "First Name", type: "text", required: true },
@@ -10592,6 +10598,8 @@ function AdminAdmissions({ store }) {
   const [bulkDelete, setBulkDelete] = useState(false);
   const selectAllRef = useRef(null);
 
+  const [courseOptions, setCourseOptions] = useState([]);
+
   const load = useCallback(async () => {
     setLoading(true); setErr("");
     try { setRows(await api.admissions()); }
@@ -10599,6 +10607,8 @@ function AdminAdmissions({ store }) {
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+  // The course dropdown is populated from the live courses table.
+  useEffect(() => { api.applicationCourses().then(setCourseOptions).catch(() => {}); }, []);
 
   // Silent reload after a document action, keeping the open View modal in sync with the
   // fresh row (so a new upload / verification appears without closing the dialog).
@@ -10880,7 +10890,7 @@ function AdminAdmissions({ store }) {
               </div>
               {sec.note && <p className="mb-2.5 rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-snug text-slate-500 ring-1 ring-slate-100">{sec.note}</p>}
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                {sec.fields.map(f => <AdmissionField key={f.key} f={f} value={form[f.key]} onChange={set} missing={missing.has(f.key)} />)}
+                {sec.fields.map(f => { const ff = (f.key === "course" && courseOptions.length) ? { ...f, options: courseOptions } : f; return <AdmissionField key={f.key} f={ff} value={form[f.key]} onChange={set} missing={missing.has(f.key)} />; })}
               </div>
             </div>
           ))}

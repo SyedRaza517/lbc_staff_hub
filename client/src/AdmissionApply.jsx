@@ -5,7 +5,7 @@
 // their Admissions tab, then shows a thank-you confirmation. The form is data-driven
 // from ADMISSION_SECTIONS, so admissions can change the questions without touching
 // this file.
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { api } from "./api";
 import { ADMISSION_SECTIONS, ADMISSION_REQUIRED } from "./StaffHub";
 import { BrandLockup } from "./Brand";
@@ -90,6 +90,9 @@ export default function AdmissionApply({ onDone }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const [courseOptions, setCourseOptions] = useState([]); // the live courses table
+
+  useEffect(() => { api.applicationCourses().then(setCourseOptions).catch(() => {}); }, []);
 
   // Editing a field clears its "missing" flag so its rose ring disappears as it fills.
   const set = (k, v) => {
@@ -182,9 +185,10 @@ export default function AdmissionApply({ onDone }) {
               <h2 className="text-sm font-bold tracking-tight" style={{ color: NAVY }}>{sec.title}</h2>
               {sec.note && <p className="mt-1 text-xs leading-relaxed text-slate-400">{sec.note}</p>}
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {sec.fields.map((f) => (
-                  <Field key={f.key} f={f} value={form[f.key]} missing={missing.has(f.key)} onChange={set} />
-                ))}
+                {sec.fields.map((f) => {
+                  const ff = (f.key === "course" && courseOptions.length) ? { ...f, options: courseOptions } : f;
+                  return <Field key={f.key} f={ff} value={form[f.key]} missing={missing.has(f.key)} onChange={set} />;
+                })}
               </div>
             </section>
           ))}

@@ -188,6 +188,12 @@ export const api = {
   addIsm: (data) => request("/ism", { method: "POST", body: data }),
   updateIsm: (id, data) => request(`/ism/${id}`, { method: "PUT", body: data }),
   removeIsm: (id) => request(`/ism/${id}`, { method: "DELETE" }),
+  // public: the course list for the application form's course dropdown (no login)
+  applicationCourses: async () => {
+    const res = await fetch(`${BASE}/admission-apply/courses`);
+    const data = await res.json().catch(() => []);
+    return Array.isArray(data) ? data : [];
+  },
   // public: a prospective student submitting the application form (no login)
   submitApplication: async (data) => {
     const res = await fetch(`${BASE}/admission-apply`, {

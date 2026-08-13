@@ -6,6 +6,15 @@ const router = require("express").Router();
 const prisma = require("../db");
 const { pick, str } = require("../admissionFields");
 
+// GET /api/admission-apply/courses — the course list for the application form's course
+// dropdown. PUBLIC (the form is open) and only exposes course names, nothing sensitive.
+router.get("/courses", async (_req, res) => {
+  try {
+    const rows = await prisma.course.findMany({ orderBy: { name: "asc" }, select: { name: true } });
+    res.json(rows.map((r) => r.name));
+  } catch (_) { res.json([]); }
+});
+
 // POST /api/admission-apply — create an application from the public form.
 router.post("/", async (req, res) => {
   // Light anti-spam: a hidden honeypot field only bots fill in. Pretend success so the

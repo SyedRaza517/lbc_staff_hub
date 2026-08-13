@@ -232,7 +232,7 @@ router.put("/:id", async (req, res) => {
   // Admissions / <course> / <intake> path in SharePoint (best-effort).
   let warning = null;
   const courseChanged = (existing.course || "") !== (row.course || "");
-  const intakeChanged = (existing.intake || "") !== (row.intake || "");
+  const intakeChanged = (existing.intake || "") !== (row.intake || "") || (existing.intakeYear || "") !== (row.intakeYear || "");
   if ((courseChanged || intakeChanged) && row.spFolderId && sharepoint.isConfigured()) {
     try {
       const [courseSeg, intakeSeg] = admissionFolderSegments(row); // [course, intake, name]

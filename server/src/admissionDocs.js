@@ -31,9 +31,10 @@ function admissionFolderSegments(a) {
   const student = (a.enrollStatus === "Enroll" && a.studentId)
     ? `${a.studentId} - ${name}`
     : `${name} (${String(a.id).slice(-6)})`;
+  const intake = [a.intake, a.intakeYear].map((s) => (s || "").trim()).filter(Boolean).join(" ");
   return [
     (a.course || "").trim() || "Unspecified course",
-    (a.intake || "").trim() || "Unspecified intake",
+    intake || "Unspecified intake",
     student,
   ];
 }
