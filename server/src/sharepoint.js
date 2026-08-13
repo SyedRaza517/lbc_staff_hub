@@ -465,6 +465,37 @@ async function deleteItem(itemId) {
   }
 }
 
+// PATCH a drive item's metadata (rename and/or re-parent). Returns the updated
+// { id, webUrl } — both change when a folder is renamed or moved.
+async function patchDriveItem(itemId, body) {
+  if (!isConfigured()) throw new Error("SharePoint isn't set up on the server yet.");
+  const driveId = await resolveDriveId();
+  const item = await graphFetch(`/drives/${driveId}/items/${itemId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { id: item.id, webUrl: item.webUrl };
+}
+
+/** Rename a folder (e.g. to "<studentId> - <name>" on enrolment). */
+async function renameItem(itemId, newName) {
+  const name = sanitizeFolderName(newName) || "Unnamed";
+  return patchDriveItem(itemId, { name });
+}
+
+/**
+ * Move a folder under a new parent (e.g. when the applicant's course/intake changes),
+ * optionally renaming it in the same call. `newParentId` is a folder driveItem id —
+ * typically the intake folder from ensureFolderPath([course, intake]).
+ */
+async function moveItem(itemId, newParentId, newName) {
+  const body = { parentReference: { id: newParentId } };
+  const nm = sanitizeFolderName(newName || "");
+  if (nm) body.name = nm;
+  return patchDriveItem(itemId, body);
+}
+
 module.exports = {
   isConfigured,
   describe,
@@ -472,5 +503,7 @@ module.exports = {
   ensureFolderPath,
   uploadFile,
   deleteItem,
+  renameItem,
+  moveItem,
   MAX_BYTES,
 };

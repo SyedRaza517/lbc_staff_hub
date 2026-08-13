@@ -141,8 +141,9 @@ router.post("/:id/request-documents", async (req, res) => {
   res.json({ admission: sAdmission(updated), emailed, link, warning });
 });
 
-// Inline admin decision fields from the list — interview outcome, enrol decision, and
-// the manually-assigned student ID. Only the keys present in the body are touched.
+// Inline admin decision fields from the list — enrol decision (Enroll/Rejected/Withdraw),
+// and the manually-assigned student ID. Only the keys present in the body are touched.
+// On ENROL, the applicant's SharePoint folder is renamed to "<studentId> - <name>".
 router.put("/:id/status", async (req, res) => {
   const existing = await prisma.admission.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Application not found." });
@@ -151,8 +152,26 @@ router.put("/:id/status", async (req, res) => {
   if ("interviewStatus" in b) data.interviewStatus = str(b.interviewStatus) || null;
   if ("enrollStatus" in b) data.enrollStatus = str(b.enrollStatus) || null;
   if ("studentId" in b) data.studentId = str(b.studentId).slice(0, 100) || null;
-  const row = await prisma.admission.update({ where: { id: req.params.id }, data, ...withDocs });
-  res.json(sAdmission(row));
+  let row = await prisma.admission.update({ where: { id: req.params.id }, data });
+
+  // Once enrolled, name the folder after the student: "<studentId> - <name>".
+  let warning = null;
+  if (row.enrollStatus === "Enroll" && row.spFolderId && sharepoint.isConfigured()) {
+    if (!row.studentId) {
+      warning = "Enrolled — add a Student ID to rename the SharePoint folder.";
+    } else {
+      const name = [row.firstName, row.surname].filter(Boolean).join(" ") || "Applicant";
+      try {
+        const folder = await sharepoint.renameItem(row.spFolderId, `${row.studentId} - ${name}`);
+        row = await prisma.admission.update({ where: { id: row.id }, data: { spFolderUrl: folder.webUrl } });
+      } catch (e) { warning = `Enrolled, but the SharePoint folder couldn't be renamed: ${e.message}`; }
+    }
+  }
+
+  const full = await prisma.admission.findUnique({ where: { id: row.id }, ...withDocs });
+  const out = sAdmission(full);
+  if (warning) out.warning = warning;
+  res.json(out);
 });
 
 // Generate the offer-letter PDF, email it to the applicant with a secure Accept link,
@@ -202,8 +221,26 @@ router.put("/:id", async (req, res) => {
   if (!data.firstName && !data.surname) {
     return res.status(400).json({ error: "An applicant needs at least a first name or surname." });
   }
-  const row = await prisma.admission.update({ where: { id: req.params.id }, data, ...withDocs });
-  res.json(sAdmission(row));
+  let row = await prisma.admission.update({ where: { id: req.params.id }, data });
+
+  // If the course or intake changed, move the applicant's folder to the matching
+  // Admissions / <course> / <intake> path in SharePoint (best-effort).
+  let warning = null;
+  const courseChanged = (existing.course || "") !== (row.course || "");
+  const intakeChanged = (existing.intake || "") !== (row.intake || "");
+  if ((courseChanged || intakeChanged) && row.spFolderId && sharepoint.isConfigured()) {
+    try {
+      const [courseSeg, intakeSeg] = admissionFolderSegments(row); // [course, intake, name]
+      const parent = await sharepoint.ensureFolderPath([courseSeg, intakeSeg]);
+      const moved = await sharepoint.moveItem(row.spFolderId, parent.id);
+      row = await prisma.admission.update({ where: { id: row.id }, data: { spFolderUrl: moved.webUrl } });
+    } catch (e) { warning = `Saved, but the SharePoint folder couldn't be moved: ${e.message}`; }
+  }
+
+  const full = await prisma.admission.findUnique({ where: { id: row.id }, ...withDocs });
+  const out = sAdmission(full);
+  if (warning) out.warning = warning;
+  res.json(out);
 });
 
 router.delete("/:id", async (req, res) => {

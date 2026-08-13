@@ -10610,9 +10610,10 @@ function AdminAdmissions({ store }) {
     } catch (_) { /* a transient failure shouldn't disturb the panel */ }
   }, []);
 
-  // Save an inline decision field (interview / enrol / student ID) from the list.
+  // Save an inline decision field (enrol / student ID) from the list. Enrolling can rename
+  // the SharePoint folder server-side; surface any warning it returns.
   const saveStatus = async (id, patch) => {
-    try { await api.updateAdmissionStatus(id, patch); await refresh(); }
+    try { const res = await api.updateAdmissionStatus(id, patch); if (res?.warning) store.notify(res.warning, "info"); await refresh(); }
     catch (e) { store.notify(e.message || "Could not save that change", "error"); }
   };
 
@@ -10634,7 +10635,7 @@ function AdminAdmissions({ store }) {
     }
     setBusy(true); setFormErr("");
     try {
-      if (editing) await api.updateAdmission(editing.id, form);
+      if (editing) { const res = await api.updateAdmission(editing.id, form); if (res?.warning) store.notify(res.warning, "info"); }
       else await api.addAdmission(form);
       store.notify(editing ? "Application updated" : "Application saved");
       setModal(false);
@@ -10842,6 +10843,8 @@ function AdminAdmissions({ store }) {
                               className={`press rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${r.enrollStatus === "Enroll" ? "text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`} style={r.enrollStatus === "Enroll" ? { background: "#059669" } : {}}>Enroll</button>
                             <button onClick={() => saveStatus(r.id, { enrollStatus: r.enrollStatus === "Rejected" ? "" : "Rejected" })}
                               className={`press rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${r.enrollStatus === "Rejected" ? "text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`} style={r.enrollStatus === "Rejected" ? { background: MAROON } : {}}>Reject</button>
+                            <button onClick={() => saveStatus(r.id, { enrollStatus: r.enrollStatus === "Withdraw" ? "" : "Withdraw" })}
+                              className={`press rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${r.enrollStatus === "Withdraw" ? "text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`} style={r.enrollStatus === "Withdraw" ? { background: "#d97706" } : {}}>Withdraw</button>
                           </div>
                         </td>
                       </tr>
