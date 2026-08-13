@@ -10341,6 +10341,7 @@ function AdmissionOfferPanel({ r, store, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState(false);
   const [inductionDate, setInductionDate] = useState("");
+  const [senderName, setSenderName] = useState(store.currentUser?.name || "");
   const [link, setLink] = useState("");
 
   const sent = r.offerStatus === "sent";
@@ -10348,9 +10349,10 @@ function AdmissionOfferPanel({ r, store, onChanged }) {
 
   const send = async () => {
     if (!inductionDate) { store.notify("Please pick the induction (first) day.", "error"); return; }
+    if (!senderName.trim()) { store.notify("Please enter your name — it signs the letter.", "error"); return; }
     setBusy(true);
     try {
-      const res = await api.sendAdmissionOffer(r.id, { inductionDate });
+      const res = await api.sendAdmissionOffer(r.id, { inductionDate, signatoryName: senderName.trim() });
       setLink(res.link || "");
       store.notify(res.emailed ? `Offer letter emailed to ${r.email}` : "Email isn't set up — copy the link below to send it", res.emailed ? "success" : "info");
       if (res.warning) store.notify(res.warning, "error");
@@ -10372,7 +10374,7 @@ function AdmissionOfferPanel({ r, store, onChanged }) {
             ? <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-[11px] font-bold text-blue-700">Sent{r.offerSentAt ? ` · ${fmtDate(String(r.offerSentAt).slice(0, 10))}` : ""}</span>
             : <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-400">Not sent</span>}
         <div className="ml-auto">
-          <button onClick={() => { setDialog(d => !d); setInductionDate(""); }} disabled={!r.email} title={!r.email ? "Add an email address first" : ""}
+          <button onClick={() => { setDialog(d => !d); setInductionDate(""); setSenderName(store.currentUser?.name || ""); }} disabled={!r.email} title={!r.email ? "Add an email address first" : ""}
             className="press flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white transition hover:opacity-95 disabled:opacity-40" style={{ background: MAROON }}>
             <Send size={13} /> {sent || accepted ? "Resend offer" : "Send offer letter"}
           </button>
@@ -10386,7 +10388,12 @@ function AdmissionOfferPanel({ r, store, onChanged }) {
           <Field label="Induction / first day">
             <input type="date" value={inductionDate} onChange={e => setInductionDate(e.target.value)} className={inputCls} />
           </Field>
-          <p className="mt-1.5 text-[11px] text-slate-400">Report time 09:45 am · session starts 10:00 am (as per the standard letter). The PDF is generated with the applicant's name, address and course, and emailed with an Accept link.</p>
+          <div className="mt-2">
+            <Field label="Your name (signs the letter)">
+              <input type="text" value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="e.g. Swaroop Arja" className={inputCls} />
+            </Field>
+          </div>
+          <p className="mt-1.5 text-[11px] text-slate-400">Report time 09:45 am · session starts 10:00 am (as per the standard letter). The PDF is generated with the applicant's name and course, signed with your name (page 2), and emailed with an Accept link.</p>
           <PrimaryBtn colour={MAROON} onClick={send} disabled={busy} className="mt-3 w-full">{busy ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Generate & send offer letter</>}</PrimaryBtn>
         </div>
       )}

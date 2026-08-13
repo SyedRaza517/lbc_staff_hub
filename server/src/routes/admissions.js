@@ -189,12 +189,15 @@ router.post("/:id/send-offer", async (req, res) => {
   const name = [a.firstName, a.surname].filter(Boolean).join(" ") || "Applicant";
   const inductionDate = str(req.body?.inductionDate) ? formatOfferDate(str(req.body.inductionDate)) : "";
   const letterDate = formatLetterDate(new Date());
+  // Whoever is sending types their own name in the dialog; it signs both the PDF
+  // (page 2) and the email body. Falls back to a sensible default if left blank.
+  const senderName = str(req.body?.signatoryName) || "Swaroop Arja";
 
   // Build the PDF (required lazily so the router still loads if the module is absent).
   let pdf;
   try {
     const { buildOfferLetterPdf } = require("../offerLetter");
-    pdf = await buildOfferLetterPdf(a, { letterDate, inductionDate, signatoryName: "Swaroop Arja", signatoryTitle: "Admissions Officer" });
+    pdf = await buildOfferLetterPdf(a, { letterDate, inductionDate, signatoryName: senderName, signatoryTitle: "Admissions Officer" });
   } catch (e) {
     return res.status(500).json({ error: `Could not generate the offer letter: ${e.message}` });
   }
@@ -205,10 +208,16 @@ router.post("/:id/send-offer", async (req, res) => {
     data: { offerStatus: "sent", offerSentAt: new Date(), offerTokenHash: hashToken(raw), offerInductionDate: inductionDate || null },
   });
 
+  // Sign-off carries the sender's typed name over "Admissions Officer, London
+  // Brookes College" — matching the PDF. The HTML copy is escaped defensively.
+  const escName = senderName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const textSignOff = `${senderName}\nAdmissions Officer\nLondon Brookes College`;
+  const htmlSignOff = `${escName}<br>Admissions Officer<br>London Brookes College`;
+
   const acceptLink = `${CLIENT_URL}/?offer=${raw}`;
   const subject = `London Brookes College — Your offer for ${a.course || "your course"}`;
-  const text = `Dear ${a.firstName || name},\n\nCongratulations! Following your application, we are delighted to offer you a place on ${a.course || "your course"} at London Brookes College. Your official offer letter is attached to this email as a PDF.\n\nTo confirm your place, please accept your offer here:\n${acceptLink}\n\nIf you have any questions, contact our Admissions Team at admissions@londonbrookescollege.co.uk or +447946830578.\n\nKind regards,\nLondon Brookes College Admissions`;
-  const html = `<p>Dear ${a.firstName || name},</p><p><b>Congratulations!</b> Following your application, we are delighted to offer you a place on <b>${a.course || "your course"}</b> at London Brookes College. Your official offer letter is attached to this email as a PDF.</p><p>To confirm your place, please accept your offer:</p><p><a href="${acceptLink}" style="display:inline-block;background:#1a3a8f;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:bold">Accept my offer</a></p><p>Or paste this link into your browser:<br>${acceptLink}</p><p>If you have any questions, contact our Admissions Team at admissions@londonbrookescollege.co.uk or +447946830578.</p><p>Kind regards,<br>London Brookes College Admissions</p>`;
+  const text = `Dear ${a.firstName || name},\n\nCongratulations! Following your application, we are delighted to offer you a place on ${a.course || "your course"} at London Brookes College. Your official offer letter is attached to this email as a PDF.\n\nTo confirm your place, please accept your offer here:\n${acceptLink}\n\nIf you have any questions, contact our Admissions Team at admissions@londonbrookescollege.co.uk or +447946830578.\n\nKind regards,\n${textSignOff}`;
+  const html = `<p>Dear ${a.firstName || name},</p><p><b>Congratulations!</b> Following your application, we are delighted to offer you a place on <b>${a.course || "your course"}</b> at London Brookes College. Your official offer letter is attached to this email as a PDF.</p><p>To confirm your place, please accept your offer:</p><p><a href="${acceptLink}" style="display:inline-block;background:#1a3a8f;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:bold">Accept my offer</a></p><p>Or paste this link into your browser:<br>${acceptLink}</p><p>If you have any questions, contact our Admissions Team at admissions@londonbrookescollege.co.uk or +447946830578.</p><p>Kind regards,<br>${htmlSignOff}</p>`;
   const fileName = `Offer Letter - ${name}.pdf`;
 
   let emailed = false, warning = null;
