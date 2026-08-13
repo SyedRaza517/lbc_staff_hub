@@ -149,13 +149,13 @@ export default function AdmissionUpload({ token, onDone }) {
           </span>
         </div>
 
-        {/* Reassurance / success banner — shows once anything is uploaded; not all are required. */}
+        {/* Success banner — shows once anything is uploaded. */}
         {uploadedCount > 0 && (
           <div className="pop mb-4 flex items-start gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200">
             <CheckCircle2 size={18} className="mt-px shrink-0" />
             <span>{allDone
-              ? "All documents uploaded — thank you! The admissions team will review them."
-              : "Your documents are saved. You don't have to upload all of them — add or replace files any time."}</span>
+              ? "All documents uploaded successfully — thank you! The admissions team will contact you if they need any more information or documents."
+              : "Your documents have been uploaded successfully. You can add or replace files any time. The admissions team will contact you if they need any more information or documents."}</span>
           </div>
         )}
 
@@ -246,19 +246,6 @@ export default function AdmissionUpload({ token, onDone }) {
             </p>
           )}
         </div>
-
-        {/* Optional, subtle Done affordance */}
-        {onDone && (
-          <div className="mt-6 text-center">
-            <button
-              type="button"
-              onClick={onDone}
-              className="text-xs font-semibold text-slate-400 underline-offset-2 transition hover:text-slate-600 hover:underline"
-            >
-              Done
-            </button>
-          </div>
-        )}
       </div>
     </Shell>
   );
