@@ -138,17 +138,6 @@ export default function AdmissionApply({ onDone }) {
         <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
           The admissions team will contact you soon about your process.
         </p>
-        {onDone && (
-          <div className="mt-6">
-            <button
-              type="button"
-              onClick={onDone}
-              className="text-xs font-semibold text-slate-400 underline-offset-2 transition hover:text-slate-600 hover:underline"
-            >
-              Done
-            </button>
-          </div>
-        )}
       </div>
     </Shell>
   );
