@@ -61,7 +61,7 @@ const isHomeSite = (v) => v == null || (isString(v) && HOME_SITES.includes(v));
 const ADMIN_PAGES = [
   "executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents",
   "approvals", "signups", "summaries", "registers", "students", "assessments",
-  "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "timetable", "admissions", "passwords", "settings",
+  "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "timetable", "admissions", "ism", "passwords", "settings",
 ];
 
 module.exports = {

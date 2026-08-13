@@ -839,9 +839,12 @@ model Admission {
   spFolderUrl       String?
 
   // --- Admissions decision (set manually by an admin) ---
-  interviewStatus String?   // "Not interviewed" | "Passed" | "Reject" | "Refer"
+  interviewStatus String?   // legacy manual field — superseded by the ISM "Admitted?" outcome
   enrollStatus    String?   // "Enroll" | "Rejected" | null (= pending)
   studentId       String?   // college student ID, typed in by an admin
+  // Mirror of the linked ISM (Intention to Study Meeting) outcome — "Yes" | "No" | "May Be" —
+  // so the Admissions list can show it without joining. Written by the ISM routes.
+  ismOutcome      String?
 
   // --- Offer letter ---
   // offerStatus: null (not sent) | "sent" | "accepted". The applicant accepts via a
@@ -854,11 +857,39 @@ model Admission {
   offerTokenHash     String?   @unique
 
   documents AdmissionDocument[]
+  isms      Ism[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([surname, firstName])
+}
+
+// An Intention to Study Meeting (ISM) — the admission interview record. Linked to an
+// applicant (admissionId); the "admitted" outcome is mirrored onto Admission.ismOutcome
+// so the Admissions list shows it. All answers are free text so the form can evolve.
+model Ism {
+  id          String   @id @default(cuid())
+  admission   Admission? @relation(fields: [admissionId], references: [id], onDelete: SetNull)
+  admissionId String?
+  name                String?
+  courseUnderstanding String?
+  lastStudied         String?
+  independentLearning String?
+  educationExperience String?
+  strengthsWeaknesses String?
+  prioritiseWorkload  String?
+  working             String?
+  teamworkExample     String?
+  wifiAccess          String?  // Yes | No
+  officeSkills        String?  // Yes | No
+  admitted            String?  // Yes | No | May Be
+  interviewerName     String?  // the admin who recorded the meeting
+  interviewDate       String?  // YYYY-MM-DD
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([admissionId])
 }
 
 // One uploaded document belonging to an application. There is at most one row per

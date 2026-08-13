@@ -84,6 +84,8 @@ app.use("/api/timetable", wrapAsync(require("./routes/timetable")));
 app.use("/api/admissions", wrapAsync(require("./routes/admissions")));
 app.use("/api/admission-uploads", wrapAsync(require("./routes/admissionsUpload")));
 app.use("/api/admission-offers", wrapAsync(require("./routes/admissionOffer")));
+app.use("/api/admission-apply", wrapAsync(require("./routes/admissionApply")));
+app.use("/api/ism", wrapAsync(require("./routes/ism")));
 
 // 404 + error handlers
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));

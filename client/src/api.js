@@ -182,6 +182,21 @@ export const api = {
     if (!res.ok) { const e = new Error(data?.error || `Could not accept (${res.status})`); e.status = res.status; throw e; }
     return data;
   },
+  // ISM (Intention to Study Meeting) — admission interview records (admin)
+  isms: () => request("/ism"),
+  ismRoster: () => request("/ism/roster"),
+  addIsm: (data) => request("/ism", { method: "POST", body: data }),
+  updateIsm: (id, data) => request(`/ism/${id}`, { method: "PUT", body: data }),
+  removeIsm: (id) => request(`/ism/${id}`, { method: "DELETE" }),
+  // public: a prospective student submitting the application form (no login)
+  submitApplication: async (data) => {
+    const res = await fetch(`${BASE}/admission-apply`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+    });
+    const out = await res.json().catch(() => null);
+    if (!res.ok) { const e = new Error(out?.error || `Could not submit (${res.status})`); e.status = res.status; throw e; }
+    return out;
+  },
   // admissions — applicant upload page (PUBLIC: authed by the emailed token, no login)
   admissionUploadInfo: async (token) => {
     const res = await fetch(`${BASE}/admission-uploads/${encodeURIComponent(token)}`);

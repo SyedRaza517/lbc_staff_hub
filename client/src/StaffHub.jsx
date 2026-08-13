@@ -2120,8 +2120,8 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
 /* ============================================================ ADMIN DASHBOARD ============================================================ */
 // The assignable admin pages, in nav order. "access" is intentionally excluded —
 // it is Super-Admin-only and never granted. Keep in sync with server validate.js.
-const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "timetable", "admissions", "passwords", "settings"];
-const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentreviews: "Student Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", timetable: "Timetable", admissions: "Admissions", passwords: "Reset Passwords", settings: "Settings" };
+const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "timetable", "admissions", "ism", "passwords", "settings"];
+const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentreviews: "Student Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", timetable: "Timetable", admissions: "Admissions", ism: "ISM (Interviews)", passwords: "Reset Passwords", settings: "Settings" };
 
 // Can this user see/use a given admin page? The Super Admin gets everything,
 // including the Super-Admin-only Access tab. A page-scoped admin gets only their
@@ -2558,6 +2558,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
     { key: "registers", label: "Registers — HND", I: ClipboardList },
     { key: "students", label: "Students", I: GraduationCap },
     { key: "admissions", label: "Admissions", I: ClipboardList },
+    { key: "ism", label: "ISM", I: MessageSquare },
     { key: "assessments", label: "Assessments", I: Award },
     { key: "pat", label: "PAT", I: MessageSquare },
     { key: "staffreviews", label: "Staff Reviews", I: ClipboardList },
@@ -2647,6 +2648,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
         {activeKey === "timesheets" && <AdminTimesheets store={store} />}
         {activeKey === "timetable" && <AdminTimetable store={store} />}
         {activeKey === "admissions" && <AdminAdmissions store={store} />}
+        {activeKey === "ism" && <AdminIsm store={store} />}
         {activeKey === "settings" && <AdminSettings store={store} />}
         {activeKey === "access" && <AdminAccess store={store} />}
       </main>
@@ -10058,7 +10060,7 @@ const YES_NO = ["Yes", "No"];
 // flags and the page/section help notes match the original one-for-one so an admin can
 // copy a paper/online application straight down the screen. Fields expecting "N/A" as an
 // answer stay as text (a date picker can't hold "N/A").
-const ADMISSION_SECTIONS = [
+export const ADMISSION_SECTIONS = [
   { title: "Course Details", fields: [
     { key: "course", label: "Which course are you applying for", type: "select", required: true, options: ["HND - Business", "HND - Sustainable Business Management", "HND - Leadership and Management"] },
     { key: "intake", label: "Which intake are you applying for?", type: "select", required: true, options: ["Sep 2026", "Jan 2027", "May 2027", "Sep 2027", "Jan 2028"] },
@@ -10149,7 +10151,7 @@ const ADMISSION_SECTIONS = [
   ] },
 ];
 // The keys the form requires (asterisked in the original). Used to block save until filled.
-const ADMISSION_REQUIRED = ADMISSION_SECTIONS.flatMap(s => s.fields.filter(f => f.required).map(f => f.key));
+export const ADMISSION_REQUIRED = ADMISSION_SECTIONS.flatMap(s => s.fields.filter(f => f.required).map(f => f.key));
 // Every field key, flattened — used to build a blank form and to map a saved row back.
 const ADMISSION_KEYS = ADMISSION_SECTIONS.flatMap(s => s.fields.map(f => f.key));
 const blankAdmission = () => Object.fromEntries(ADMISSION_KEYS.map(k => [k, ""]));
@@ -10392,6 +10394,187 @@ function AdmissionOfferPanel({ r, store, onChanged }) {
   );
 }
 
+/* ============================================================ ISM (interviews) ============================================================ */
+// The Intention to Study Meeting — the admission interview, transcribed from the college's
+// 12-question interview form. Each record links to an applicant; the "Admitted?" outcome
+// mirrors onto that applicant's Admissions row.
+const ISM_FIELDS = [
+  { key: "courseUnderstanding", label: "What do you understand about this course?", type: "textarea", span: 2 },
+  { key: "lastStudied", label: "When was the last time you studied? How many hours did you commit to self-study?", type: "textarea", span: 2 },
+  { key: "independentLearning", label: "What is your understanding of independent learning?", type: "textarea", span: 2 },
+  { key: "educationExperience", label: "What was your experience of education at school / college?", type: "textarea", span: 2 },
+  { key: "strengthsWeaknesses", label: "Describe your key strengths and weaknesses that would enable you to study and complete the qualification.", type: "textarea", span: 2 },
+  { key: "prioritiseWorkload", label: "How do you prioritise your workload? How do you decide what task is more important and should be completed first?", type: "textarea", span: 2 },
+  { key: "working", label: "Are you working? Part-time / Full-time", type: "text" },
+  { key: "teamworkExample", label: "Give an example of how you have worked successfully as part of a team — your role and its impact.", type: "textarea", span: 2 },
+  { key: "wifiAccess", label: "Do you have access to WiFi?", type: "select", options: ["Yes", "No"] },
+  { key: "officeSkills", label: "Do you know how to use Word / PowerPoint?", type: "select", options: ["Yes", "No"] },
+  { key: "admitted", label: "Admitted?", type: "select", options: ["Yes", "No", "May Be"] },
+];
+const ISM_KEYS = ["name", ...ISM_FIELDS.map(f => f.key)];
+const blankIsm = () => ({ admissionId: "", interviewDate: "", ...Object.fromEntries(ISM_KEYS.map(k => [k, ""])) });
+const ismFormFrom = (r) => ({ admissionId: r.admissionId || "", interviewDate: r.interviewDate || "", ...Object.fromEntries(ISM_KEYS.map(k => [k, r[k] ?? ""])) });
+const admittedTone = (v) => v === "Yes" ? "bg-emerald-100 text-emerald-700" : v === "No" ? "bg-rose-100 text-rose-700" : v === "May Be" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-400";
+
+function AdminIsm({ store }) {
+  const [rows, setRows] = useState([]);
+  const [roster, setRoster] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [query, setQuery] = useState("");
+  const [modal, setModal] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(blankIsm);
+  const [formErr, setFormErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [viewing, setViewing] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr("");
+    try { const [list, ros] = await Promise.all([api.isms(), api.ismRoster()]); setRows(list); setRoster(ros || []); }
+    catch (e) { setErr(e.message || "Could not load ISM records"); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  // Picking an applicant links the record and prefills the name if it's blank.
+  const pickApplicant = (id) => { const a = roster.find(x => x.id === id); setForm(f => ({ ...f, admissionId: id, name: (!f.name && a) ? a.name : f.name })); };
+  const openAdd = () => { setEditing(null); setForm(blankIsm()); setFormErr(""); setModal(true); };
+  const openEdit = (r) => { setEditing(r); setForm(ismFormFrom(r)); setFormErr(""); setModal(true); };
+
+  const save = async () => {
+    if (!form.admissionId && !form.name.trim()) { setFormErr("Pick an applicant or enter a name."); return; }
+    setBusy(true); setFormErr("");
+    try {
+      if (editing) await api.updateIsm(editing.id, form); else await api.addIsm(form);
+      store.notify(editing ? "ISM record updated" : "ISM record saved");
+      setModal(false); await load();
+    } catch (e) { setFormErr(e.message || "Could not save the ISM record"); }
+    setBusy(false);
+  };
+  const confirmRemove = async () => {
+    setBusy(true);
+    try { await api.removeIsm(deleteTarget.id); setDeleteTarget(null); store.notify("ISM record deleted", "error"); await load(); }
+    catch (e) { store.notify(e.message || "Could not delete", "error"); }
+    setBusy(false);
+  };
+
+  const ismName = (r) => (r.applicant?.name || r.name || "—");
+  const ql = query.trim().toLowerCase();
+  const list = rows.filter(r => !ql || ismName(r).toLowerCase().includes(ql) || (r.applicant?.course || "").toLowerCase().includes(ql) || (r.interviewerName || "").toLowerCase().includes(ql));
+  const paged = usePaged(list, 10, ql);
+
+  return (
+    <>
+      <AdminHeader title="ISM — Intention to Study Meetings" subtitle="Admission interview records — the “Admitted?” outcome shows on the applicant in Admissions"
+        Icon={MessageSquare} action={<PrimaryBtn onClick={openAdd}><Plus size={16} /> New ISM record</PrimaryBtn>} />
+
+      {err && <div className="mb-4 flex items-start gap-2 rounded-xl bg-rose-50 px-3.5 py-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={16} className="mt-px shrink-0" />{err}</div>}
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+          <Search size={15} className="text-slate-400" />
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, course or interviewer…" className="w-60 bg-transparent text-sm outline-none" />
+        </div>
+      </div>
+
+      {loading ? <div className="skeleton h-64 rounded-2xl" /> : (
+        <>
+          <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 fade-up">
+            <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
+              <table className="w-full min-w-[820px] text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
+                  <tr>
+                    <th className="px-5 py-3">Applicant</th><th className="px-5 py-3">Course</th>
+                    <th className="px-5 py-3 whitespace-nowrap">Admitted?</th><th className="px-5 py-3">Interviewer</th>
+                    <th className="px-5 py-3 whitespace-nowrap">Date</th><th className="px-5 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paged.slice.map(r => {
+                    const nm = ismName(r);
+                    const initials = (nm.split(" ").map(w => w[0]).join("").slice(0, 2) || "?").toUpperCase();
+                    return (
+                      <tr key={r.id} onClick={() => setViewing(r)} className="cursor-pointer border-t border-slate-100 transition-colors duration-150 hover:bg-blue-50/40">
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-sm" style={{ background: NAVY }}>{initials}</span>
+                            <div className="min-w-0"><p className="font-semibold text-slate-700">{nm}</p>{r.applicant ? <p className="text-[11px] text-emerald-600">Linked</p> : <p className="text-[11px] text-slate-300">Not linked</p>}</div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3 text-slate-500">{r.applicant?.course || <span className="text-slate-300">—</span>}</td>
+                        <td className="px-5 py-3 whitespace-nowrap">{r.admitted ? <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${admittedTone(r.admitted)}`}>{r.admitted}</span> : <span className="text-slate-300">—</span>}</td>
+                        <td className="px-5 py-3 text-slate-500">{r.interviewerName || <span className="text-slate-300">—</span>}</td>
+                        <td className="px-5 py-3 whitespace-nowrap text-slate-500">{fmtDate(String(r.interviewDate || r.createdAt).slice(0, 10))}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-1 whitespace-nowrap">
+                            <button onClick={(e) => { e.stopPropagation(); setViewing(r); }} title="View" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><FileText size={15} /></button>
+                            <button onClick={(e) => { e.stopPropagation(); openEdit(r); }} title="Edit" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button>
+                            <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }} title="Delete" className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {paged.slice.length === 0 && (
+                    <tr><td colSpan={6} className="px-5 py-12"><EmptyState Icon={MessageSquare} title={rows.length ? "No records match" : "No ISM records yet"} msg={rows.length ? "Try a different search." : "Press “New ISM record” to add an interview."} /></td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
+        </>
+      )}
+
+      {/* Add / edit */}
+      <Modal open={modal} onClose={() => !busy && setModal(false)} title={editing ? "Edit ISM record" : "New ISM record"} width={720}>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Applicant (from Admissions)">
+              <select value={form.admissionId} onChange={e => pickApplicant(e.target.value)} className={inputCls}>
+                <option value="">— not linked —</option>
+                {roster.map(a => <option key={a.id} value={a.id}>{a.name}{a.course ? ` · ${a.course}` : ""}</option>)}
+              </select>
+            </Field>
+            <Field label="Interview date"><input type="date" value={form.interviewDate} onChange={e => set("interviewDate", e.target.value)} className={inputCls} /></Field>
+          </div>
+          <div><Field label="Name"><input value={form.name} onChange={e => set("name", e.target.value)} placeholder="Applicant's name" className={inputCls} /></Field></div>
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+            {ISM_FIELDS.map(f => <AdmissionField key={f.key} f={f} value={form[f.key]} onChange={set} />)}
+          </div>
+          {formErr && <p className="flex items-start gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={13} className="mt-px shrink-0" />{formErr}</p>}
+          {editing?.interviewerName && <p className="text-[11px] text-slate-400">Recorded by {editing.interviewerName}.</p>}
+          <PrimaryBtn onClick={save} disabled={busy} className="w-full">{busy ? <><Loader2 size={16} className="animate-spin" /> Saving…</> : <><Save size={16} /> {editing ? "Save changes" : "Save ISM record"}</>}</PrimaryBtn>
+        </div>
+      </Modal>
+
+      {/* View */}
+      <Modal open={!!viewing} onClose={() => setViewing(null)} title={viewing ? (ismName(viewing) || "ISM record") : "ISM record"} width={680}>
+        {viewing && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2 text-[11px]">
+              {viewing.applicant?.course && <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-600">{viewing.applicant.course}</span>}
+              {viewing.admitted && <span className={`rounded-full px-2.5 py-1 font-bold ${admittedTone(viewing.admitted)}`}>Admitted: {viewing.admitted}</span>}
+              {viewing.interviewerName && <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-600">By {viewing.interviewerName}</span>}
+              {viewing.interviewDate && <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-600">{fmtDate(viewing.interviewDate)}</span>}
+            </div>
+            <dl className="space-y-2">
+              {ISM_FIELDS.filter(f => (viewing[f.key] ?? "") !== "").map(f => (
+                <div key={f.key}><dt className="text-[11px] font-semibold text-slate-400">{f.label}</dt><dd className="text-sm text-slate-700 whitespace-pre-wrap break-words">{viewing[f.key]}</dd></div>
+              ))}
+            </dl>
+          </div>
+        )}
+      </Modal>
+
+      <ConfirmDialog open={!!deleteTarget} title="Delete this ISM record?" message={`${deleteTarget ? ismName(deleteTarget) : "This"} interview record will be removed permanently. This cannot be undone.`} confirmLabel={busy ? "Deleting…" : "Delete record"} danger onConfirm={confirmRemove} onCancel={() => !busy && setDeleteTarget(null)} />
+    </>
+  );
+}
+
 function AdminAdmissions({ store }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -10575,7 +10758,9 @@ function AdminAdmissions({ store }) {
     <>
       <AdminHeader title="Admissions" subtitle="HND application entries — create, review, edit and remove"
         Icon={ClipboardList}
-        action={<div className="flex flex-wrap items-center gap-2"><ExportBtn onClick={exportCsv} /><PrimaryBtn onClick={openAdd}><Plus size={16} /> Create new entry</PrimaryBtn></div>} />
+        action={<div className="flex flex-wrap items-center gap-2">
+          <button onClick={async () => { const url = `${window.location.origin}/?apply`; try { await navigator.clipboard.writeText(url); store.notify("Application form link copied — share it with applicants"); } catch { store.notify(url, "info"); } }} className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><Copy size={14} /> Application link</button>
+          <ExportBtn onClick={exportCsv} /><PrimaryBtn onClick={openAdd}><Plus size={16} /> Create new entry</PrimaryBtn></div>} />
 
       {err && <div className="mb-4 flex items-start gap-2 rounded-xl bg-rose-50 px-3.5 py-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={16} className="mt-px shrink-0" />{err}</div>}
 
@@ -10609,7 +10794,7 @@ function AdminAdmissions({ store }) {
                     <th className="px-5 py-3">Applicant</th><th className="px-5 py-3">Course</th>
                     <th className="px-5 py-3">Email</th><th className="px-5 py-3 whitespace-nowrap">Phone</th>
                     <th className="px-5 py-3 whitespace-nowrap">Applied</th><th className="px-5 py-3 whitespace-nowrap">Documents</th>
-                    <th className="px-5 py-3 whitespace-nowrap">Interview</th><th className="px-5 py-3 whitespace-nowrap">Student ID</th>
+                    <th className="px-5 py-3 whitespace-nowrap" title="From the ISM (interview) outcome">Admitted</th><th className="px-5 py-3 whitespace-nowrap">Student ID</th>
                     <th className="px-5 py-3 text-right">Actions</th><th className="px-5 py-3 whitespace-nowrap">Enroll</th>
                   </tr>
                 </thead>
@@ -10638,11 +10823,10 @@ function AdminAdmissions({ store }) {
                             ? <span className="text-slate-300">—</span>
                             : <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${dUp === 0 ? "bg-slate-100 text-slate-400" : dUp === dTot ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{dUp === dTot && dVer === dTot && <ShieldCheck size={11} />}{dUp}/{dTot}</span>}
                         </td>
-                        <td className="px-5 py-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                          <select value={r.interviewStatus || "Not interviewed"} onChange={(e) => saveStatus(r.id, { interviewStatus: e.target.value })}
-                            className={`cursor-pointer rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold outline-none transition focus:border-blue-400 ${interviewTone(r.interviewStatus)}`}>
-                            {INTERVIEW_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                          </select>
+                        <td className="px-5 py-3 whitespace-nowrap">
+                          {r.ismOutcome
+                            ? <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${r.ismOutcome === "Yes" ? "bg-emerald-100 text-emerald-700" : r.ismOutcome === "No" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>{r.ismOutcome}</span>
+                            : <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-5 py-3 whitespace-nowrap"><StudentIdCell r={r} onSave={saveStatus} /></td>
                         <td className="px-4 py-3">
