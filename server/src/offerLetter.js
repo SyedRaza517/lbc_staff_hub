@@ -1,187 +1,242 @@
 // Builds the "unconditional offer" letter that Admissions sends to a successful HND
-// applicant, rendered as a single-page A4 PDF and returned as an in-memory Buffer.
+// applicant, rendered as a two-page A4 PDF and returned as an in-memory Buffer.
 //
-// The letter is a faithful copy of the printed London Brookes College letterhead:
-// a brand header band, the applicant's name and address, the offer body, and the
-// company small-print footer. Everything that varies per applicant (name, address,
-// course) comes from the `admission` record; everything that varies per send (the
-// letter date, induction date, who signs it) comes from `opts`. Both objects are
-// treated as untrusted — every field can be missing, and each falls back to a sane
-// default or an empty string so a half-complete record still produces a valid PDF
-// rather than throwing.
+// The letter is a faithful copy of the printed London Brookes College offer template:
+// page 1 carries the branded letterhead, the "Congratulations" headline, the offer
+// body (First Day + Accept Your Place), and the "Your journey starts here." line;
+// page 2 carries the sign-off. The letterhead logo is the college's fanlight emblem,
+// recreated here as vector paths (the same geometry as the app's <BrandMark>) so there
+// are no image files to ship or resolve at runtime.
+//
+// Everything that varies per applicant (name, course, intake) comes from the
+// `admission` record; everything that varies per send (induction date, arrival/start
+// times, who signs it) comes from `opts`. Both objects are treated as untrusted —
+// every field can be missing, and each falls back to a sane default or is simply
+// omitted so a half-complete record still produces a valid PDF rather than throwing.
 //
 // We keep to pdfkit's built-in PDF "standard 14" fonts (Times-Roman / Times-Bold /
-// Times-Italic / Helvetica) so there are no font files to ship or resolve at runtime.
+// Times-Italic / Times-BoldItalic / Helvetica) so there are no font files to resolve.
 const PDFDocument = require("pdfkit");
 
-// Brand palette — the deep navy of the wordmark and the maroon accent used on the
-// tagline and the signatory's name. Kept as named constants so a rebrand is a
-// one-line change and the two colours read the same everywhere they appear.
+// Brand palette. BLUE is the emblem's royal blue; NAVY the wordmark; MAROON the
+// "COLLEGE" line and link accents; INK the body text; GREY the small-print footer.
+const BLUE = "#1e40af";
 const NAVY = "#1a3a8f";
 const MAROON = "#9e1b32";
+const INK = "#000000";
+const GREY = "#555f6d";
 
-// A4 page geometry in PostScript points (72pt = 1in). We compute the printable
-// content width once so every text block and rule lines up on the same left/right
-// edges as the margin pdfkit is laying out against.
+// A4 page geometry in PostScript points (72pt = 1in). The printable content width is
+// computed once so every block and rule lines up on the same left/right edges.
 const A4_WIDTH = 595.28;
 const A4_HEIGHT = 841.89;
 const MARGIN = 56;
 const CONTENT_WIDTH = A4_WIDTH - MARGIN * 2;
+const RIGHT = A4_WIDTH - MARGIN;
 
-// Body copy point size. Kept modest (11pt) with a small line gap so both long
-// paragraphs, the address block and the sign-off comfortably share one page.
+// Body copy point size.
 const BODY_SIZE = 11;
 
 /**
  * Build the offer letter as a PDF.
  *
  * @param {object} admission - the applicant record; any field may be absent:
- *        firstName, surname, houseNo, street, city, postCode, course.
- * @param {object} opts - per-send overrides: letterDate, inductionDate, reportTime,
- *        sessionTime, signatoryName, signatoryTitle. Missing values fall back to the
- *        defaults applied below.
- * @returns {Promise<Buffer>} the finished single-page A4 PDF.
+ *        firstName, surname, course, intake, intakeYear.
+ * @param {object} opts - per-send overrides: inductionDate, reportTime, sessionTime,
+ *        signatoryName, signatoryTitle. Missing values fall back to the defaults below.
+ * @returns {Promise<Buffer>} the finished two-page A4 PDF.
  */
 async function buildOfferLetterPdf(admission = {}, opts = {}) {
   return new Promise((resolve, reject) => {
     try {
       // ---- Normalise the applicant fields -------------------------------------
       // Trim everything and coalesce to "" so a null/undefined never reaches pdfkit
-      // (which would print the literal word "undefined").
+      // (which would otherwise print the literal word "undefined").
       const a = admission || {};
       const firstName = String(a.firstName || "").trim();
-      const surname = String(a.surname || "").trim();
-      const fullName = [firstName, surname].filter(Boolean).join(" ");
-      const houseNo = String(a.houseNo || "").trim();
-      const street = String(a.street || "").trim();
-      const city = String(a.city || "").trim();
-      const postCode = String(a.postCode || "").trim();
       const course = String(a.course || "").trim();
+      const intake = String(a.intake || "").trim();
+      const intakeYear = String(a.intakeYear || "").trim();
+
+      // "[MONTH YEAR] INTAKE" — built from whatever intake parts we have, upper-cased
+      // to match the template. Omitted entirely if we know neither month nor year.
+      const intakeParts = [intake, intakeYear].filter(Boolean).join(" ");
+      const intakeLine = intakeParts ? `${intakeParts} INTAKE`.toUpperCase() : "";
 
       // ---- Normalise the per-send options, applying the documented defaults -----
       const o = opts || {};
-      const letterDate = String(o.letterDate || "");
       const inductionDate = String(o.inductionDate || "");
-      const reportTime = String(o.reportTime || "09:45 am");
-      const sessionTime = String(o.sessionTime || "10:00 am");
+      const reportTime = String(o.reportTime || "09:45 AM");
+      const sessionTime = String(o.sessionTime || "10:00 AM");
       const signatoryName = String(o.signatoryName || "Swaroop Arja");
       const signatoryTitle = String(o.signatoryTitle || "Admissions Officer");
 
       // ---- Set up the document and capture its bytes into a Buffer --------------
-      // pdfkit streams the PDF out as it is written; we buffer the chunks and
-      // resolve with a single concatenated Buffer once the stream ends.
       const doc = new PDFDocument({ size: "A4", margin: MARGIN });
       const chunks = [];
       doc.on("data", (c) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
 
-      // ===== Header band ========================================================
-      // Left: the bold navy wordmark. `lineBreak: false` keeps it on one line even
-      // if the printable width were tight.
-      doc.font("Times-Bold").fontSize(20).fillColor(NAVY)
-        .text("LONDON BROOKES COLLEGE", MARGIN, 52, { lineBreak: false });
-      // Right: the italic maroon tagline, right-aligned across the content width so
-      // it hugs the right margin opposite the wordmark.
-      doc.font("Times-Italic").fontSize(12).fillColor(MAROON)
-        .text("Your Success; Our Goal", MARGIN, 60, { width: CONTENT_WIDTH, align: "right" });
-
-      // A navy rule beneath the header separating the letterhead from the body.
-      doc.moveTo(MARGIN, 86).lineTo(A4_WIDTH - MARGIN, 86)
-        .lineWidth(1.5).strokeColor(NAVY).stroke();
-
-      // ===== Body ===============================================================
-      // Move the cursor below the rule and reset to black for the letter text.
-      doc.fillColor("#000000");
-      doc.x = MARGIN;
-      doc.y = 104;
-
-      // Small helpers so the letter reads top-to-bottom like the source document.
-      // `para` writes one left-aligned block in the chosen font/colour; `gap` drops
-      // a blank line's worth of vertical space between blocks.
-      const para = (text, font = "Times-Roman", color = "#000000") => {
-        doc.font(font).fontSize(BODY_SIZE).fillColor(color)
-          .text(text || "", { width: CONTENT_WIDTH, align: "left", lineGap: 2 });
+      // ===== Reusable letterhead ================================================
+      // The fanlight emblem, drawn in its native 100×58 space and scaled to `w` wide.
+      // This is the exact geometry of the app's <BrandMark>: a filled blue half-disc
+      // with a white fanlight (outer ring, inner ring, and six radial spokes).
+      const drawEmblem = (x, y, w) => {
+        const s = w / 100;
+        const cx = 50, by = 52, R = 46, rO = 39.5, rI = 13.5, N = 6;
+        const arc = (r) => `M ${cx - r} ${by} A ${r} ${r} 0 0 1 ${cx + r} ${by}`;
+        const angles = Array.from({ length: N }, (_, i) => ((i + 1) * 180) / (N + 1));
+        const pt = (r, deg) => {
+          const t = (deg * Math.PI) / 180;
+          return [cx + r * Math.cos(t), by - r * Math.sin(t)];
+        };
+        doc.save();
+        doc.translate(x, y).scale(s);
+        doc.path(`${arc(R)} Z`).fill(BLUE);                       // filled blue dome
+        doc.lineWidth(2.6).strokeColor("#ffffff").lineCap("round").lineJoin("round");
+        doc.path(arc(rO)).stroke();                                // outer fanlight ring
+        doc.path(arc(rI)).stroke();                                // inner ring
+        angles.forEach((deg) => {                                  // radial spokes
+          const [ix, iy] = pt(rI, deg), [ox, oy] = pt(rO, deg);
+          doc.moveTo(ix, iy).lineTo(ox, oy).stroke();
+        });
+        doc.restore();
       };
-      const gap = (n = 1) => doc.moveDown(n);
 
-      // Letter date.
-      para(letterDate);
-      gap();
+      // The full letterhead: emblem + two-line wordmark on the left, italic tagline on
+      // the right, and a navy rule beneath. Drawn identically at the top of every page.
+      const drawHeader = () => {
+        drawEmblem(MARGIN, 40, 44);
+        doc.font("Times-Bold").fontSize(18).fillColor(NAVY)
+          .text("LONDON BROOKES", MARGIN, 70, { lineBreak: false });
+        doc.font("Times-Bold").fontSize(9.5).fillColor(MAROON)
+          .text("COLLEGE", MARGIN, 91, { characterSpacing: 4, lineBreak: false });
+        doc.font("Times-BoldItalic").fontSize(9).fillColor("#333333")
+          .text("YOUR SUCCESS; OUR GOAL", MARGIN, 56, { width: CONTENT_WIDTH, align: "right" });
+        doc.moveTo(MARGIN, 110).lineTo(RIGHT, 110).lineWidth(1.5).strokeColor(NAVY).stroke();
+      };
 
-      // Recipient — name in bold, then the address block. Empty parts collapse so a
-      // missing house number or city doesn't leave a stray comma or full stop.
-      para(fullName, "Times-Bold");
-      const addrLine1 = [houseNo, street].filter(Boolean).join(" ");
-      if (addrLine1) para(addrLine1 + ",");
-      if (city) para(city + ".");
-      if (postCode) para(postCode);
-      gap();
+      // The company small-print footer, with a hairline rule above it, pinned near the
+      // foot of the current page. Drawn identically on every page.
+      const drawFooter = () => {
+        doc.page.margins.bottom = 0; // stop pdfkit spilling this low block onto a new page
+        const lines = [
+          "London Brookes College is a company limited by guarantee registered in England and Wales 6683232.  Registered Office: 42 The Burroughs, Hendon, London NW4 4AP",
+          "Tel: 0208 202 2007 | Fax: 0208 202 2047",
+          "email: info@londonbrookescollege.co.uk | website: www.Londonbrookescollege.co.uk",
+          "ISI No: 482 - Dfes No: 23278- SLN No: GNVKF0HT9",
+        ];
+        const fopts = { width: CONTENT_WIDTH, align: "center", lineGap: 1.5 };
+        doc.font("Helvetica").fontSize(8).fillColor(GREY);
+        const h = lines.reduce((acc, t) => acc + doc.heightOfString(t, fopts), 0);
+        let fy = A4_HEIGHT - 44 - h;
+        doc.moveTo(MARGIN, fy - 12).lineTo(RIGHT, fy - 12).lineWidth(0.8).strokeColor("#c7ccd6").stroke();
+        doc.font("Helvetica").fontSize(8).fillColor(GREY);
+        lines.forEach((t) => { doc.text(t, MARGIN, fy, fopts); fy = doc.y + 1.5; });
+      };
+
+      // ===== Text helpers =======================================================
+      // A paragraph of one or more inline runs. Each run is [text, font?, runOpts?]
+      // where runOpts may carry { color, underline }. Runs flow inline (bold spans
+      // inside a sentence) and wrap as one block; `gapAfter` adds trailing space.
+      const para = (runs, opts2 = {}) => {
+        const size = opts2.size || BODY_SIZE;
+        const baseColor = opts2.color || INK;
+        const lineGap = opts2.lineGap != null ? opts2.lineGap : 3;
+        const gapAfter = opts2.gapAfter != null ? opts2.gapAfter : 10;
+        const align = opts2.align || "left";
+        doc.x = MARGIN;
+        const y0 = doc.y;
+        runs.forEach((run, i) => {
+          const [text, font = "Times-Roman", ro = {}] = run;
+          const last = i === runs.length - 1;
+          doc.font(font).fontSize(size).fillColor(ro.color || baseColor);
+          const common = { continued: !last, underline: !!ro.underline };
+          if (i === 0) doc.text(text, MARGIN, y0, { width: CONTENT_WIDTH, align, lineGap, ...common });
+          else doc.text(text, common);
+        });
+        doc.y += gapAfter;
+      };
+      // A single-run heading line — a thin wrapper over para for readability.
+      const head = (text, size, opts2 = {}) =>
+        para([[text, opts2.font || "Times-Bold", { color: opts2.color || INK }]], { size, gapAfter: opts2.gapAfter, lineGap: 1 });
+
+      // ===== PAGE 1 =============================================================
+      drawHeader();
+      doc.x = MARGIN;
+      doc.y = 128;
+
+      // Headline + offer type.
+      head(firstName ? `CONGRATULATIONS, ${firstName.toUpperCase()}!` : "CONGRATULATIONS!", 25, { gapAfter: 8 });
+      head("UNCONDITIONAL OFFER", 19, { gapAfter: 14 });
+
+      // Qualification title + intake (bold), each omitted if unknown.
+      if (course) head(course, 11.5, { gapAfter: intakeLine ? 3 : 14 });
+      if (intakeLine) head(intakeLine, 11.5, { gapAfter: 16 });
 
       // Salutation.
-      para(`Dear ${firstName},`);
-      gap();
+      para([[`Dear ${firstName || "Applicant"},`]], { gapAfter: 12 });
 
-      // Subject line (bold).
-      para(`Subject: Unconditional Offer for ${course}`, "Times-Bold");
-      gap();
+      // Opening two paragraphs.
+      para([
+        ["We are delighted to confirm that your application to "],
+        ["London Brookes College has been successful", "Times-Bold"],
+        ["."],
+      ], { gapAfter: 10 });
+      para([
+        ["Following a review of your application, you have met the required entry criteria and we are pleased to offer you an "],
+        ["unconditional place", "Times-Bold"],
+        [" on the programme above."],
+      ], { gapAfter: 18 });
 
-      // First paragraph — the offer itself, induction day and reporting details.
-      para(
-        "We are delighted to inform you that following your application, London Brookes " +
-        `College is pleased to offer you an unconditional place on our ${course} programme. ` +
-        "This offer confirms that you have met the required entry criteria for this course, " +
-        "and we are excited about the prospect of you joining our vibrant academic community. " +
-        `${inductionDate} is your first day (Induction Day) in the college. You must attend the ` +
-        "Induction to complete the course enrolment process. You must report to the Reception " +
-        `desk of London Brookes College at ${reportTime}. Your session will start at ${sessionTime}. ` +
-        "During this session, you will receive your timetable, student ID card, and information " +
-        "about your classes, course-related information, and other important resources."
-      );
-      gap();
+      // ---- Your First Day ----
+      head("YOUR FIRST DAY", 13.5, { gapAfter: 8 });
+      para([["Induction: ", "Times-Bold"], [inductionDate || "", "Times-Roman"]], { gapAfter: 3 });
+      para([
+        ["Arrival: ", "Times-Bold"], [reportTime, "Times-Roman"],
+        ["  |  ", "Times-Roman"],
+        ["Start: ", "Times-Bold"], [sessionTime, "Times-Roman"],
+      ], { gapAfter: 3 });
+      para([["Location: ", "Times-Bold"], ["London Brookes College", "Times-Roman"]], { gapAfter: 10 });
+      para([
+        ["Attendance at induction is required to complete your enrolment. During the session, you will receive your "],
+        ["timetable, student ID card, programme information", "Times-Bold"],
+        [" and guidance on the resources and support available to you."],
+      ], { gapAfter: 18 });
 
-      // "What you need to do" heading (bold).
-      para("Accepting Your Offer - What You Need to Do:", "Times-Bold");
-      gap();
+      // ---- Accept Your Place ----
+      head("ACCEPT YOUR PLACE", 13.5, { gapAfter: 8 });
+      para([
+        ["To confirm your place, simply "],
+        ["reply to the email containing this offer and confirm that you accept your offer of admission", "Times-Bold"],
+        ["."],
+      ], { gapAfter: 10 });
+      para([["If you have any questions before joining us, please contact our Admissions Team:"]], { gapAfter: 6 });
+      para([
+        ["admissions@londonbrookescollege.co.uk", "Times-Bold", { color: NAVY, underline: true }],
+        ["  |  ", "Times-Roman"],
+        ["+44 7946 830578", "Times-Bold"],
+      ], { gapAfter: 12 });
+      para([["We are excited to welcome you to London Brookes College and look forward to supporting you throughout your studies."]], { gapAfter: 22 });
 
-      // Second paragraph — how to accept and who to contact.
-      para(
-        `To confirm your place on the ${course} course, please click the Accept link in the ` +
-        "email accompanying this letter accepting the OFFER of admission. Should you have any " +
-        "questions prior to your enrolment, please do not hesitate to contact our Admissions Team " +
-        "at admissions@londonbrookescollege.co.uk or +447946830578. We look forward to welcoming " +
-        `you to London Brookes College and supporting you in your academic journey on the ${course} programme.`
-      );
-      gap();
+      // Closing line.
+      head("YOUR JOURNEY STARTS HERE.", 19, { gapAfter: 0 });
 
-      // Sign-off. The signatory's name is bold maroon to echo the tagline accent.
-      para("Yours sincerely,");
-      gap();
-      para(signatoryName, "Times-Bold", MAROON);
-      para(signatoryTitle);
-      para("London Brookes College");
+      drawFooter();
 
-      // ===== Footer =============================================================
-      // Company small-print, centred near the foot of the page. We drop the page's
-      // bottom margin to zero first so this multi-line block can sit low on the page
-      // without pdfkit deciding it has overflowed and spilling onto a second page.
-      doc.page.margins.bottom = 0;
-      const footLines = [
-        "London Brookes College is a company limited by guarantee registered in England and Wales 06683232.",
-        "Registered Office: 42 The Burroughs, Hendon, London NW4 4AP | Tel: 0208 202 2007 | Fax: 0208 202 2047 | email: info@londonbrookescollege.co.uk",
-        "website: www.Londonbrookescollege.co.uk | ISI No: 428 | SLN No: GNVKF0HT9 | UKPRN: 10065543",
-        "Page 1 of 1",
-      ];
-      const footOpts = { width: CONTENT_WIDTH, align: "center", lineGap: 1 };
-      doc.font("Helvetica").fontSize(8);
-      // Measure the block so we can pin it a margin's-worth above the paper edge.
-      const footHeight = footLines.reduce((h, t) => h + doc.heightOfString(t, footOpts), 0);
-      let fy = A4_HEIGHT - MARGIN - footHeight;
-      doc.fillColor("#556070"); // muted grey-navy for the small print
-      footLines.forEach((t) => {
-        doc.text(t, MARGIN, fy, footOpts);
-        fy = doc.y + 1; // pdfkit advances doc.y to the end of the block just drawn
-      });
+      // ===== PAGE 2 =============================================================
+      doc.addPage({ size: "A4", margin: MARGIN });
+      drawHeader();
+      doc.x = MARGIN;
+      doc.y = 134;
+
+      para([["Yours sincerely,"]], { gapAfter: 26 });
+      para([[signatoryName, "Times-Bold"]], { gapAfter: 2 });
+      para([[signatoryTitle, "Times-Roman"]], { gapAfter: 2 });
+      para([["London Brookes College", "Times-Bold"]], { gapAfter: 0 });
+
+      drawFooter();
 
       // Finalise — flushes the last chunk and triggers the "end" event above.
       doc.end();
