@@ -26,10 +26,15 @@ const docLabel = (key) => (ADMISSION_DOC_TYPES.find((d) => d.key === key) || {})
 // same intake don't collide into one folder.
 function admissionFolderSegments(a) {
   const name = [a.firstName, a.surname].filter(Boolean).join(" ").trim() || "Applicant";
+  // Once enrolled with a student ID, the folder is named "<studentId> - <name>"; before
+  // that it carries a short id suffix so same-named applicants don't collide.
+  const student = (a.enrollStatus === "Enroll" && a.studentId)
+    ? `${a.studentId} - ${name}`
+    : `${name} (${String(a.id).slice(-6)})`;
   return [
     (a.course || "").trim() || "Unspecified course",
     (a.intake || "").trim() || "Unspecified intake",
-    `${name} (${String(a.id).slice(-6)})`,
+    student,
   ];
 }
 
