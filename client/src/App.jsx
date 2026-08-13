@@ -252,9 +252,9 @@ export default function App() {
 
   // These public pages are valid whether or not a stale session exists, and deliberately
   // run before the auth gate below.
-  if (applyOpen) return (<><style>{GLOBAL_STYLE}</style><AdmissionApply onDone={clearTokenFromUrl} /></>);
-  if (offerToken) return (<><style>{GLOBAL_STYLE}</style><AdmissionOffer token={offerToken} onDone={clearTokenFromUrl} /></>);
-  if (uploadToken) return (<><style>{GLOBAL_STYLE}</style><AdmissionUpload token={uploadToken} onDone={clearTokenFromUrl} /></>);
+  if (applyOpen) return (<><style>{GLOBAL_STYLE}</style><AdmissionApply /></>);
+  if (offerToken) return (<><style>{GLOBAL_STYLE}</style><AdmissionOffer token={offerToken} /></>);
+  if (uploadToken) return (<><style>{GLOBAL_STYLE}</style><AdmissionUpload token={uploadToken} /></>);
   if (inviteToken) return (<><style>{GLOBAL_STYLE}</style><AcceptInvite token={inviteToken} onDone={clearTokenFromUrl} /></>);
   if (resetToken) return (<><style>{GLOBAL_STYLE}</style><ResetPasswordPage token={resetToken} onDone={clearTokenFromUrl} /></>);
 

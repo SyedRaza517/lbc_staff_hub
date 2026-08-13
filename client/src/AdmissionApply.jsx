@@ -83,7 +83,7 @@ function Field({ f, value, missing, onChange }) {
   );
 }
 
-export default function AdmissionApply({ onDone }) {
+export default function AdmissionApply() {
   const [form, setForm] = useState(blankForm);
   const [hp, setHp] = useState("");            // honeypot — real people leave it empty
   const [missing, setMissing] = useState(new Set());

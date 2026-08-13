@@ -32,7 +32,7 @@ function Shell({ center = false, children }) {
   );
 }
 
-export default function AdmissionOffer({ token, onDone }) {
+export default function AdmissionOffer({ token }) {
   const [state, setState] = useState({ status: "checking" }); // checking | ready | accepted | invalid
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState("");   // inline error while accepting

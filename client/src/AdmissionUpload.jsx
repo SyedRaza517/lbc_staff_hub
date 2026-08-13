@@ -37,7 +37,7 @@ function Shell({ center = false, children }) {
   );
 }
 
-export default function AdmissionUpload({ token, onDone }) {
+export default function AdmissionUpload({ token }) {
   const [state, setState] = useState({ status: "checking" }); // checking | ready | invalid
   const [busy, setBusy] = useState({});   // { [docKey]: true } while that doc uploads
   const [errors, setErrors] = useState({}); // { [docKey]: "message" } inline per doc
