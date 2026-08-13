@@ -137,7 +137,7 @@ export default function AdmissionUpload({ token, onDone }) {
             Welcome{state.name ? `, ${state.name}` : ""}
           </h1>
           <p className="mt-2 max-w-md text-sm text-slate-500">
-            Please upload the documents below to complete your HND application. You can come back to this link any time to add or replace a file.
+            Upload the documents below that apply to you — you don't have to provide all of them. Files are saved automatically, and you can return to this link any time to add or replace one.
           </p>
         </div>
 
@@ -149,11 +149,13 @@ export default function AdmissionUpload({ token, onDone }) {
           </span>
         </div>
 
-        {/* Success banner */}
-        {allDone && (
+        {/* Reassurance / success banner — shows once anything is uploaded; not all are required. */}
+        {uploadedCount > 0 && (
           <div className="pop mb-4 flex items-start gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200">
             <CheckCircle2 size={18} className="mt-px shrink-0" />
-            <span>All documents uploaded — thank you! The admissions team will review them.</span>
+            <span>{allDone
+              ? "All documents uploaded — thank you! The admissions team will review them."
+              : "Your documents are saved. You don't have to upload all of them — add or replace files any time."}</span>
           </div>
         )}
 
