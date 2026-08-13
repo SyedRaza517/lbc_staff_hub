@@ -112,17 +112,6 @@ export default function AdmissionOffer({ token, onDone }) {
           <ShieldCheck size={18} className="mt-px shrink-0" />
           <span>Offer accepted — thank you! The admissions team will be in touch about enrolment.</span>
         </div>
-        {onDone && (
-          <div className="mt-6">
-            <button
-              type="button"
-              onClick={onDone}
-              className="text-xs font-semibold text-slate-400 underline-offset-2 transition hover:text-slate-600 hover:underline"
-            >
-              Done
-            </button>
-          </div>
-        )}
       </div>
     </Shell>
   );
@@ -170,17 +159,6 @@ export default function AdmissionOffer({ token, onDone }) {
           )}
         </button>
 
-        {onDone && (
-          <div className="mt-6">
-            <button
-              type="button"
-              onClick={onDone}
-              className="text-xs font-semibold text-slate-400 underline-offset-2 transition hover:text-slate-600 hover:underline"
-            >
-              Done
-            </button>
-          </div>
-        )}
       </div>
     </Shell>
   );
