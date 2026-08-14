@@ -9,6 +9,8 @@
 const prisma = require("./db");
 const bands = require("./attendanceBands");
 const service = require("./attendanceEmailService");
+const email = require("./email");
+const mailFrom = require("./mailFrom");
 
 const CONFIG_ID = "singleton";
 
@@ -88,4 +90,25 @@ async function runMonthly({ force = false } = {}) {
   return { ok: true, period, term: term.name, ...summary };
 }
 
-module.exports = { loadConfig, saveConfig, resolveConfig, runMonthly, ymPeriod };
+// Send ONE student their band email right now (the per-student send from the tab). Uses
+// the same freshly-computed figures + band template as the monthly run, from attendance@.
+async function sendOneStudent(studentId) {
+  const term = await service.currentTerm();
+  if (!term) return { ok: false, reason: "no-current-term" };
+  const { period, students } = await service.computeCurrentTermAttendance(term);
+  const student = students.find((s) => s.id === studentId);
+  if (!student) return { ok: false, reason: "not-found" };
+  if (!student.email) return { ok: false, reason: "no-email" };
+  if (!student.bandKey) return { ok: false, reason: "no-attendance" };
+
+  const config = await loadConfig();
+  const respondByDate = fmtDate(addWorkingDays(new Date(), config.respondDays));
+  const built = service.buildEmailFor(student, config, { period, respondByDate });
+  if (!built) return { ok: false, reason: "no-template" };
+
+  const r = await email.sendEmail(student.email, built.subject, built.text, { html: built.html, from: mailFrom.attendance });
+  if (r.sent) return { ok: true, student: student.name, band: student.bandLabel, email: student.email };
+  return { ok: false, reason: r.stubbed ? "email-off" : "send-failed", error: r.error, student: student.name };
+}
+
+module.exports = { loadConfig, saveConfig, resolveConfig, runMonthly, sendOneStudent, ymPeriod };

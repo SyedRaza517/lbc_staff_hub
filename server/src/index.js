@@ -121,6 +121,7 @@ app.listen(PORT, () => {
   startKeepAlive();
   require("./scheduler").startScheduler();
   require("./attendanceScheduler").start();
+  require("./notificationsScheduler").start();
 });
 
 // --- Keep-alive: stop the free-tier host idling the server to sleep ---

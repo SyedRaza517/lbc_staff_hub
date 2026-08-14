@@ -161,6 +161,7 @@ export const api = {
   attendanceEmailConfig: () => request("/attendance-emails/config"),
   saveAttendanceEmailConfig: (data) => request("/attendance-emails/config", { method: "PUT", body: data }),
   runAttendanceEmails: (force = true) => request("/attendance-emails/run", { method: "POST", body: { force } }),
+  sendAttendanceEmailToStudent: (studentId) => request("/attendance-emails/send-one", { method: "POST", body: { studentId } }),
 
   // admissions (admin) — HND application entries: create, list, edit, delete
   admissions: () => request("/admissions"),

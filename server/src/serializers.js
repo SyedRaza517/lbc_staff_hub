@@ -5,6 +5,7 @@ const sStaff = (s) => ({
   id: s.id, name: s.name, role: s.jobTitle, dept: s.dept, email: s.email,
   site: s.site ?? null,
   allowance: s.allowance, initials: s.initials, colour: s.colour, accountRole: s.accountRole,
+  dob: s.dob ?? null,
   mustChangePassword: s.mustChangePassword ?? false,
   totpEnabled: s.totpEnabled ?? false,
   totpRequired: s.mustSetupTotp ?? false,
@@ -94,6 +95,7 @@ const sUnit = (m) => ({
 const sStudent = (s) => ({
   id: s.id, firstName: s.firstName, lastName: s.lastName, name: `${s.firstName} ${s.lastName}`,
   studentRef: s.studentRef, email: s.email, initials: s.initials, colour: s.colour, active: s.active,
+  dob: s.dob ?? null,
   cohortId: s.cohortId ?? null,
   ...(s.enrolments ? { unitIds: s.enrolments.map((e) => e.unitId) } : {}),
 });

@@ -19,6 +19,7 @@ model Staff {
   jobTitle     String
   dept         String
   email        String   @unique
+  dob          String?  // YYYY-MM-DD — used for birthday emails (optional)
   passwordHash String
   accountRole  String   @default("STAFF") // ADMIN | STAFF
   // The staff member's home site — chosen at sign-up. HND | FE | Online. Nullable
@@ -499,6 +500,7 @@ model Student {
   lastName   String
   studentRef String   @unique
   email      String   @unique
+  dob        String?  // YYYY-MM-DD — used for birthday emails (optional)
   initials   String
   colour     String
   active     Boolean  @default(true)
@@ -951,4 +953,13 @@ model AttendanceEmailConfig {
   id        String   @id @default("singleton")
   data      Json
   updatedAt DateTime @updatedAt
+}
+
+// A ledger of one-off automated emails already sent, used purely to de-duplicate the
+// scheduled notifications (birthdays, bank-holiday closures, assessment-deadline reminders)
+// so a re-tick or a restart can never send the same one twice. `key` is a stable string,
+// e.g. "birthday:student:<id>:2026", "bankholiday:2026-12-25", "assessment:<id>".
+model SentNotification {
+  key    String   @id
+  sentAt DateTime @default(now())
 }

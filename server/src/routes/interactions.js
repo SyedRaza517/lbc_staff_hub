@@ -6,6 +6,10 @@ const prisma = require("../db");
 const { sInteraction } = require("../serializers");
 const { requireAuth, requireAdmin, requirePage } = require("../auth");
 const { isRealDate } = require("../validate");
+// Best-effort outbound email: sendEmail(to, subject, text, { html }) -> { sent,
+// stubbed, error } and never throws (see ../email).
+const email = require("../email");
+const mailFrom = require("../mailFrom");
 
 // DEF-01: PAT interactions contain sensitive wellbeing/absence notes and are an
 // admin-only feature. Guard every route, reads included, against non-admin tokens.
@@ -18,6 +22,78 @@ const QUERY_TYPES = [
 ];
 const str = (v) => (typeof v === "string" ? v.trim() : "");
 const isTime = (v) => /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+
+// Build the "record of your meeting" email a student receives when a PAT
+// interaction is logged. Returns { subject, text, html }; the caller sends it
+// best-effort. Keeping this at module level keeps the route handler small and
+// the plain-text / HTML bodies in lock-step (both are driven by the same `rows`).
+function buildInteractionEmail(row) {
+  // HTML-escape every interpolated value — student names and free-text notes are
+  // untrusted and must never break out of the markup.
+  const esc = (s) => String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const s = row.student || {};
+  const first = str(s.firstName) || "Student";
+  const type = row.queryType || "meeting";
+  const dash = "—"; // em dash used as the placeholder for empty fields
+
+  // Ordered label/value pairs, rendered identically in the text and HTML bodies.
+  const rows = [
+    ["Type", row.queryType || dash],
+    ["Date", row.date || dash],
+    ["Time", row.time || dash],
+    ["Tutor", row.tutor || dash],
+    ["Summary", row.summary || dash],
+    ["Follow-up actions", row.followUpActions || dash],
+  ];
+  // Only mention a follow-up when one was actually arranged.
+  if (row.followUpRequired) rows.push(["Follow-up arranged for", row.followUpDate || dash]);
+
+  const subject = `London Brookes College — Record of your ${row.queryType || "meeting"}`;
+
+  // Plain-text alternative.
+  const text = [
+    `Dear ${first},`,
+    "",
+    `A record of your ${type} on ${row.date} at ${row.time} has been logged by your tutor.`,
+    "",
+    ...rows.map(([k, v]) => `${k}: ${v}`),
+    "",
+    "Kind regards,",
+    "London Brookes College",
+  ].join("\n");
+
+  // Branded HTML — table-safe, inline styles, everything interpolated is escaped.
+  const heading = `Record of your ${esc(row.queryType || "meeting")}`;
+  const tableRows = rows.map(([k, v]) => `
+        <tr>
+          <td style="padding:6px 16px 6px 0;color:#64748b;font-weight:600;vertical-align:top;white-space:nowrap">${esc(k)}</td>
+          <td style="padding:6px 0;color:#0f172a">${esc(v)}</td>
+        </tr>`).join("");
+  const bodyHtml =
+    `<p style="margin:0 0 14px">Dear ${esc(first)},</p>` +
+    `<p style="margin:0 0 16px">A record of your ${esc(type)} on ${esc(row.date)} at ${esc(row.time)} has been logged by your tutor.</p>` +
+    `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:14px">${tableRows}\n      </table>` +
+    `<p style="margin:16px 0 0">Kind regards,<br>London Brookes College</p>`;
+
+  const html = `<div style="margin:0;padding:24px;background:#eef1f6;font-family:'Segoe UI',system-ui,-apple-system,sans-serif">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(15,23,42,.08)">
+    <div style="background:linear-gradient(135deg,#1a3a8f,#9e1b32);padding:20px 24px">
+      <p style="margin:0 0 2px;color:rgba(255,255,255,.7);font-size:11px;letter-spacing:.18em">PERSONAL ACADEMIC TUTOR</p>
+      <p style="margin:0;color:#fff;font-size:18px;font-weight:800">London Brookes College</p>
+    </div>
+    <div style="padding:24px">
+      <h1 style="margin:0 0 12px;font-size:18px;color:#0f172a">${heading}</h1>
+      <div style="font-size:14px;line-height:1.6;color:#334155">${bodyHtml}</div>
+    </div>
+    <div style="padding:14px 24px;background:#f8fafc;border-top:1px solid #e2e8f0">
+      <p style="margin:0;font-size:11px;color:#94a3b8">London Brookes College · 42 The Burroughs, Hendon, London NW4 4AP · info@londonbrookescollege.co.uk</p>
+    </div>
+  </div>
+</div>`;
+
+  return { subject, text, html };
+}
 
 // GET /api/interactions?studentId=&followUp=true
 router.get("/", requireAuth, async (req, res) => {
@@ -92,6 +168,18 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     include: { student: true },
   });
   res.status(201).json(sInteraction(row));
+
+  // Fire-and-forget: email the student a branded record of the interaction. This
+  // runs AFTER the response is sent and is never awaited, so it can neither delay
+  // nor break the create. sendEmail already swallows its own errors; the .catch()
+  // is a belt-and-braces guard so an unexpected rejection can't surface unhandled.
+  if (row.student && row.student.email) {
+    const name = [row.student.firstName, row.student.lastName].map(str).filter(Boolean).join(" ");
+    const to = name ? `${name} <${row.student.email}>` : row.student.email;
+    const { subject, text, html } = buildInteractionEmail(row);
+    const from = /wellbeing/i.test(row.queryType || "") ? mailFrom.wellbeing : mailFrom.pat;
+    email.sendEmail(to, subject, text, { html, from }).catch(() => {});
+  }
 });
 
 router.put("/:id", requireAuth, requireAdmin, async (req, res) => {

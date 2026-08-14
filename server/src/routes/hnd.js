@@ -555,9 +555,15 @@ router.post("/students", requireAuth, requireStudentAdmin, async (req, res) => {
   const cohortId = str(req.body?.cohortId) || null;
   if (cohortId && !(await prisma.cohort.findUnique({ where: { id: cohortId } }))) return res.status(400).json({ error: "Unknown cohort" });
 
+  // Optional date of birth (powers birthday emails). Empty → null; otherwise it must
+  // be a real YYYY-MM-DD calendar date, same rule as every other date in this file.
+  const dob = str(req.body?.dob);
+  if (dob && !isDate(dob)) return res.status(400).json({ error: "Date of birth must be a valid date (YYYY-MM-DD)" });
+
   const s = await prisma.student.create({
     data: {
       firstName, lastName, studentRef, email, cohortId,
+      dob: dob || null,
       initials: initialsOf(firstName, lastName),
       colour: colourFor(studentRef + lastName),
       enrolments: { create: unitIds.map((unitId) => ({ unitId })) },
@@ -604,6 +610,11 @@ router.put("/students/:id", requireAuth, requireStudentAdmin, async (req, res) =
     const cohortId = str(req.body.cohortId) || null;
     if (cohortId && !(await prisma.cohort.findUnique({ where: { id: cohortId } }))) return res.status(400).json({ error: "Unknown cohort" });
     data.cohortId = cohortId;
+  }
+  if (req.body?.dob !== undefined) {
+    const dob = str(req.body.dob);
+    if (dob && !isDate(dob)) return res.status(400).json({ error: "Date of birth must be a valid date (YYYY-MM-DD)" });
+    data.dob = dob || null;
   }
 
   const s = await prisma.student.update({

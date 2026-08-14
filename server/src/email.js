@@ -28,11 +28,11 @@ const isConfigured = () => Boolean(process.env.RESEND_API_KEY || process.env.SMT
 // Send via Resend's HTTP API with a hard timeout so it can never hang a request.
 // `attachments` (optional) is [{ filename, content }] where content is a Buffer or a
 // base64 string — Resend wants base64, so a Buffer is encoded here.
-async function sendViaResend(to, subject, text, html, attachments) {
+async function sendViaResend(to, subject, text, html, attachments, from) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 20000);
   try {
-    const payload = { from: FROM, to, subject, text, html: html || defaultHtml(subject, text) };
+    const payload = { from: from || FROM, to, subject, text, html: html || defaultHtml(subject, text) };
     if (attachments && attachments.length) {
       payload.attachments = attachments.map((a) => ({
         filename: a.filename,
@@ -107,7 +107,7 @@ function defaultHtml(subject, text) {
 
 // Send a message. Returns { sent, stubbed, messageId?, previewUrl?, error? } so
 // callers and the check script can report what happened; nothing throws.
-async function sendEmail(to, subject, body, { html, attachments } = {}) {
+async function sendEmail(to, subject, body, { html, attachments, from } = {}) {
   if (!to) return { sent: false, stubbed: false, error: "no recipient" };
 
   if (!isConfigured()) {
@@ -121,11 +121,11 @@ async function sendEmail(to, subject, body, { html, attachments } = {}) {
   }
 
   // Prefer the HTTP API when configured (works where SMTP is blocked).
-  if (useResend()) return sendViaResend(to, subject, body, html, attachments);
+  if (useResend()) return sendViaResend(to, subject, body, html, attachments, from);
 
   try {
     const info = await getTransport().sendMail({
-      from: FROM,
+      from: from || FROM,
       to,
       subject,
       text: body,

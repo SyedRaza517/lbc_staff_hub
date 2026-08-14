@@ -4,7 +4,7 @@ const { sStaff } = require("../serializers");
 const { requireAuth, requireAdmin, requireSuperAdmin, requireAnyPage, hasPage, hashPassword, blockedByRank } = require("../auth");
 const { notifyStaff } = require("../notify");
 const { sendEmail } = require("../email");
-const { isInt32, MAX_ALLOWANCE_DAYS, isString, isNonEmptyString, isHomeSite, ADMIN_PAGES } = require("../validate");
+const { isInt32, MAX_ALLOWANCE_DAYS, isString, isNonEmptyString, isHomeSite, isRealDate, ADMIN_PAGES } = require("../validate");
 const { sendInvite, unguessablePassword } = require("../invite");
 
 // allowance is a 32-bit Int column. An out-of-range value would be stored by SQLite
@@ -52,7 +52,7 @@ router.get("/", requireAuth, async (req, res) => {
 
 // POST /api/staff  (admin)
 router.post("/", requireAuth, requireAnyPage(["staff", "settings"]), async (req, res) => {
-  const { name, role, dept, email, allowance, password, site } = req.body || {};
+  const { name, role, dept, email, allowance, password, site, dob } = req.body || {};
   if (!name || !email) return res.status(400).json({ error: "Name and email required" });
   // Type-check before anything touches initialsOf() or Prisma: a number here threw
   // outside the try block and surfaced as a 500. A whitespace-only name passed the
@@ -69,6 +69,10 @@ router.post("/", requireAuth, requireAnyPage(["staff", "settings"]), async (req,
   if (allowance != null && !isValidAllowance(allowance)) {
     return res.status(400).json({ error: `Allowance must be a whole number between 0 and ${MAX_ALLOWANCE_DAYS}` });
   }
+  // Optional date of birth (powers birthday emails). Empty → null; otherwise a real
+  // YYYY-MM-DD calendar date.
+  const dobClean = typeof dob === "string" ? dob.trim() : "";
+  if (dobClean && !isRealDate(dobClean)) return res.status(400).json({ error: "Date of birth must be a valid date (YYYY-MM-DD)" });
   // No shared default password. The account is created inactive with a password
   // nobody knows, and the person activates it from an emailed link. Previously
   // every admin-created account carried "password123", so anyone who guessed the
@@ -82,6 +86,7 @@ router.post("/", requireAuth, requireAnyPage(["staff", "settings"]), async (req,
         email: String(email).toLowerCase(),
         passwordHash: hashPassword(password || unguessablePassword()),
         accountRole: "STAFF", allowance: allowance == null ? 28 : Number(allowance),
+        dob: dobClean || null,
         initials: initialsOf(name), colour: colourFor(String(email).toLowerCase()),
         // An explicitly-supplied password means the caller has chosen one and the
         // account is usable at once; otherwise it waits for activation.
@@ -114,7 +119,7 @@ router.put("/:id", requireAuth, requireAnyPage(["staff", "settings"]), async (re
   if (!target) return res.status(404).json({ error: "Staff not found" });
   const blocked = guardSuperAdmin(target, req);
   if (blocked) return res.status(403).json({ error: blocked });
-  const { name, role, dept, email, allowance, site } = req.body || {};
+  const { name, role, dept, email, allowance, site, dob } = req.body || {};
   const data = {};
   if (name != null) {
     if (!isNonEmptyString(name)) return res.status(400).json({ error: "Name must be text" });
@@ -135,6 +140,12 @@ router.put("/:id", requireAuth, requireAnyPage(["staff", "settings"]), async (re
   if (allowance != null) {
     if (!isValidAllowance(allowance)) return res.status(400).json({ error: `Allowance must be a whole number between 0 and ${MAX_ALLOWANCE_DAYS}` });
     data.allowance = Number(allowance);
+  }
+  // dob is optional and clearable: empty → null, otherwise a real YYYY-MM-DD date.
+  if (dob !== undefined) {
+    const dobClean = typeof dob === "string" ? dob.trim() : "";
+    if (dobClean && !isRealDate(dobClean)) return res.status(400).json({ error: "Date of birth must be a valid date (YYYY-MM-DD)" });
+    data.dob = dobClean || null;
   }
   // Changing someone's email points their password-reset link at a new mailbox, so it
   // is an account-transfer, not an edit. Treat it like one: end their sessions, kill

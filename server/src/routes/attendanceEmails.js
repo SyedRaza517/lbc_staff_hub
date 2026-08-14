@@ -61,4 +61,22 @@ router.post("/run", async (req, res) => {
   res.json(out);
 });
 
+// POST /send-one — send ONE student their band email now (the per-student send).
+router.post("/send-one", async (req, res) => {
+  const studentId = String(req.body?.studentId || "");
+  if (!studentId) return res.status(400).json({ error: "A student is required." });
+  const out = await runner.sendOneStudent(studentId);
+  if (!out.ok) {
+    const msg = {
+      "no-current-term": "No teaching term is running right now.",
+      "not-found": "That student isn't in the current term.",
+      "no-email": "That student has no email address on file.",
+      "no-attendance": "That student has no attendance marks yet this term.",
+      "email-off": "Email isn't configured on the server.",
+    }[out.reason] || out.error || "Could not send the email.";
+    return res.status(400).json({ error: msg });
+  }
+  res.json(out);
+});
+
 module.exports = router;

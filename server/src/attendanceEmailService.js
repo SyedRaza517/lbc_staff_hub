@@ -17,6 +17,7 @@ const prisma = require("./db");
 const { summariseCounts } = require("./attendance");
 const email = require("./email");
 const bands = require("./attendanceBands");
+const mailFrom = require("./mailFrom");
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -135,9 +136,10 @@ async function computeCurrentTermAttendance(term) {
     },
   });
 
-  // unitId -> { code, name } for labelling the module list.
-  const unitRows = await prisma.unit.findMany({ select: { id: true, code: true, name: true } });
-  const unitMap = new Map(unitRows.map((u) => [u.id, { code: u.code, name: u.name }]));
+  // unitId -> { code, name, course } for labelling the module list and deriving the
+  // student's course/programme from the units they actually take.
+  const unitRows = await prisma.unit.findMany({ select: { id: true, code: true, name: true, course: { select: { name: true } } } });
+  const unitMap = new Map(unitRows.map((u) => [u.id, { code: u.code, name: u.name, course: u.course && u.course.name }]));
 
   // One aggregate row per (student, unit) — the four status counts, scoped to the
   // semester's dates and joined to Enrolment so only current enrolments are counted.
@@ -167,12 +169,14 @@ async function computeCurrentTermAttendance(term) {
     const enrolledIds = new Set((s.enrolments || []).map((e) => e.unitId));
 
     const modules = [];
+    const courseNames = new Set();
     const acc = { P: 0, L: 0, E: 0, A: 0 };
     for (const [unitId, c] of per) {
       if (!enrolledIds.has(unitId)) continue; // not currently enrolled → ignore
       if (unitFilter && !unitFilter.has(unitId)) continue; // not a unit running this term
       const sum = summariseCounts(c.p, c.l, c.e, c.a);
       const u = unitMap.get(unitId) || { code: "", name: "" };
+      if (u.course) courseNames.add(u.course);
       modules.push({ unitId, code: u.code, name: u.name, pct: sum.pct, marked: sum.marked });
       acc.P += c.p; acc.L += c.l; acc.E += c.e; acc.A += c.a;
     }
@@ -189,7 +193,9 @@ async function computeCurrentTermAttendance(term) {
       lastName: s.lastName,
       name: `${s.firstName} ${s.lastName}`,
       email: s.email,
-      programme: s.cohort?.course?.name || "",
+      // Course comes from the units the student is actually taking this term (many students
+      // have no cohort→course link); fall back to the cohort's course if there is one.
+      programme: [...courseNames].filter(Boolean).join(", ") || s.cohort?.course?.name || "",
       pct,
       bandKey: band ? band.key : null,
       bandLabel: band ? band.label : null,
@@ -336,7 +342,7 @@ async function sendToStudents(students, config = {}, opts = {}) {
     const built = buildEmailFor(student, config, opts);
     if (!built) { result.skipped++; continue; }
 
-    const r = await email.sendEmail(student.email, built.subject, built.text, { html: built.html });
+    const r = await email.sendEmail(student.email, built.subject, built.text, { html: built.html, from: mailFrom.attendance });
     if (r.sent) {
       result.sent++;
     } else if (r.stubbed) {

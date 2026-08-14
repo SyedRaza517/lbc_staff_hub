@@ -56,6 +56,48 @@ function ukBankHolidays(year) {
   return [...base.filter((d) => !oneOff.remove.includes(d)), ...oneOff.add].sort();
 }
 
+// The same England & Wales bank holidays as ukBankHolidays(), but each carried with its
+// canonical name — [{ date: 'YYYY-MM-DD', name }] — for messaging (e.g. the automated
+// "college closed tomorrow" reminder). Re-uses the exact date computations above so the
+// two never drift; when a day is moved to a weekday substitute (New Year, Christmas,
+// Boxing Day) the name is suffixed "(substitute day)".
+function namedUkBankHolidays(year) {
+  const easter = easterSunday(year);
+
+  // Christmas/Boxing Day substitution — identical rule to ukBankHolidays().
+  const dow25 = mkUTC(year, 11, 25).getUTCDay();
+  let xmasDay = 25, boxDay = 26;
+  if (dow25 === 6) { xmasDay = 27; boxDay = 28; }      // Christmas on Saturday
+  else if (dow25 === 0) { xmasDay = 27; boxDay = 26; } // Christmas on Sunday
+  else if (dow25 === 5) { boxDay = 28; }               // Christmas on Friday → Boxing Day slips to Monday
+
+  // New Year's Day, with its own weekend → weekday substitution.
+  const nyd = mkUTC(year, 0, 1);
+  const nydObserved = substitute(nyd);
+
+  const entries = [
+    { date: iso(nydObserved),
+      name: iso(nydObserved) !== iso(nyd) ? "New Year's Day (substitute day)" : "New Year's Day" },
+    { date: iso(addDays(easter, -2)), name: "Good Friday" },
+    { date: iso(addDays(easter, 1)),  name: "Easter Monday" },
+    { date: iso(firstMondayOf(year, 4)), name: "Early May bank holiday" },
+    { date: iso(lastMondayOf(year, 4)),  name: "Spring bank holiday" },
+    { date: iso(lastMondayOf(year, 7)),  name: "Summer bank holiday" },
+    { date: iso(mkUTC(year, 11, xmasDay)),
+      name: xmasDay !== 25 ? "Christmas Day (substitute day)" : "Christmas Day" },
+    { date: iso(mkUTC(year, 11, boxDay)),
+      name: boxDay !== 26 ? "Boxing Day (substitute day)" : "Boxing Day" },
+  ];
+
+  // Fold in the same one-off royal holidays ukBankHolidays() applies, so the date set of
+  // the two stays identical. Their names can't be derived by rule, so use a best-effort label.
+  const oneOff = ONE_OFFS[year];
+  if (!oneOff) return entries;
+  const kept = entries.filter((e) => !oneOff.remove.includes(e.date));
+  const added = oneOff.add.map((date) => ({ date, name: "Bank holiday" }));
+  return [...kept, ...added].sort((a, b) => a.date.localeCompare(b.date));
+}
+
 // Days actually charged against the bookable allowance for an inclusive [start,end]
 // range: Monday–Friday only, excluding bank holidays. Weekends (Sat/Sun) and bank
 // holidays inside the range are free and never deducted. Mirrors the client's
@@ -123,4 +165,4 @@ function spanDays(start, end) {
   return Math.floor((b - a) / 86400000) + 1;
 }
 
-module.exports = { ukBankHolidays, chargeableDays, bankHolidayCount, yearsSpanned, spanDays, MAX_SPAN_DAYS };
+module.exports = { ukBankHolidays, namedUkBankHolidays, chargeableDays, bankHolidayCount, yearsSpanned, spanDays, MAX_SPAN_DAYS };

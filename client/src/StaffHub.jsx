@@ -4855,8 +4855,8 @@ function HndStudents({ store }) {
     return ids.size === 1 ? [...ids][0] : "";
   };
 
-  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", cohortId: "", unitIds: [] }); setCourseId(""); setModal(true); };
-  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, cohortId: s.cohortId || "", unitIds: s.unitIds || [] }); setCourseId(courseOf(s)); setModal(true); };
+  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", dob: "", cohortId: "", unitIds: [] }); setCourseId(""); setModal(true); };
+  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, dob: s.dob || "", cohortId: s.cohortId || "", unitIds: s.unitIds || [] }); setCourseId(courseOf(s)); setModal(true); };
   const toggleUnit = (id) => setForm(f => ({ ...f, unitIds: f.unitIds.includes(id) ? f.unitIds.filter(x => x !== id) : [...f.unitIds, id] }));
 
   // What the picker offers: this course's units only, and never the synthetic
@@ -4887,7 +4887,7 @@ function HndStudents({ store }) {
   const save = async () => {
     try {
       if (edit) {
-        await store.updateStudent(edit.id, { firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, cohortId: form.cohortId || null });
+        await store.updateStudent(edit.id, { firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, dob: form.dob || null, cohortId: form.cohortId || null });
         await store.setEnrolments(edit.id, form.unitIds);
       } else {
         await store.addStudent(form);
@@ -4968,6 +4968,7 @@ function HndStudents({ store }) {
               {store.cohorts.map(c => { const p = store.courses.find(x => x.id === c.courseId); return <option key={c.id} value={c.id}>{p ? `${p.name} — ${c.name}` : c.name}</option>; })}
             </select>
           </Field>
+          <Field label="Date of birth"><input type="date" value={form.dob} onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} className={inputCls} /></Field>
           <Field label="Course">
             <select value={courseId} onChange={e => setCourseId(e.target.value)} className={inputCls}>
               <option value="">— all courses —</option>
@@ -5088,8 +5089,8 @@ function AdminStudents({ store }) {
     return possible > 0 ? Math.round((earned / possible) * 1000) / 10 : null;
   };
 
-  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", active: true, cohortId: "", unitIds: [] }); setCourseId(""); setModal(true); };
-  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, active: s.active !== false, cohortId: s.cohortId || "", unitIds: s.unitIds || [] }); setCourseId(courseOf(s)); setModal(true); };
+  const openAdd = () => { setEdit(null); setForm({ firstName: "", lastName: "", studentRef: "", email: "", dob: "", active: true, cohortId: "", unitIds: [] }); setCourseId(""); setModal(true); };
+  const openEdit = (s) => { setEdit(s); setForm({ firstName: s.firstName, lastName: s.lastName, studentRef: s.studentRef, email: s.email, dob: s.dob || "", active: s.active !== false, cohortId: s.cohortId || "", unitIds: s.unitIds || [] }); setCourseId(courseOf(s)); setModal(true); };
   const toggleUnit = (id) => setForm(f => ({ ...f, unitIds: f.unitIds.includes(id) ? f.unitIds.filter(x => x !== id) : [...f.unitIds, id] }));
 
   // What the picker offers: this course's units only, and never the synthetic
@@ -5120,10 +5121,10 @@ function AdminStudents({ store }) {
   const save = async () => {
     try {
       if (edit) {
-        await store.updateStudent(edit.id, { firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, active: form.active, cohortId: form.cohortId || null });
+        await store.updateStudent(edit.id, { firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, dob: form.dob || null, active: form.active, cohortId: form.cohortId || null });
         await store.setEnrolments(edit.id, form.unitIds);
       } else {
-        await store.addStudent({ firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, cohortId: form.cohortId || null, unitIds: form.unitIds });
+        await store.addStudent({ firstName: form.firstName, lastName: form.lastName, studentRef: form.studentRef, email: form.email, dob: form.dob || null, cohortId: form.cohortId || null, unitIds: form.unitIds });
       }
       setModal(false);
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
@@ -5311,6 +5312,7 @@ function AdminStudents({ store }) {
               {store.cohorts.map(c => { const p = store.courses.find(x => x.id === c.courseId); return <option key={c.id} value={c.id}>{p ? `${p.name} — ${c.name}` : c.name}</option>; })}
             </select>
           </Field>
+          <Field label="Date of birth"><input type="date" value={form.dob} onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} className={inputCls} /></Field>
           {edit && (
             <Field label="Status">
               <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
@@ -9572,7 +9574,7 @@ function AdminStaff({ store }) {
   const [teachingFor, setTeachingFor] = useState(null);
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ name: "", role: "", dept: "", email: "", allowance: 28, site: "" });
+  const [form, setForm] = useState({ name: "", role: "", dept: "", email: "", allowance: 28, site: "", dob: "" });
   // Recovery actions, reachable from the Staff page too (not only Settings).
   const [resetTarget, setResetTarget] = useState(null);
   const [resetBusy, setResetBusy] = useState(false);
@@ -9598,13 +9600,13 @@ function AdminStaff({ store }) {
   const depts = Array.from(new Set(store.staff.map(s => s.dept).filter(Boolean))).sort();
   const deptOptions = Array.from(new Set([...depts, "Sixth Form", "Tuition Centre", "Exam Centre", "Administration", "Higher Education"])).sort();
 
-  const openAdd = () => { setEdit(null); setForm({ name: "", role: "", dept: (deptFilter || depts[0] || "Sixth Form"), email: "", allowance: 28, site: (siteFilter || "") }); setModal(true); };
-  const openEdit = (s) => { setEdit(s); setForm({ name: s.name, role: s.role || "", dept: s.dept || "", email: s.email, allowance: s.allowance, site: s.site || "" }); setModal(true); };
+  const openAdd = () => { setEdit(null); setForm({ name: "", role: "", dept: (deptFilter || depts[0] || "Sixth Form"), email: "", allowance: 28, site: (siteFilter || ""), dob: "" }); setModal(true); };
+  const openEdit = (s) => { setEdit(s); setForm({ name: s.name, role: s.role || "", dept: s.dept || "", email: s.email, allowance: s.allowance, site: s.site || "", dob: s.dob || "" }); setModal(true); };
   const save = async () => {
     if (!form.name.trim()) return;
     try {
-      if (edit) await store.updateStaff(edit.id, { name: form.name, role: form.role, dept: form.dept, email: form.email, allowance: Number(form.allowance), site: form.site || null });
-      else await store.addStaff({ name: form.name, role: form.role, dept: form.dept, email: form.email, allowance: Number(form.allowance), site: form.site || null });
+      if (edit) await store.updateStaff(edit.id, { name: form.name, role: form.role, dept: form.dept, email: form.email, allowance: Number(form.allowance), site: form.site || null, dob: form.dob || null });
+      else await store.addStaff({ name: form.name, role: form.role, dept: form.dept, email: form.email, allowance: Number(form.allowance), site: form.site || null, dob: form.dob || null });
       setModal(false);
     } catch (_e) { /* toast shown by the store; keep the modal open */ }
   };
@@ -9788,6 +9790,7 @@ function AdminStaff({ store }) {
             </Field>
           </div>
           <Field label="Email address"><input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@londonbrookescollege.co.uk" className={inputCls} /></Field>
+          <Field label="Date of birth"><input type="date" value={form.dob} onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} className={inputCls} /></Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Site"><select value={form.site} onChange={e => setForm(f => ({ ...f, site: e.target.value }))} className={inputCls}><option value="">Not set</option>{HOME_SITES.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>
             <Field label="Holiday allowance (days)"><input type="number" min={0} value={form.allowance} onChange={e => setForm(f => ({ ...f, allowance: e.target.value }))} className={inputCls} /></Field>
@@ -10229,6 +10232,7 @@ function AdminAttendanceEmails({ store }) {
   const [confirmRun, setConfirmRun] = useState(false);
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState(null);
+  const [sendingId, setSendingId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -10266,6 +10270,16 @@ function AdminAttendanceEmails({ store }) {
       else store.notify(res.reason === "no-current-term" ? "No current term" : "Nothing to send", "info");
     } catch (e) { store.notify(e.message || "Could not send", "error"); }
     setRunning(false);
+  };
+
+  // Send ONE student their band email now (the per-student send, alongside the bulk run).
+  const sendOne = async (s) => {
+    setSendingId(s.id);
+    try {
+      const res = await api.sendAttendanceEmailToStudent(s.id);
+      store.notify(`Emailed ${res.student || s.name} — ${res.band || s.bandLabel}`, "success");
+    } catch (e) { store.notify(e.message || "Could not send the email", "error"); }
+    setSendingId(null);
   };
 
   if (loading) return (<><AdminHeader title="Attendance Emails" subtitle="Automated month-end attendance emails" Icon={Mail} /><div className="skeleton h-64 rounded-2xl" /></>);
@@ -10324,9 +10338,9 @@ function AdminAttendanceEmails({ store }) {
               {bandFilter && <button onClick={() => setBandFilter("")} className="shrink-0 text-xs font-semibold text-blue-600">Clear filter</button>}
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[680px] text-sm">
+              <table className="w-full min-w-[780px] text-sm">
                 <thead><tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
-                  <th className="px-3 py-2">Student</th><th className="px-3 py-2">Programme</th><th className="px-3 py-2 text-right">Overall</th><th className="px-3 py-2">Band</th><th className="px-3 py-2">Modules (this term)</th>
+                  <th className="px-3 py-2">Student</th><th className="px-3 py-2">Programme</th><th className="px-3 py-2 text-right">Overall</th><th className="px-3 py-2">Band</th><th className="px-3 py-2">Modules (this term)</th><th className="px-3 py-2 text-right">Send</th>
                 </tr></thead>
                 <tbody>
                   {shown.map(s => (
@@ -10336,9 +10350,16 @@ function AdminAttendanceEmails({ store }) {
                       <td className="px-3 py-2 text-right font-bold text-slate-700">{s.pct}%</td>
                       <td className="px-3 py-2"><span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ${BAND_STYLE[s.bandKey] || ""}`}>{bandLabel(s.bandKey)}</span></td>
                       <td className="px-3 py-2 text-[11px] text-slate-500">{s.modules?.length ? s.modules.map(m => `${m.code} ${m.pct}%`).join(" · ") : "—"}</td>
+                      <td className="px-3 py-2 text-right">
+                        <button onClick={() => sendOne(s)} disabled={sendingId === s.id || !s.email || !s.bandKey}
+                          title={!s.email ? "No email on file" : !s.bandKey ? "No attendance yet" : "Email this student now"}
+                          className="press inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-white transition disabled:opacity-40" style={{ background: NAVY }}>
+                          {sendingId === s.id ? <Loader2 size={13} className="animate-spin" /> : <><Send size={13} /> Send</>}
+                        </button>
+                      </td>
                     </tr>
                   ))}
-                  {shown.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-slate-400">No students match.</td></tr>}
+                  {shown.length === 0 && <tr><td colSpan={6} className="px-3 py-10 text-center text-sm text-slate-400">No students match.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -11649,15 +11670,15 @@ function AdminTimetable({ store }) {
 function AdminSettings({ store }) {
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ name: "", role: "", dept: "Sixth Form", email: "", allowance: 28 });
+  const [form, setForm] = useState({ name: "", role: "", dept: "Sixth Form", email: "", allowance: 28, dob: "" });
   const depts = Array.from(new Set(store.staff.map(s => s.dept)));
   const deptOptions = Array.from(new Set([...depts, "Sixth Form", "Tuition Centre", "Exam Centre", "Administration", "Higher Education"])).sort();
-  const openAdd = () => { setEdit(null); setForm({ name: "", role: "", dept: depts[0] || "Sixth Form", email: "", allowance: 28 }); setModal(true); };
-  const openEdit = (s) => { setEdit(s); setForm({ name: s.name, role: s.role, dept: s.dept, email: s.email, allowance: s.allowance }); setModal(true); };
+  const openAdd = () => { setEdit(null); setForm({ name: "", role: "", dept: depts[0] || "Sixth Form", email: "", allowance: 28, dob: "" }); setModal(true); };
+  const openEdit = (s) => { setEdit(s); setForm({ name: s.name, role: s.role, dept: s.dept, email: s.email, allowance: s.allowance, dob: s.dob || "" }); setModal(true); };
   const save = async () => {
     if (!form.name.trim()) return;
-    if (edit) await store.updateStaff(edit.id, { name: form.name, role: form.role, dept: form.dept, email: form.email, allowance: Number(form.allowance) });
-    else await store.addStaff({ name: form.name, role: form.role, dept: form.dept, email: form.email, allowance: Number(form.allowance) });
+    if (edit) await store.updateStaff(edit.id, { name: form.name, role: form.role, dept: form.dept, email: form.email, allowance: Number(form.allowance), dob: form.dob || null });
+    else await store.addStaff({ name: form.name, role: form.role, dept: form.dept, email: form.email, allowance: Number(form.allowance), dob: form.dob || null });
     setModal(false);
   };
   // Deleting a staff member cascades their entire history — leave, check-ins,
@@ -11796,6 +11817,7 @@ function AdminSettings({ store }) {
           <Field label="Role"><input value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} placeholder="e.g. Physics Teacher" className={inputCls} /></Field>
           <div className="grid grid-cols-2 gap-3"><Field label="Department"><select value={form.dept} onChange={e => setForm(f => ({ ...f, dept: e.target.value }))} className={inputCls}>{deptOptions.map(d => <option key={d}>{d}</option>)}</select></Field><Field label="Allowance (days)"><input type="number" value={form.allowance} onChange={e => setForm(f => ({ ...f, allowance: e.target.value }))} className={inputCls} /></Field></div>
           <Field label="Email"><input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@londonbrookescollege.co.uk" className={inputCls} /></Field>
+          <Field label="Date of birth"><input type="date" value={form.dob} onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} className={inputCls} /></Field>
           <PrimaryBtn onClick={save} disabled={!form.name.trim()} className="w-full"><Save size={16} /> {edit ? "Save changes" : "Add staff member"}</PrimaryBtn>
         </div>
       </Modal>
