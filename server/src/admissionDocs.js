@@ -6,12 +6,16 @@
 // upload URL; `label` is what the applicant and the admin see; the label is also used as
 // the file's base name in SharePoint so a folder reads cleanly ("Passport.pdf").
 const ADMISSION_DOC_TYPES = [
-  { key: "passport", label: "Passport / ID / BRP" },
-  { key: "english", label: "Proof of English" },
-  { key: "qualifications", label: "Qualification certificates" },
+  { key: "photo", label: "Passport-size photo" },
+  { key: "passport", label: "Passport / Driving Licence" },
+  { key: "cv", label: "CV" },
   { key: "address", label: "Proof of address" },
   { key: "ni", label: "National Insurance number" },
-  { key: "immigration", label: "Immigration status" },
+  { key: "immigration", label: "Immigration share code" },
+  { key: "personalStatement", label: "Personal statement" },
+  { key: "english", label: "Proof of English" },
+  { key: "qualifications", label: "Academic qualification" },
+  { key: "employment", label: "Employment verification" },
 ];
 
 const DOC_KEYS = ADMISSION_DOC_TYPES.map((d) => d.key);

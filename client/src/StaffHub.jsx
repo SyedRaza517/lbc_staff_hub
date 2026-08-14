@@ -10287,12 +10287,16 @@ function AdmissionDetail({ r }) {
 
 // The documents an applicant is asked to upload. MUST match server/src/admissionDocs.js.
 const ADMISSION_DOC_TYPES = [
-  { key: "passport", label: "Passport / ID / BRP" },
-  { key: "english", label: "Proof of English" },
-  { key: "qualifications", label: "Qualification certificates" },
+  { key: "photo", label: "Passport-size photo" },
+  { key: "passport", label: "Passport / Driving Licence" },
+  { key: "cv", label: "CV" },
   { key: "address", label: "Proof of address" },
   { key: "ni", label: "National Insurance number" },
-  { key: "immigration", label: "Immigration status" },
+  { key: "immigration", label: "Immigration share code" },
+  { key: "personalStatement", label: "Personal statement" },
+  { key: "english", label: "Proof of English" },
+  { key: "qualifications", label: "Academic qualification" },
+  { key: "employment", label: "Employment verification" },
 ];
 const admDocLabel = (key) => (ADMISSION_DOC_TYPES.find(d => d.key === key) || {}).label || key;
 
