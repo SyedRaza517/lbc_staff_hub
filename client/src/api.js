@@ -156,6 +156,10 @@ export const api = {
   updateTimetableSlot: (id, data) => request(`/timetable/slots/${id}`, { method: "PUT", body: data }),
   removeTimetableSlot: (id) => request(`/timetable/slots/${id}`, { method: "DELETE" }),
 
+  // attendance emails (admin) — recognise students by attendance %
+  attendanceEmailStudents: () => request("/attendance-emails/students"),
+  sendAttendanceEmails: (data) => request("/attendance-emails/send", { method: "POST", body: data }),
+
   // admissions (admin) — HND application entries: create, list, edit, delete
   admissions: () => request("/admissions"),
   addAdmission: (data) => request("/admissions", { method: "POST", body: data }),

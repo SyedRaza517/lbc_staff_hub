@@ -2120,8 +2120,8 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
 /* ============================================================ ADMIN DASHBOARD ============================================================ */
 // The assignable admin pages, in nav order. "access" is intentionally excluded —
 // it is Super-Admin-only and never granted. Keep in sync with server validate.js.
-const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "assessments", "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "timetable", "admissions", "ism", "passwords", "settings"];
-const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentreviews: "Student Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", timetable: "Timetable", admissions: "Admissions", ism: "ISM (Interviews)", passwords: "Reset Passwords", settings: "Settings" };
+const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "attendance-emails", "assessments", "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "timetable", "admissions", "ism", "passwords", "settings"];
+const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", "attendance-emails": "Attendance Emails", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentreviews: "Student Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", timetable: "Timetable", admissions: "Admissions", ism: "ISM (Interviews)", passwords: "Reset Passwords", settings: "Settings" };
 
 // Can this user see/use a given admin page? The Super Admin gets everything,
 // including the Super-Admin-only Access tab. A page-scoped admin gets only their
@@ -2557,6 +2557,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
     { key: "summaries", label: "Daily Summaries", I: UserPlus },
     { key: "registers", label: "Registers — HND", I: ClipboardList },
     { key: "students", label: "Students", I: GraduationCap },
+    { key: "attendance-emails", label: "Attendance Emails", I: Mail },
     { key: "admissions", label: "Admissions", I: ClipboardList },
     { key: "ism", label: "ISM", I: MessageSquare },
     { key: "assessments", label: "Assessments", I: Award },
@@ -2638,6 +2639,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
         {activeKey === "summaries" && <AdminSummaries store={store} />}
         {activeKey === "registers" && <AdminHndRegisters store={store} />}
         {activeKey === "students" && <AdminStudents store={store} />}
+        {activeKey === "attendance-emails" && <AdminAttendanceEmails store={store} />}
         {activeKey === "assessments" && <AdminAssessments store={store} />}
         {activeKey === "pat" && <AdminPAT store={store} />}
         {activeKey === "staffreviews" && <AdminStaffReviews store={store} />}
@@ -10170,6 +10172,183 @@ const blankAdmission = () => Object.fromEntries(ADMISSION_KEYS.map(k => [k, ""])
 // A saved row (nulls) → a form (empty strings), so inputs stay controlled.
 const admissionForm = (r) => Object.fromEntries(ADMISSION_KEYS.map(k => [k, r[k] ?? ""]));
 const admissionName = (r) => `${r.firstName || ""} ${r.surname || ""}`.trim();
+
+/* ============================================================ ATTENDANCE EMAILS ============================================================ */
+// Recognise students by their attendance: pick an attendance % range, review who falls in
+// it, and email them. The % is computed and re-verified on the server (never trusted from
+// here). Placeholders {firstName} {name} {pct} {course} are filled per student.
+const DEFAULT_ATTENDANCE_SUBJECT = "Well done on your attendance";
+const DEFAULT_ATTENDANCE_MESSAGE =
+  "Dear {firstName},\n\n" +
+  "Congratulations! We're delighted to recognise your excellent attendance of {pct}% at London Brookes College.\n\n" +
+  "Consistent attendance is one of the strongest indicators of success, and your commitment is a real credit to you. Keep up the great work!\n\n" +
+  "Kind regards,\nLondon Brookes College";
+
+// Fill the placeholders for a live preview (the server does the same for the real send).
+const fillAttendanceTemplate = (t, s) => String(t).replace(/\{(firstName|lastName|name|pct|course)\}/g, (_, k) => {
+  const v = { firstName: s.firstName, lastName: s.lastName, name: s.name, pct: s.pct == null ? "" : s.pct, course: s.course }[k];
+  return v == null ? "" : String(v);
+});
+
+function AdminAttendanceEmails({ store }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [minPct, setMinPct] = useState("90");
+  const [maxPct, setMaxPct] = useState("100");
+  const [selected, setSelected] = useState(() => new Set());
+  const [subject, setSubject] = useState(DEFAULT_ATTENDANCE_SUBJECT);
+  const [message, setMessage] = useState(DEFAULT_ATTENDANCE_MESSAGE);
+  const [query, setQuery] = useState("");
+  const [confirm, setConfirm] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr("");
+    try { setRows(await api.attendanceEmailStudents()); }
+    catch (e) { setErr(e.message || "Could not load students"); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const lo = Number(minPct) || 0, hi = maxPct === "" ? 100 : Number(maxPct);
+  // Students whose attendance falls in the chosen range (nulls — no marked sessions — excluded).
+  const inRange = rows.filter(r => r.pct != null && r.pct >= lo && r.pct <= hi);
+
+  // Whenever the data or the range changes, default-select everyone in range. Keyed on the
+  // primitive range values (not the derived array) so it can't loop.
+  useEffect(() => {
+    const a = Number(minPct) || 0, b = maxPct === "" ? 100 : Number(maxPct);
+    setSelected(new Set(rows.filter(r => r.pct != null && r.pct >= a && r.pct <= b).map(r => r.id)));
+  }, [rows, minPct, maxPct]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = q ? inRange.filter(r => `${r.name} ${r.email} ${r.course} ${r.cohort}`.toLowerCase().includes(q)) : inRange;
+  const selectedInRange = inRange.filter(r => selected.has(r.id));
+  const allChecked = filtered.length > 0 && filtered.every(r => selected.has(r.id));
+
+  const toggle = (id) => setSelected(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleAll = () => setSelected(s => { const n = new Set(s); if (allChecked) filtered.forEach(r => n.delete(r.id)); else filtered.forEach(r => n.add(r.id)); return n; });
+
+  const send = async () => {
+    setConfirm(false); setSending(true); setResult(null);
+    try {
+      const res = await api.sendAttendanceEmails({ studentIds: [...selected], subject, message });
+      setResult(res);
+      const bits = [`${res.sent} sent`];
+      if (res.failed) bits.push(`${res.failed} failed`);
+      if (res.skipped) bits.push(`${res.skipped} skipped`);
+      store.notify(bits.join(" · "), res.failed ? "error" : "success");
+    } catch (e) { store.notify(e.message || "Could not send the emails", "error"); }
+    setSending(false);
+  };
+
+  const pctColour = (p) => p == null ? "bg-slate-100 text-slate-400" : p >= 90 ? "bg-emerald-50 text-emerald-700" : p >= 75 ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700";
+  const preview = selectedInRange[0];
+
+  return (
+    <>
+      <AdminHeader title="Attendance Emails" subtitle="Email students by attendance — recognise good attendance" Icon={Mail} />
+
+      {err && <div className="mb-4 flex items-start gap-2 rounded-xl bg-rose-50 px-3.5 py-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={16} className="mt-px shrink-0" />{err}</div>}
+
+      {loading ? <div className="skeleton h-64 rounded-2xl" /> : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {/* Left — range + student list */}
+          <div className="flex flex-col gap-4 lg:col-span-2">
+            <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+              <div className="flex flex-wrap items-end gap-4">
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Min attendance %</label>
+                  <input type="number" min={0} max={100} value={minPct} onChange={e => setMinPct(e.target.value)} className={`${inputCls} mt-1 w-28`} />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Max attendance %</label>
+                  <input type="number" min={0} max={100} value={maxPct} onChange={e => setMaxPct(e.target.value)} className={`${inputCls} mt-1 w-28`} />
+                </div>
+                <div className="ml-auto text-right">
+                  <p className="text-3xl font-extrabold leading-none" style={{ color: NAVY }}>{inRange.length}</p>
+                  <p className="mt-1 text-xs text-slate-500">students {lo}%–{hi}%</p>
+                </div>
+              </div>
+              <p className="mt-3 text-[11px] text-slate-400">Students with no marked sessions yet aren't shown. <b>{selectedInRange.length}</b> selected to email.</p>
+            </div>
+
+            <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200">
+              <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+                <Search size={15} className="text-slate-400" />
+                <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, email, course…" className="w-full bg-transparent text-sm outline-none" />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead>
+                    <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                      <th className="px-3 py-2"><input type="checkbox" checked={allChecked} onChange={toggleAll} className="h-4 w-4 accent-blue-600" /></th>
+                      <th className="px-3 py-2">Student</th>
+                      <th className="px-3 py-2">Course / Cohort</th>
+                      <th className="px-3 py-2">Email</th>
+                      <th className="px-3 py-2 text-right">Attendance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(r => (
+                      <tr key={r.id} className="border-t border-slate-50 hover:bg-slate-50/60">
+                        <td className="px-3 py-2"><input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} className="h-4 w-4 accent-blue-600" /></td>
+                        <td className="px-3 py-2 font-semibold text-slate-700">{r.name || "—"}</td>
+                        <td className="px-3 py-2 text-slate-500">{r.course || "—"}{r.cohort ? ` · ${r.cohort}` : ""}</td>
+                        <td className="px-3 py-2 text-slate-500">{r.email || "—"}</td>
+                        <td className="px-3 py-2 text-right"><span className={`inline-block rounded-full px-2 py-0.5 text-xs font-bold ${pctColour(r.pct)}`}>{r.pct}%</span></td>
+                      </tr>
+                    ))}
+                    {filtered.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-slate-400">No students in this attendance range.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* Right — composer + preview */}
+          <div className="flex flex-col gap-4">
+            <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+              <p className="mb-3 text-sm font-extrabold" style={{ color: NAVY_DARK }}>Compose email</p>
+              <Field label="Subject"><input value={subject} onChange={e => setSubject(e.target.value)} className={inputCls} /></Field>
+              <div className="mt-3"><Field label="Message"><textarea rows={9} value={message} onChange={e => setMessage(e.target.value)} className={`${inputCls} resize-y`} /></Field></div>
+              <p className="mt-2 text-[11px] leading-relaxed text-slate-400">Placeholders (filled per student): <b>{"{firstName}"}</b> <b>{"{name}"}</b> <b>{"{pct}"}</b> <b>{"{course}"}</b></p>
+              <PrimaryBtn onClick={() => setConfirm(true)} disabled={sending || !selectedInRange.length || !subject.trim() || !message.trim()} className="mt-4 w-full">
+                {sending ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Send to {selectedInRange.length} student{selectedInRange.length === 1 ? "" : "s"}</>}
+              </PrimaryBtn>
+            </div>
+
+            {preview && (
+              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Preview · {preview.name}</p>
+                <p className="text-sm font-bold text-slate-700">{fillAttendanceTemplate(subject, preview)}</p>
+                <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-500">{fillAttendanceTemplate(message, preview)}</p>
+              </div>
+            )}
+
+            {result && (
+              <div className="rounded-2xl bg-white p-4 text-sm ring-1 ring-slate-200">
+                <p className="font-bold text-slate-700">Last send</p>
+                <p className="mt-1 text-slate-500">{result.sent} sent{result.failed ? `, ${result.failed} failed` : ""}{result.skipped ? `, ${result.skipped} skipped (no email / email off)` : ""}</p>
+                {result.errors?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-rose-600">{result.errors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <Modal open={confirm} onClose={() => setConfirm(false)} title="Send attendance emails?">
+        <p className="text-sm leading-relaxed text-slate-600">This will email <b>{selectedInRange.length}</b> student{selectedInRange.length === 1 ? "" : "s"} with attendance between <b>{lo}%</b> and <b>{hi}%</b>. Each email is personalised and shows the student's own attendance.</p>
+        <div className="mt-5 flex gap-2">
+          <button onClick={() => setConfirm(false)} className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50">Cancel</button>
+          <PrimaryBtn colour={NAVY} onClick={send} className="flex-1"><Send size={16} /> Send</PrimaryBtn>
+        </div>
+      </Modal>
+    </>
+  );
+}
 
 // The "Courses & intakes" manager — a modal on the Admissions page where an admin curates
 // the course and intake lists that applicants pick from on the public application form.
