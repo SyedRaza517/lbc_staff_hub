@@ -126,11 +126,52 @@ router.post("/:id/request-documents", async (req, res) => {
   await prisma.admission.update({ where: { id: a.id }, data: patch });
   const link = `${CLIENT_URL}/?upload=${raw}`;
 
+  // Plain-text fallback — readable on its own, with the documents as a bulleted list.
   const list = ADMISSION_DOC_TYPES.map((d) => `• ${d.label}`).join("\n");
-  const listHtml = ADMISSION_DOC_TYPES.map((d) => `<li>${d.label}</li>`).join("");
   const subject = "London Brookes College — Please upload your application documents";
-  const text = `Dear ${name},\n\nThank you for your HND application to London Brookes College. To continue, please upload the following documents using your secure link:\n\n${list}\n\nUpload here (you can return to this link to add or replace files):\n${link}\n\nThis link expires in 30 days.\n\nKind regards,\nLondon Brookes College Admissions`;
-  const html = `<p>Dear ${name},</p><p>Thank you for your HND application to London Brookes College. To continue, please upload the following documents using your secure link:</p><ul>${listHtml}</ul><p><a href="${link}" style="display:inline-block;background:#1a3a8f;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:bold">Upload your documents</a></p><p>Or paste this link into your browser (you can return to it to add or replace files):<br>${link}</p><p style="color:#64748b;font-size:12px">This link expires in 30 days.</p><p>Kind regards,<br>London Brookes College Admissions</p>`;
+  const text =
+    `Dear ${name},\n\n` +
+    `Thank you for applying to London Brookes College. To move your application forward, please upload the documents below using your secure link. You only need to provide the ones that apply to you, and you can return to the same link any time to add or replace a file.\n\n` +
+    `Documents requested:\n${list}\n\n` +
+    `Upload your documents here:\n${link}\n\n` +
+    `This secure link expires in 30 days. If you have any questions, please contact our Admissions Team at admissions@londonbrookescollege.co.uk or +44 7946 830578.\n\n` +
+    `Kind regards,\nLondon Brookes College Admissions`;
+
+  // Branded HTML email — table-based with inline styles for broad email-client support.
+  // The document rows are generated from ADMISSION_DOC_TYPES so the email always matches
+  // the upload page and never drifts out of sync.
+  const docRowsHtml = ADMISSION_DOC_TYPES.map((d, i) =>
+    `<tr><td style="padding:11px 18px;${i < ADMISSION_DOC_TYPES.length - 1 ? "border-bottom:1px solid #eef1f6;" : ""}font-size:14px;color:#334155">` +
+    `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#9e1b32;margin-right:11px;vertical-align:middle"></span>${d.label}</td></tr>`
+  ).join("");
+
+  const html = `<div style="margin:0;padding:24px;background:#eef1f6;font-family:'Segoe UI',Roboto,system-ui,-apple-system,sans-serif">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(15,23,42,.08)">
+    <tr><td style="background:linear-gradient(135deg,#1a3a8f,#9e1b32);padding:24px 28px">
+      <p style="margin:0;color:#ffffff;font-size:18px;font-weight:800">London Brookes College</p>
+      <p style="margin:3px 0 0;color:rgba(255,255,255,.75);font-size:11px;font-weight:700;letter-spacing:.18em">ADMISSIONS</p>
+    </td></tr>
+    <tr><td style="padding:28px">
+      <h1 style="margin:0 0 16px;font-size:19px;color:#0f172a">Your application documents</h1>
+      <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#334155">Dear ${name},</p>
+      <p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#334155">Thank you for applying to London Brookes College. To move your application forward, please upload the documents below using your secure link. You only need to provide the ones that apply to you, and you can return to the same link any time to add or replace a file.</p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 22px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
+        <tr><td style="background:#f8fafc;padding:10px 18px;border-bottom:1px solid #e2e8f0;font-size:11px;font-weight:800;letter-spacing:.12em;color:#64748b;text-transform:uppercase">Documents requested</td></tr>
+        ${docRowsHtml}
+      </table>
+      <table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:0 auto 18px"><tr><td style="border-radius:10px" bgcolor="#1a3a8f">
+        <a href="${link}" style="display:inline-block;padding:14px 30px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;background:linear-gradient(135deg,#1a3a8f,#9e1b32)">Upload your documents</a>
+      </td></tr></table>
+      <p style="margin:0 0 4px;font-size:12px;line-height:1.5;color:#64748b;text-align:center">Or paste this link into your browser:</p>
+      <p style="margin:0 0 20px;font-size:12px;line-height:1.5;word-break:break-all;text-align:center"><a href="${link}" style="color:#1a3a8f">${link}</a></p>
+      <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8">This secure link expires in 30 days. If you have any questions, please contact our Admissions Team at <a href="mailto:admissions@londonbrookescollege.co.uk" style="color:#1a3a8f">admissions@londonbrookescollege.co.uk</a> or +44&nbsp;7946&nbsp;830578.</p>
+      <p style="margin:18px 0 0;font-size:14px;line-height:1.6;color:#334155">Kind regards,<br><b>London Brookes College Admissions</b></p>
+    </td></tr>
+    <tr><td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0">
+      <p style="margin:0;font-size:11px;line-height:1.6;color:#94a3b8">London Brookes College &middot; 42 The Burroughs, Hendon, London NW4 4AP<br>info@londonbrookescollege.co.uk &middot; www.londonbrookescollege.co.uk</p>
+    </td></tr>
+  </table>
+</div>`;
 
   let emailed = false;
   try { await email.sendEmail(a.email, subject, text, { html }); emailed = email.isConfigured(); }
