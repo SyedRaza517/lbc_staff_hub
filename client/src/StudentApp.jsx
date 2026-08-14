@@ -615,7 +615,7 @@ function ResultsScreen({ results, busy, err }) {
               <div className="flex items-start gap-2.5">
                 <span className="mt-0.5 flex h-8 w-12 shrink-0 items-center justify-center rounded-xl text-[10px] font-extrabold text-white" style={{ background: `linear-gradient(135deg, ${NAVY}, ${NAVY_DARK})` }}>{(a.unitCode || a.moduleCode || "?").slice(0, 5)}</span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-extrabold text-slate-700">{a.title}</p>
+                  <p className="break-words text-[13px] font-extrabold text-slate-700">{a.title}</p>
                   <p className="truncate text-[11px] text-slate-400">{a.unitName || a.moduleName} · {a.type}{a.dueDate ? ` · due ${fmtDate(a.dueDate)}` : ""}</p>
                 </div>
                 {done
@@ -627,7 +627,7 @@ function ResultsScreen({ results, busy, err }) {
                   <div className="h-full rounded-full" style={{ width: `${a.pct ?? 0}%`, background: t.colour, transition: "width 1s cubic-bezier(.4,0,.2,1)" }} />
                 </div>
               )}
-              {a.feedback ? <p className="mt-2.5 rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500"><span className="font-bold text-slate-600">Feedback: </span>{a.feedback}</p> : null}
+              {a.feedback ? <p className="mt-2.5 break-words rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500"><span className="font-bold text-slate-600">Feedback: </span>{a.feedback}</p> : null}
             </Card>
           );
         })}
@@ -791,7 +791,7 @@ function TimetableBlock({ stage, i }) {
                 {byDay[d].map(r => (
                   <div key={r.id} className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200/70">
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-bold text-slate-800">{r.title}</p>
+                      <p className="min-w-0 break-words text-sm font-bold text-slate-800">{r.title}</p>
                       <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-slate-500 ring-1 ring-slate-200">{periodOf(r.start)}</span>
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-slate-500">
@@ -811,7 +811,7 @@ function TimetableBlock({ stage, i }) {
       {weeks.length > 0 && (
         <div className="border-t-4 border-slate-100 px-4 py-3">
           <p className="mb-2 text-[11px] font-extrabold uppercase tracking-widest" style={{ color: accent }}>Academic calendar</p>
-          <div className="overflow-hidden rounded-xl ring-1 ring-slate-200">
+          <div className="overflow-x-auto rounded-xl ring-1 ring-slate-200">
             <table className="w-full text-[12px]">
               <thead><tr className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-wide text-slate-400"><th className="px-3 py-2">Wk</th><th className="px-3 py-2">Commencing</th><th className="px-3 py-2">Activity</th></tr></thead>
               <tbody>
@@ -892,14 +892,14 @@ function QueryScreen({ queries = [], reload }) {
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${q.status === "open" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>{q.status === "open" ? "Awaiting reply" : "Answered"}</span>
           </div>
           <div className="flex justify-end">
-            <div className="max-w-[85%] rounded-2xl rounded-br-md px-3.5 py-2.5 text-sm leading-relaxed text-white shadow-sm" style={{ background: NAVY }}>
+            <div className="max-w-[85%] break-words rounded-2xl rounded-br-md px-3.5 py-2.5 text-sm leading-relaxed text-white shadow-sm" style={{ background: NAVY }}>
               {q.message}
               <p className="mt-1 text-[10px] text-white/60">{fmtDate(String(q.createdAt).slice(0, 10))}</p>
             </div>
           </div>
           {q.response ? (
             <div className="flex justify-start">
-              <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-white px-3.5 py-2.5 text-sm leading-relaxed text-slate-700 shadow-sm ring-1 ring-slate-200/70">
+              <div className="max-w-[85%] break-words rounded-2xl rounded-bl-md bg-white px-3.5 py-2.5 text-sm leading-relaxed text-slate-700 shadow-sm ring-1 ring-slate-200/70">
                 <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-blue-600">College{q.respondedBy ? ` · ${q.respondedBy}` : ""}</p>
                 {q.response}
                 {q.respondedAt && <p className="mt-1 text-[10px] text-slate-400">{fmtDate(q.respondedAt)}</p>}

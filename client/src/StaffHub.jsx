@@ -11,7 +11,7 @@ import {
   Sun, Sunrise, Sunset, TrendingUp, Timer, Info, Phone,
   CalendarCheck, UserCheck, Layers, Activity, Award, ShieldCheck,
   BookOpen, Percent, PlayCircle, RefreshCw, MoreHorizontal, MessageSquare, ChevronDown, Loader2, KeyRound, Send, Wallet,
-  Fingerprint, ScanFace, ExternalLink, Copy
+  Fingerprint, ScanFace, ExternalLink, Copy, PanelLeftClose, PanelLeftOpen
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis,
@@ -2540,6 +2540,10 @@ function ExecutiveDashboard({ store }) {
 
 export function AdminDashboard({ store, onExitToStaffApp }) {
   const me = store.currentUser;
+  // Collapsible sidebar (desktop) so an admin can reclaim full width; remembered across
+  // sessions. On mobile the sidebar is already a horizontal chip bar, so this is desktop-only.
+  const [sidebarOpen, setSidebarOpen] = useState(() => { try { return localStorage.getItem("lbc.sidebar") !== "0"; } catch { return true; } });
+  const toggleSidebar = (v) => { setSidebarOpen(v); try { localStorage.setItem("lbc.sidebar", v ? "1" : "0"); } catch { /* ignore */ } };
   // NOTE: the isAdmin guard is deliberately below the hooks (see the return further
   // down). Returning before them would change the hook count if the flag ever flipped
   // while mounted, which React rejects and turns into an app-wide crash.
@@ -2600,11 +2604,12 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
   if (me?.kind === "student" || me?.isStudent) return <div className="p-4 text-slate-400">Access denied</div>;
   if (!store.isAdmin) return <div className="p-4 text-slate-400">Access denied</div>;
   return (
-    <div className="flex min-h-[calc(100vh-40px)]">
-      <aside className="hidden w-60 flex-col bg-white px-4 py-5 ring-1 ring-slate-200 md:flex">
+    <div className="flex min-h-[calc(100vh-40px)] w-full overflow-x-hidden">
+      <aside className={`hidden w-60 shrink-0 flex-col bg-white px-4 py-5 ring-1 ring-slate-200 ${sidebarOpen ? "md:flex" : ""}`}>
         <div className="mb-6 flex items-center gap-2 px-1">
-          <div className="flex h-10 w-14 items-center justify-center rounded-md ring-1 ring-slate-200"><Logo small /></div>
-          <div><p className="text-[13px] font-extrabold leading-tight" style={{ color: NAVY }}>Staff Hub</p><p className="text-[10px] font-semibold text-slate-400">ADMIN CONSOLE</p></div>
+          <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-md ring-1 ring-slate-200"><Logo small /></div>
+          <div className="min-w-0"><p className="text-[13px] font-extrabold leading-tight" style={{ color: NAVY }}>Staff Hub</p><p className="text-[10px] font-semibold text-slate-400">ADMIN CONSOLE</p></div>
+          <button onClick={() => toggleSidebar(false)} title="Hide menu" aria-label="Hide menu" className="press ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><PanelLeftClose size={18} /></button>
         </div>
         <nav className="flex-1 space-y-1">
           {nav.map((n, i) => (
@@ -2619,7 +2624,10 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
         </nav>
         <div className="rounded-xl bg-slate-50 p-3 text-center"><p className="text-[11px] text-slate-400">Logged in as</p><p className="text-sm font-bold text-slate-700">{me?.name || "Administrator"}</p>{me?.isSuperAdmin && <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: MAROON }}>Super Admin</p>}</div>
       </aside>
-      <main className="flex-1 overflow-x-hidden bg-slate-100 p-5 md:p-7">
+      <main className="min-w-0 flex-1 overflow-x-hidden bg-slate-100 p-5 md:p-7">
+        {!sidebarOpen && (
+          <button onClick={() => toggleSidebar(true)} title="Show menu" className="press mb-4 hidden items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50 md:inline-flex"><PanelLeftOpen size={16} /> Menu</button>
+        )}
         <div className="mb-4 flex gap-1.5 overflow-x-auto md:hidden">
           {/* On a phone, a way back to the staff app — admins (incl. limited admins
               who registered on the app) keep both their staff view and the console. */}
@@ -11569,7 +11577,7 @@ function AdminTimetable({ store }) {
 
           {/* Weekly grid, grouped by day */}
           {data.slots.length > 0 && (
-            <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
+            <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 overflow-x-auto max-w-full">
               <table className="w-full min-w-[720px] text-sm">
                 <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-400">
                   <tr><th className="px-4 py-3">Day</th><th className="px-4 py-3">Time</th><th className="px-4 py-3">Session</th><th className="px-4 py-3">Lecturer</th><th className="px-4 py-3">Venue</th><th className="px-4 py-3 text-right">Actions</th></tr>
@@ -11615,7 +11623,7 @@ function AdminTimetable({ store }) {
           </div>
 
           {cal.weeks.length > 0 && (
-            <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-slate-200">
+            <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-slate-200 overflow-x-auto max-w-full">
               <table className="w-full min-w-[520px] text-sm">
                 <thead className="bg-slate-50 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400">
                   <tr><th className="px-3 py-2">Week</th><th className="px-3 py-2">Commencing</th><th className="px-3 py-2">Activity</th><th className="px-3 py-2"></th></tr>

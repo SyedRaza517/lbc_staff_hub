@@ -432,17 +432,17 @@ function Shell({ user, logout, entry }) {
           <div className="flex h-7 w-8 items-center justify-center rounded-lg bg-white/95 ring-1 ring-white/15"><BrandMark size={20} /></div>
           <span className="hidden font-extrabold tracking-tight text-white sm:inline" style={{ fontFamily: "'Lora', serif" }}>LBC</span>
         </div>
-        <div className="flex flex-1 items-center justify-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
           {/* The Staff-App / Admin-Dashboard view toggle used to live here. It's
               gone now: the front-door Landing screen already asks which one to
               open, so switching again from the header was redundant. */}
-          <span className="font-semibold tracking-wide text-slate-200">London Brookes College · Staff Hub</span>
+          <span className="min-w-0 truncate font-semibold tracking-wide text-slate-200">London Brookes College · Staff Hub</span>
         </div>
         <div className="flex items-center gap-2.5">
           <LiveClock />
-          <div className="hidden items-center gap-2 sm:flex">
-            <div className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white ring-1 ring-white/20" style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}>{initialsOf(user.name)}</div>
-            <span className="text-slate-300">{user.name}</span>
+          <div className="hidden min-w-0 items-center gap-2 sm:flex">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ring-1 ring-white/20" style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}>{initialsOf(user.name)}</div>
+            <span className="max-w-[24ch] truncate text-slate-300">{user.name}</span>
           </div>
           <button onClick={() => setShowChangePw(true)} title="Change password" className="press flex items-center gap-1 rounded-full px-2.5 py-1.5 font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"><KeyRound size={13} /> <span className="hidden md:inline">Change password</span></button>
           <button onClick={() => setConfirmOut(true)} className="press flex items-center gap-1 rounded-full px-2.5 py-1.5 font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"><LogOut size={13} /> Sign out</button>
@@ -494,8 +494,8 @@ function Shell({ user, logout, entry }) {
           const tone = t.type === "success" ? "#059669" : t.type === "error" ? MAROON : NAVY;
           const I = t.type === "success" ? CheckCircle2 : t.type === "error" ? XCircle : Sparkles;
           return (
-            <div key={t.id} className="slide-in pointer-events-auto flex items-center gap-2.5 rounded-xl bg-white px-4 py-3 shadow-2xl ring-1 ring-slate-200" style={{ borderLeft: `4px solid ${tone}` }}>
-              <I size={18} style={{ color: tone }} /><span className="text-sm font-semibold text-slate-700">{t.msg}</span>
+            <div key={t.id} className="slide-in pointer-events-auto flex max-w-[min(85vw,22rem)] items-center gap-2.5 rounded-xl bg-white px-4 py-3 shadow-2xl ring-1 ring-slate-200" style={{ borderLeft: `4px solid ${tone}` }}>
+              <I size={18} style={{ color: tone }} className="shrink-0" /><span className="min-w-0 break-words text-sm font-semibold text-slate-700">{t.msg}</span>
             </div>
           );
         })}
