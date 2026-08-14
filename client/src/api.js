@@ -176,6 +176,21 @@ export const api = {
   // admissions — decision (interview/enrol/studentId) + offer letter (admin)
   updateAdmissionStatus: (id, data) => request(`/admissions/${id}/status`, { method: "PUT", body: data }),
   sendAdmissionOffer: (id, data) => request(`/admissions/${id}/send-offer`, { method: "POST", body: data }),
+  // admissions — server-generated PDF downloads (admin). Fetch the PDF as a Blob and
+  // trigger a real file download. This works uniformly across Chrome, Firefox,
+  // Safari/Mac and Edge, unlike the old window.open()+print() export (pop-up blockers,
+  // Safari print quirks). The Authorization header mirrors request() exactly.
+  downloadPdf: async (path, filename) => {
+    const token = getToken();
+    const res = await fetch(`${BASE}${path}`, { cache: "no-store", headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
+    if (!res.ok) { let m = "Download failed"; try { m = (await res.json()).error || m; } catch (_) {} const e = new Error(m); e.status = res.status; throw e; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  },
+  downloadAdmissionApplicationPdf: (id, filename) => api.downloadPdf(`/admission-pdf/${id}/application.pdf`, filename),
+  downloadAdmissionOfferLetterPdf: (id, filename) => api.downloadPdf(`/admission-pdf/${id}/offer-letter.pdf`, filename),
   // admissions — applicant offer acceptance (PUBLIC: authed by the emailed token)
   offerInfo: async (token) => {
     const res = await fetch(`${BASE}/admission-offers/${encodeURIComponent(token)}`);

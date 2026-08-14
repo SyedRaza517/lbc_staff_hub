@@ -83,6 +83,7 @@ app.use("/api/student-reviews", wrapAsync(require("./routes/studentReviews")));
 app.use("/api/timetable", wrapAsync(require("./routes/timetable")));
 app.use("/api/admissions", wrapAsync(require("./routes/admissions")));
 app.use("/api/admission-config", wrapAsync(require("./routes/admissionConfig")));
+app.use("/api/admission-pdf", wrapAsync(require("./routes/admissionPdf")));
 app.use("/api/attendance-emails", wrapAsync(require("./routes/attendanceEmails")));
 app.use("/api/admission-uploads", wrapAsync(require("./routes/admissionsUpload")));
 app.use("/api/admission-offers", wrapAsync(require("./routes/admissionOffer")));

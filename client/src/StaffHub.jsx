@@ -10731,7 +10731,11 @@ function AdmissionOfferPanel({ r, store, onChanged }) {
           : sent
             ? <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-[11px] font-bold text-blue-700">Sent{r.offerSentAt ? ` · ${fmtDate(String(r.offerSentAt).slice(0, 10))}` : ""}</span>
             : <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-400">Not sent</span>}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={async () => { try { await api.downloadAdmissionOfferLetterPdf(r.id, `Offer Letter - ${[r.firstName, r.surname].filter(Boolean).join(" ") || "Applicant"}.pdf`); } catch (e) { store.notify(e.message || "Could not download the offer letter", "error"); } }}
+            className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50">
+            <Download size={13} /> Download offer letter
+          </button>
           <button onClick={() => { setDialog(d => !d); setInductionDate(""); setSenderName(store.currentUser?.name || ""); }} disabled={!r.email} title={!r.email ? "Add an email address first" : ""}
             className="press flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white transition hover:opacity-95 disabled:opacity-40" style={{ background: MAROON }}>
             <Send size={13} /> {sent || accepted ? "Resend offer" : "Send offer letter"}
@@ -11108,52 +11112,13 @@ function AdminAdmissions({ store }) {
     store.notify("Exported application CSV");
   };
 
-  // Export the open application as a PDF. No PDF library is bundled, so we render a
-  // clean, self-contained print document in a new tab and hand it to the browser's
-  // "Save as PDF" — which is exactly what the print dialog offers. Only answered
-  // questions are shown, grouped by the same sections as the form.
-  const exportPdf = (r) => {
-    const w = window.open("", "_blank");
-    if (!w) { store.notify("Allow pop-ups for this site to export a PDF", "error"); return; }
-    const esc = (s) => String(s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-    const name = admissionName(r) || "Applicant";
-    const applied = fmtDate(String(r.createdAt).slice(0, 10));
-    const body = ADMISSION_SECTIONS.map(sec => {
-      const rowsHtml = sec.fields.filter(f => (r[f.key] ?? "") !== "").map(f => {
-        const val = f.type === "date" ? fmtDate(r[f.key]) : r[f.key];
-        return `<tr><td class="q">${esc(f.label)}</td><td class="a">${esc(val)}</td></tr>`;
-      }).join("");
-      return rowsHtml ? `<section><h2>${esc(sec.title)}</h2><table>${rowsHtml}</table></section>` : "";
-    }).join("");
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Admission — ${esc(name)}</title>
-<style>
-  * { box-sizing: border-box; }
-  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #0f172a; margin: 32px; }
-  header { border-bottom: 3px solid ${NAVY}; padding-bottom: 12px; margin-bottom: 20px; }
-  header .org { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: ${MAROON}; }
-  header h1 { font-size: 22px; margin: 4px 0 2px; color: ${NAVY_DARK}; }
-  header .meta { font-size: 12px; color: #64748b; }
-  section { margin: 0 0 16px; page-break-inside: avoid; }
-  h2 { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: ${NAVY}; border-left: 3px solid ${NAVY}; padding-left: 8px; margin: 0 0 6px; }
-  table { width: 100%; border-collapse: collapse; }
-  td { border-bottom: 1px solid #e2e8f0; padding: 5px 8px; font-size: 12px; vertical-align: top; }
-  td.q { width: 46%; color: #475569; font-weight: 600; }
-  td.a { color: #0f172a; white-space: pre-wrap; }
-  footer { margin-top: 24px; font-size: 10px; color: #94a3b8; text-align: center; }
-  @media print { body { margin: 12mm; } @page { margin: 12mm; } }
-</style></head><body>
-  <header>
-    <div class="org">London Brookes College</div>
-    <h1>HND Application — ${esc(name)}</h1>
-    <div class="meta">Applied ${esc(applied)}</div>
-  </header>
-  ${body}
-  <footer>Generated from London Brookes College Staff Hub</footer>
-  <script>window.addEventListener('load', function(){ setTimeout(function(){ window.focus(); window.print(); }, 200); });<\/script>
-</body></html>`;
-    w.document.write(html);
-    w.document.close();
-    store.notify("Opening PDF export…");
+  // Export the open application as a PDF. The server builds the PDF (see
+  // server/src/applicationPdf.js) and we download it as a file — this works uniformly
+  // across Chrome, Firefox, Safari/Mac and Edge, unlike the old window.open()+print()
+  // export which was defeated by pop-up blockers and Safari's print quirks.
+  const exportPdf = async (r) => {
+    try { await api.downloadAdmissionApplicationPdf(r.id, `Application Form - ${admissionName(r) || "Applicant"}.pdf`); }
+    catch (e) { store.notify(e.message || "Could not download the PDF", "error"); }
   };
 
   return (

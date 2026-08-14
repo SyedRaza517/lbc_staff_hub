@@ -10,6 +10,7 @@ const { isRealDate } = require("../validate");
 // stubbed, error } and never throws (see ../email).
 const email = require("../email");
 const mailFrom = require("../mailFrom");
+const mailAssets = require("../mailAssets");
 
 // DEF-01: PAT interactions contain sensitive wellbeing/absence notes and are an
 // admin-only feature. Guard every route, reads included, against non-admin tokens.
@@ -79,6 +80,7 @@ function buildInteractionEmail(row) {
   const html = `<div style="margin:0;padding:24px;background:#eef1f6;font-family:'Segoe UI',system-ui,-apple-system,sans-serif">
   <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(15,23,42,.08)">
     <div style="background:linear-gradient(135deg,#1a3a8f,#9e1b32);padding:20px 24px">
+      <img src="${mailAssets.logoUrl}" width="44" height="26" alt="London Brookes College" style="display:block;margin:0 0 10px;border:0;outline:none;max-width:44px" />
       <p style="margin:0 0 2px;color:rgba(255,255,255,.7);font-size:11px;letter-spacing:.18em">PERSONAL ACADEMIC TUTOR</p>
       <p style="margin:0;color:#fff;font-size:18px;font-weight:800">London Brookes College</p>
     </div>

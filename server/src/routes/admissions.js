@@ -13,6 +13,7 @@ const sharepoint = require("../sharepoint");
 const storage = require("../storage");
 const { ADMISSION_DOC_TYPES, admissionFolderSegments } = require("../admissionDocs");
 const { FIELDS, pick, str } = require("../admissionFields");
+const mailAssets = require("../mailAssets");
 
 // Where the applicant's upload page lives (the SPA reads ?upload=<token>).
 const CLIENT_URL = (process.env.CLIENT_URL || "http://localhost:5173").replace(/\/$/, "");
@@ -149,6 +150,7 @@ router.post("/:id/request-documents", async (req, res) => {
   const html = `<div style="margin:0;padding:24px;background:#eef1f6;font-family:'Segoe UI',Roboto,system-ui,-apple-system,sans-serif">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(15,23,42,.08)">
     <tr><td style="background:linear-gradient(135deg,#1a3a8f,#9e1b32);padding:24px 28px">
+      <img src="${mailAssets.logoUrl}" width="44" height="26" alt="London Brookes College" style="display:block;margin:0 0 10px;border:0;outline:none;max-width:44px" />
       <p style="margin:0;color:#ffffff;font-size:18px;font-weight:800">London Brookes College</p>
       <p style="margin:3px 0 0;color:rgba(255,255,255,.75);font-size:11px;font-weight:700;letter-spacing:.18em">ADMISSIONS</p>
     </td></tr>
@@ -285,6 +287,7 @@ router.post("/:id/send-offer", async (req, res) => {
   const html = `<div style="margin:0;padding:24px;background:#eef1f6;font-family:'Segoe UI',Roboto,system-ui,-apple-system,sans-serif">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(15,23,42,.08)">
     <tr><td style="background:linear-gradient(135deg,#1a3a8f,#9e1b32);padding:24px 28px">
+      <img src="${mailAssets.logoUrl}" width="44" height="26" alt="London Brookes College" style="display:block;margin:0 0 10px;border:0;outline:none;max-width:44px" />
       <p style="margin:0;color:#ffffff;font-size:18px;font-weight:800">London Brookes College</p>
       <p style="margin:3px 0 0;color:rgba(255,255,255,.75);font-size:11px;font-weight:700;letter-spacing:.18em">ADMISSIONS</p>
     </td></tr>
