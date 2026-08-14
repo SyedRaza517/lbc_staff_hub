@@ -10161,7 +10161,11 @@ export const ADMISSION_SECTIONS = [
 // The keys the form requires (asterisked in the original). Used to block save until filled.
 export const ADMISSION_REQUIRED = ADMISSION_SECTIONS.flatMap(s => s.fields.filter(f => f.required).map(f => f.key));
 // Every field key, flattened — used to build a blank form and to map a saved row back.
-const ADMISSION_KEYS = ADMISSION_SECTIONS.flatMap(s => s.fields.map(f => f.key));
+// `intakeYear` is appended even though it's no longer a form field: legacy rows (created
+// before intake became a single combined label) still carry a separate year, so including
+// the key lets an edit round-trip it instead of silently nulling it — which would also
+// wrongly move the applicant's SharePoint folder on the next save.
+const ADMISSION_KEYS = [...ADMISSION_SECTIONS.flatMap(s => s.fields.map(f => f.key)), "intakeYear"];
 const blankAdmission = () => Object.fromEntries(ADMISSION_KEYS.map(k => [k, ""]));
 // A saved row (nulls) → a form (empty strings), so inputs stay controlled.
 const admissionForm = (r) => Object.fromEntries(ADMISSION_KEYS.map(k => [k, r[k] ?? ""]));

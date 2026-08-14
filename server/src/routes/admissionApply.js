@@ -36,11 +36,14 @@ router.get("/intakes", async (_req, res) => {
 
 // POST /api/admission-apply — create an application from the public form.
 router.post("/", async (req, res) => {
+  // req.body is undefined for a non-JSON POST — guard so a malformed request 400s cleanly
+  // instead of throwing a TypeError (500) on the public endpoint.
+  const b = req.body || {};
   // Light anti-spam: a hidden honeypot field only bots fill in. Pretend success so the
   // bot moves on, but create nothing.
-  if (str(req.body._hp)) return res.status(200).json({ ok: true });
+  if (str(b._hp)) return res.status(200).json({ ok: true });
 
-  const data = pick(req.body);
+  const data = pick(b);
   if (!data.firstName && !data.surname) {
     return res.status(400).json({ error: "Please enter at least your first name or surname." });
   }

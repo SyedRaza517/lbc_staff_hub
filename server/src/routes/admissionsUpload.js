@@ -67,7 +67,11 @@ router.post("/:token", express.raw({ type: "*/*", limit: sharepoint.MAX_BYTES })
   const buffer = req.body;
   if (!buffer || !buffer.length) return res.status(400).json({ error: "The file is empty." });
 
-  const origName = decodeURIComponent(req.headers["x-file-name"] || "") || `${docLabel(type)}${extOf(req.query.name)}`;
+  // decodeURIComponent throws on a malformed %-sequence; fall back to the raw header so a
+  // bad X-File-Name header can't turn a valid upload into a 500.
+  let hdrName = req.headers["x-file-name"] || "";
+  try { hdrName = decodeURIComponent(hdrName); } catch (_) { /* keep the raw header */ }
+  const origName = hdrName || `${docLabel(type)}${extOf(req.query.name)}`;
   const contentType = req.headers["content-type"] || "application/octet-stream";
   const storedName = `${safeName(docLabel(type))}${extOf(origName)}`;
 

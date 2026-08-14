@@ -128,6 +128,7 @@ router.post("/:id/request-documents", async (req, res) => {
 
   // Plain-text fallback — readable on its own, with the documents as a bulleted list.
   const list = ADMISSION_DOC_TYPES.map((d) => `• ${d.label}`).join("\n");
+  const nameEsc = String(name).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const subject = "London Brookes College — Please upload your application documents";
   const text =
     `Dear ${name},\n\n` +
@@ -153,7 +154,7 @@ router.post("/:id/request-documents", async (req, res) => {
     </td></tr>
     <tr><td style="padding:28px">
       <h1 style="margin:0 0 16px;font-size:19px;color:#0f172a">Your application documents</h1>
-      <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#334155">Dear ${name},</p>
+      <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#334155">Dear ${nameEsc},</p>
       <p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#334155">Thank you for applying to London Brookes College. To move your application forward, please upload the documents below using your secure link. You only need to provide the ones that apply to you, and you can return to the same link any time to add or replace a file.</p>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 22px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
         <tr><td style="background:#f8fafc;padding:10px 18px;border-bottom:1px solid #e2e8f0;font-size:11px;font-weight:800;letter-spacing:.12em;color:#64748b;text-transform:uppercase">Documents requested</td></tr>
@@ -173,9 +174,14 @@ router.post("/:id/request-documents", async (req, res) => {
   </table>
 </div>`;
 
+  // sendEmail never throws on a send failure — it returns { sent, stubbed, error }. Read
+  // that result so a rejected/blocked send is reported instead of falsely showing success.
   let emailed = false;
-  try { await email.sendEmail(a.email, subject, text, { html }); emailed = email.isConfigured(); }
-  catch (e) { warning = (warning ? warning + " " : "") + `Email could not be sent: ${e.message}`; }
+  try {
+    const sent = await email.sendEmail(a.email, subject, text, { html });
+    emailed = !!sent.sent;
+    if (!sent.sent && !sent.stubbed) warning = (warning ? warning + " " : "") + `Email could not be sent: ${sent.error || "unknown error"}`;
+  } catch (e) { warning = (warning ? warning + " " : "") + `Email could not be sent: ${e.message}`; }
 
   const updated = await prisma.admission.findUnique({ where: { id: a.id }, ...withDocs });
   // Return the link too, so the admin can copy it if email isn't configured on the server.
@@ -246,7 +252,9 @@ router.post("/:id/send-offer", async (req, res) => {
   const raw = crypto.randomBytes(32).toString("hex");
   await prisma.admission.update({
     where: { id: a.id },
-    data: { offerStatus: "sent", offerSentAt: new Date(), offerTokenHash: hashToken(raw), offerInductionDate: inductionDate || null },
+    // Don't regress an already-accepted offer to "sent" on a re-send (the admin may just be
+    // sending the applicant another copy); keep the acceptance intact.
+    data: { offerStatus: a.offerStatus === "accepted" ? "accepted" : "sent", offerSentAt: new Date(), offerTokenHash: hashToken(raw), offerInductionDate: inductionDate || null },
   });
 
   // Sign-off carries the sender's typed name over "Admissions Officer, London
@@ -297,9 +305,14 @@ router.post("/:id/send-offer", async (req, res) => {
 </div>`;
   const fileName = `Offer Letter - ${name}.pdf`;
 
+  // sendEmail returns { sent, stubbed, error } and never throws on failure — read it so a
+  // blocked send (e.g. SMTP "SendAsDenied", bad key) is surfaced, not reported as success.
   let emailed = false, warning = null;
-  try { await email.sendEmail(a.email, subject, text, { html, attachments: [{ filename: fileName, content: pdf }] }); emailed = email.isConfigured(); }
-  catch (e) { warning = `The offer was recorded but the email could not be sent: ${e.message}`; }
+  try {
+    const sent = await email.sendEmail(a.email, subject, text, { html, attachments: [{ filename: fileName, content: pdf }] });
+    emailed = !!sent.sent;
+    if (!sent.sent && !sent.stubbed) warning = `The offer was recorded but the email could not be sent: ${sent.error || "unknown error"}`;
+  } catch (e) { warning = `The offer was recorded but the email could not be sent: ${e.message}`; }
 
   const updated = await prisma.admission.findUnique({ where: { id: a.id }, ...withDocs });
   res.json({ admission: sAdmission(updated), emailed, link: acceptLink, warning });

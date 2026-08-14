@@ -16,8 +16,11 @@ const clean = (v) => String(v == null ? "" : v).trim().slice(0, 300);
 
 // ---- Courses ---------------------------------------------------------------
 router.get("/courses", async (_req, res) => {
-  const rows = await prisma.admissionCourse.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] });
-  res.json(rows);
+  // Return [] (not a 500) if the table doesn't exist yet — e.g. before `prisma db push`.
+  try {
+    const rows = await prisma.admissionCourse.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] });
+    res.json(rows);
+  } catch (_) { res.json([]); }
 });
 
 router.post("/courses", async (req, res) => {
@@ -45,8 +48,11 @@ router.delete("/courses/:id", async (req, res) => {
 
 // ---- Intakes ---------------------------------------------------------------
 router.get("/intakes", async (_req, res) => {
-  const rows = await prisma.admissionIntake.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] });
-  res.json(rows);
+  // Return [] (not a 500) if the table doesn't exist yet — e.g. before `prisma db push`.
+  try {
+    const rows = await prisma.admissionIntake.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] });
+    res.json(rows);
+  } catch (_) { res.json([]); }
 });
 
 router.post("/intakes", async (req, res) => {
