@@ -62,34 +62,69 @@ function pctColour(pct) {
 }
 
 // ---------------------------------------------------------------------------
-// 1) currentSemester
+// 1) currentTerm — derived from the registers, not a separate setting
 // ---------------------------------------------------------------------------
 
-// The Semester whose [start, end] range contains today, or null if none. Dates are
-// stored as "YYYY-MM-DD" strings, which sort lexicographically in date order, so a
-// plain string comparison is correct. If ranges ever overlap we pick the one with
-// the latest start (orderBy start desc → first row).
-async function currentSemester() {
+// A "Month YYYY" or "Month–Month YYYY" label for a date range (both "YYYY-MM-DD").
+function rangeLabel(start, end) {
+  if (!start) return monthYearLabel();
+  const s = new Date(`${start}T00:00:00Z`);
+  const e = new Date(`${end || start}T00:00:00Z`);
+  const sm = MONTHS[s.getUTCMonth()], em = MONTHS[e.getUTCMonth()];
+  if (s.getUTCFullYear() === e.getUTCFullYear() && sm === em) return `${sm} ${s.getUTCFullYear()}`;
+  if (s.getUTCFullYear() === e.getUTCFullYear()) return `${sm}–${em} ${s.getUTCFullYear()}`;
+  return `${sm} ${s.getUTCFullYear()}–${em} ${e.getUTCFullYear()}`;
+}
+
+// The current teaching term, taken FROM THE REGISTERS: the units running today
+// (Unit.startDate <= today <= Unit.endDate — the admin-set teaching window that also
+// drives register generation). Their combined date span and unit set define "this term".
+// If no unit has teaching dates yet, fall back to a manually-set current Semester (scope by
+// date only). Returns { name, start, end, unitIds } or null.
+//   unitIds — the running units; attendance is restricted to these. null in the Semester
+//   fallback, where we scope by the date range instead.
+async function currentTerm() {
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const matches = await prisma.semester.findMany({
+
+  const running = await prisma.unit.findMany({
+    where: { startDate: { not: null, lte: today }, endDate: { not: null, gte: today } },
+    select: { id: true, startDate: true, endDate: true, term: { select: { name: true } } },
+  });
+  if (running.length) {
+    const starts = running.map((u) => u.startDate).sort();
+    const ends = running.map((u) => u.endDate).sort();
+    const start = starts[0], end = ends[ends.length - 1];
+    // If every running unit shares one dated Term, use its name; otherwise a date range.
+    const termNames = [...new Set(running.map((u) => u.term && u.term.name).filter(Boolean))];
+    const name = termNames.length === 1 ? termNames[0] : rangeLabel(start, end);
+    return { name, start, end, unitIds: running.map((u) => u.id) };
+  }
+
+  // Fallback: an admin-set current Semester whose [start, end] contains today.
+  const sems = await prisma.semester.findMany({
     where: { start: { lte: today }, end: { gte: today } },
     orderBy: { start: "desc" },
   });
-  return matches[0] || null;
+  const s = sems[0];
+  if (s) return { name: s.name, start: s.start, end: s.end, unitIds: null };
+  return null;
 }
 
 // ---------------------------------------------------------------------------
-// 2) computeSemesterAttendance
+// 2) computeCurrentTermAttendance
 // ---------------------------------------------------------------------------
 
-// Build the per-student attendance picture for one semester:
-//   { semester, period, students: [ { …, pct, bandKey, bandLabel, modules[] } ] }
+// Build the per-student attendance picture for the current term:
+//   { term, period, students: [ { …, pct, bandKey, bandLabel, modules[] } ] }
 //
-// Only CURRENTLY-enrolled units count (the SQL joins Enrolment), so a unit a student
-// has since left cannot drag their figure — matching the HND /attendance handler and
-// the student's own app. A student with no marks this semester is still returned, but
-// with pct null, modules [] and bandKey null, so the caller can simply skip them.
-async function computeSemesterAttendance(semester) {
+// `term` = { name, start, end, unitIds } from currentTerm(). Only CURRENTLY-enrolled units
+// count (the SQL joins Enrolment), and — when term.unitIds is set — only the units running
+// this term, so a figure can't be dragged by a unit the student has left or that isn't part
+// of this term. A student with no marks this term is still returned, but with pct null,
+// modules [] and bandKey null, so the caller can simply skip them.
+async function computeCurrentTermAttendance(term) {
+  const semester = term; // same shape { start, end, name }; term.unitIds may restrict units
+  const unitFilter = term.unitIds ? new Set(term.unitIds) : null;
   // Active students, with their programme (cohort → course) and current enrolments.
   const students = await prisma.student.findMany({
     where: { active: true },
@@ -135,6 +170,7 @@ async function computeSemesterAttendance(semester) {
     const acc = { P: 0, L: 0, E: 0, A: 0 };
     for (const [unitId, c] of per) {
       if (!enrolledIds.has(unitId)) continue; // not currently enrolled → ignore
+      if (unitFilter && !unitFilter.has(unitId)) continue; // not a unit running this term
       const sum = summariseCounts(c.p, c.l, c.e, c.a);
       const u = unitMap.get(unitId) || { code: "", name: "" };
       modules.push({ unitId, code: u.code, name: u.name, pct: sum.pct, marked: sum.marked });
@@ -162,8 +198,8 @@ async function computeSemesterAttendance(semester) {
   });
 
   return {
-    semester: { id: semester.id, name: semester.name, start: semester.start, end: semester.end },
-    period: semester.name || monthYearLabel(),
+    term: { name: term.name, start: term.start, end: term.end },
+    period: term.name || monthYearLabel(),
     students: outStudents,
   };
 }
@@ -317,4 +353,4 @@ async function sendToStudents(students, config = {}, opts = {}) {
   return result;
 }
 
-module.exports = { currentSemester, computeSemesterAttendance, buildEmailFor, sendToStudents };
+module.exports = { currentTerm, computeCurrentTermAttendance, buildEmailFor, sendToStudents };

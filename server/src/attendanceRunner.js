@@ -72,20 +72,20 @@ const ymPeriod = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
 // YYYY-MM period (skips if already run this month) unless `force` — a manual "send now"
 // press passes force:true. Returns { ok, reason?, period, semester?, sent, failed, skipped, ... }.
 async function runMonthly({ force = false } = {}) {
-  const semester = await service.currentSemester();
-  if (!semester) return { ok: false, reason: "no-current-semester" };
+  const term = await service.currentTerm();
+  if (!term) return { ok: false, reason: "no-current-term" };
 
   const now = new Date();
   const period = ymPeriod(now);
   const config = await loadConfig();
   if (!force && config.lastRunPeriod === period) return { ok: false, reason: "already-run", period };
 
-  const { period: periodLabel, students } = await service.computeSemesterAttendance(semester);
+  const { period: periodLabel, students } = await service.computeCurrentTermAttendance(term);
   const respondByDate = fmtDate(addWorkingDays(now, config.respondDays));
   const summary = await service.sendToStudents(students, config, { period: periodLabel, respondByDate });
 
   await saveConfig({ lastRunPeriod: period });
-  return { ok: true, period, semester: semester.name, ...summary };
+  return { ok: true, period, term: term.name, ...summary };
 }
 
 module.exports = { loadConfig, saveConfig, resolveConfig, runMonthly, ymPeriod };

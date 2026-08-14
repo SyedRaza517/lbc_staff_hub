@@ -14,21 +14,21 @@ const bands = require("../attendanceBands");
 
 router.use(requireAuth, requirePage("attendance-emails"));
 
-// GET /data — the current semester, every active student's attendance (overall % + band
-// + per-module), and a per-band headcount. Empty when there is no current semester.
+// GET /data — the current term (from the registers), every active student's attendance
+// (overall % + band + per-module), and a per-band headcount. Empty when no term is running.
 router.get("/data", async (_req, res) => {
-  const semester = await service.currentSemester();
-  if (!semester) {
-    return res.json({ semester: null, period: "", bands: bands.BANDS.map((b) => ({ ...b, count: 0 })), students: [] });
+  const term = await service.currentTerm();
+  if (!term) {
+    return res.json({ term: null, period: "", bands: bands.BANDS.map((b) => ({ ...b, count: 0 })), students: [] });
   }
-  const { period, students } = await service.computeSemesterAttendance(semester);
+  const out = await service.computeCurrentTermAttendance(term);
   const counts = {};
-  for (const s of students) if (s.bandKey) counts[s.bandKey] = (counts[s.bandKey] || 0) + 1;
+  for (const s of out.students) if (s.bandKey) counts[s.bandKey] = (counts[s.bandKey] || 0) + 1;
   res.json({
-    semester: { id: semester.id, name: semester.name, start: semester.start, end: semester.end },
-    period,
+    term: out.term,
+    period: out.period,
     bands: bands.BANDS.map((b) => ({ ...b, count: counts[b.key] || 0 })),
-    students,
+    students: out.students,
   });
 });
 
@@ -55,8 +55,8 @@ router.put("/config", async (req, res) => {
 router.post("/run", async (req, res) => {
   const force = req.body?.force !== false;
   const out = await runner.runMonthly({ force });
-  if (!out.ok && out.reason === "no-current-semester") {
-    return res.status(400).json({ error: "There is no current semester right now, so there is nothing to send." });
+  if (!out.ok && out.reason === "no-current-term") {
+    return res.status(400).json({ error: "No teaching term is running right now (no units have current start/end dates on the registers), so there is nothing to send." });
   }
   res.json(out);
 });
