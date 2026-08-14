@@ -942,3 +942,13 @@ model AdmissionIntake {
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
 }
+
+// Single-row config for the automated monthly attendance emails. `data` is a JSON blob
+// holding { autoEnabled, respondDays, sendHour, lastRunPeriod, values{...}, templates{...} }
+// merged over the code defaults (see attendanceBands.js / attendanceRunner.js), so the
+// shape can evolve without a migration.
+model AttendanceEmailConfig {
+  id        String   @id @default("singleton")
+  data      Json
+  updatedAt DateTime @updatedAt
+}

@@ -120,6 +120,7 @@ app.listen(PORT, () => {
   console.log(`SharePoint: ${require("./sharepoint").describe()}`);
   startKeepAlive();
   require("./scheduler").startScheduler();
+  require("./attendanceScheduler").start();
 });
 
 // --- Keep-alive: stop the free-tier host idling the server to sleep ---

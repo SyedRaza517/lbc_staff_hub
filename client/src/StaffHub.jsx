@@ -10174,176 +10174,245 @@ const admissionForm = (r) => Object.fromEntries(ADMISSION_KEYS.map(k => [k, r[k]
 const admissionName = (r) => `${r.firstName || ""} ${r.surname || ""}`.trim();
 
 /* ============================================================ ATTENDANCE EMAILS ============================================================ */
-// Recognise students by their attendance: pick an attendance % range, review who falls in
-// it, and email them. The % is computed and re-verified on the server (never trusted from
-// here). Placeholders {firstName} {name} {pct} {course} are filled per student.
-const DEFAULT_ATTENDANCE_SUBJECT = "Well done on your attendance";
-const DEFAULT_ATTENDANCE_MESSAGE =
-  "Dear {firstName},\n\n" +
-  "Congratulations! We're delighted to recognise your excellent attendance of {pct}% at London Brookes College.\n\n" +
-  "Consistent attendance is one of the strongest indicators of success, and your commitment is a real credit to you. Keep up the great work!\n\n" +
-  "Kind regards,\nLondon Brookes College";
-
-// Fill the placeholders for a live preview (the server does the same for the real send).
-const fillAttendanceTemplate = (t, s) => String(t).replace(/\{(firstName|lastName|name|pct|course)\}/g, (_, k) => {
-  const v = { firstName: s.firstName, lastName: s.lastName, name: s.name, pct: s.pct == null ? "" : s.pct, course: s.course }[k];
+// Automated month-end attendance emails. Students are banded by their attendance % for the
+// CURRENT semester; each band has its own editable template. The admin reviews the bands,
+// edits the templates + signature/contacts, turns automation on (sends on the last day of
+// each month), and can also send this month's emails immediately. Overall % and per-module
+// figures are computed and re-verified on the server.
+const BAND_STYLE = {
+  excellent: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  great: "bg-green-50 text-green-700 ring-green-200",
+  good: "bg-sky-50 text-sky-700 ring-sky-200",
+  average: "bg-amber-50 text-amber-700 ring-amber-200",
+  risk: "bg-orange-50 text-orange-700 ring-orange-200",
+  highrisk: "bg-rose-50 text-rose-700 ring-rose-200",
+};
+// The institution/tutor placeholders the admin fills once (used to build the Settings form).
+const ATTENDANCE_VALUE_FIELDS = [
+  { key: "tutorName", label: "Tutor / sender name" },
+  { key: "jobTitle", label: "Job title" },
+  { key: "department", label: "Department / Programme" },
+  { key: "institution", label: "Institution" },
+  { key: "vle", label: "VLE (e.g. Moodle)" },
+  { key: "officeHours", label: "Office hours / drop-in" },
+  { key: "patContact", label: "Personal Academic Tutor contact" },
+  { key: "wellbeingContact", label: "Wellbeing contact" },
+  { key: "academicSkillsContact", label: "Academic skills contact" },
+  { key: "financeContact", label: "Financial guidance contact" },
+  { key: "internationalContact", label: "International student advice" },
+  { key: "suContact", label: "Students' Union advice" },
+  { key: "escalationContact", label: "Escalates to (name / role)" },
+  { key: "directNumber", label: "Direct contact number" },
+  { key: "ecProcess", label: "Extenuating Circumstances name" },
+];
+// Client-side placeholder fill for the live preview (the server does the real fill on send).
+const previewAttendance = (t, vals, s, period) => String(t || "").replace(/\{(\w+)\}/g, (_, k) => {
+  if (k === "modules") return s?.modules?.length ? "Your attendance by module this term:\n" + s.modules.map(m => `• ${m.code} ${m.name} — ${m.pct}%`).join("\n") : "";
+  const dyn = {
+    firstName: s?.firstName, lastName: s?.lastName, name: s?.name, pct: s?.pct == null ? "" : s?.pct,
+    period, programme: s?.programme, missedRate: s?.pct == null ? "" : Math.max(0, Math.round((100 - s.pct) / 10)),
+    respondByDate: "(the reply-by date)",
+  };
+  const v = dyn[k] != null && dyn[k] !== "" ? dyn[k] : vals?.[k];
   return v == null ? "" : String(v);
 });
 
 function AdminAttendanceEmails({ store }) {
-  const [rows, setRows] = useState([]);
+  const [data, setData] = useState(null);       // { semester, period, bands[], students[] }
+  const [config, setConfig] = useState(null);   // { autoEnabled, respondDays, sendHour, values, templates, lastRunPeriod }
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  const [minPct, setMinPct] = useState("90");
-  const [maxPct, setMaxPct] = useState("100");
-  const [selected, setSelected] = useState(() => new Set());
-  const [subject, setSubject] = useState(DEFAULT_ATTENDANCE_SUBJECT);
-  const [message, setMessage] = useState(DEFAULT_ATTENDANCE_MESSAGE);
+  const [bandFilter, setBandFilter] = useState("");
   const [query, setQuery] = useState("");
-  const [confirm, setConfirm] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [result, setResult] = useState(null);
+  const [showConfig, setShowConfig] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [confirmRun, setConfirmRun] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [runResult, setRunResult] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
-    try { setRows(await api.attendanceEmailStudents()); }
-    catch (e) { setErr(e.message || "Could not load students"); }
+    try {
+      const [d, c] = await Promise.all([api.attendanceEmailData(), api.attendanceEmailConfig()]);
+      setData(d); setConfig(c);
+    } catch (e) { setErr(e.message || "Could not load attendance data"); }
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const lo = Number(minPct) || 0, hi = maxPct === "" ? 100 : Number(maxPct);
-  // Students whose attendance falls in the chosen range (nulls — no marked sessions — excluded).
-  const inRange = rows.filter(r => r.pct != null && r.pct >= lo && r.pct <= hi);
+  const setCfg = (patch) => setConfig(c => ({ ...c, ...patch }));
+  const setValue = (k, v) => setConfig(c => ({ ...c, values: { ...c.values, [k]: v } }));
+  const setTemplate = (band, field, v) => setConfig(c => ({ ...c, templates: { ...c.templates, [band]: { ...c.templates[band], [field]: v } } }));
 
-  // Whenever the data or the range changes, default-select everyone in range. Keyed on the
-  // primitive range values (not the derived array) so it can't loop.
-  useEffect(() => {
-    const a = Number(minPct) || 0, b = maxPct === "" ? 100 : Number(maxPct);
-    setSelected(new Set(rows.filter(r => r.pct != null && r.pct >= a && r.pct <= b).map(r => r.id)));
-  }, [rows, minPct, maxPct]);
-
-  const q = query.trim().toLowerCase();
-  const filtered = q ? inRange.filter(r => `${r.name} ${r.email} ${r.course} ${r.cohort}`.toLowerCase().includes(q)) : inRange;
-  const selectedInRange = inRange.filter(r => selected.has(r.id));
-  const allChecked = filtered.length > 0 && filtered.every(r => selected.has(r.id));
-
-  const toggle = (id) => setSelected(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const toggleAll = () => setSelected(s => { const n = new Set(s); if (allChecked) filtered.forEach(r => n.delete(r.id)); else filtered.forEach(r => n.add(r.id)); return n; });
-
-  const send = async () => {
-    setConfirm(false); setSending(true); setResult(null);
+  const saveConfig = async () => {
+    setSaving(true);
     try {
-      const res = await api.sendAttendanceEmails({ studentIds: [...selected], subject, message });
-      setResult(res);
-      const bits = [`${res.sent} sent`];
-      if (res.failed) bits.push(`${res.failed} failed`);
-      if (res.skipped) bits.push(`${res.skipped} skipped`);
-      store.notify(bits.join(" · "), res.failed ? "error" : "success");
-    } catch (e) { store.notify(e.message || "Could not send the emails", "error"); }
-    setSending(false);
+      const saved = await api.saveAttendanceEmailConfig({
+        autoEnabled: config.autoEnabled, respondDays: config.respondDays, sendHour: config.sendHour,
+        values: config.values, templates: config.templates,
+      });
+      setConfig(saved);
+      store.notify("Attendance email settings saved", "success");
+    } catch (e) { store.notify(e.message || "Could not save settings", "error"); }
+    setSaving(false);
   };
 
-  const pctColour = (p) => p == null ? "bg-slate-100 text-slate-400" : p >= 90 ? "bg-emerald-50 text-emerald-700" : p >= 75 ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700";
-  const preview = selectedInRange[0];
+  const runNow = async () => {
+    setConfirmRun(false); setRunning(true); setRunResult(null);
+    try {
+      const res = await api.runAttendanceEmails(true);
+      setRunResult(res);
+      if (res.ok) { store.notify(`Sent ${res.sent} · failed ${res.failed} · skipped ${res.skipped}`, res.failed ? "error" : "success"); await load(); }
+      else store.notify(res.reason === "no-current-semester" ? "No current semester" : "Nothing to send", "info");
+    } catch (e) { store.notify(e.message || "Could not send", "error"); }
+    setRunning(false);
+  };
+
+  if (loading) return (<><AdminHeader title="Attendance Emails" subtitle="Automated month-end attendance emails" Icon={Mail} /><div className="skeleton h-64 rounded-2xl" /></>);
+
+  const semester = data?.semester;
+  const students = data?.students || [];
+  const bandsArr = data?.bands || [];
+  const bandLabel = (k) => (bandsArr.find(b => b.key === k) || {}).label || k;
+  const withData = students.filter(s => s.bandKey);
+  const noData = students.length - withData.length;
+  const qq = query.trim().toLowerCase();
+  const shown = students.filter(s => s.bandKey && (!bandFilter || s.bandKey === bandFilter) && (!qq || `${s.name} ${s.email} ${s.programme}`.toLowerCase().includes(qq)));
 
   return (
     <>
-      <AdminHeader title="Attendance Emails" subtitle="Email students by attendance — recognise good attendance" Icon={Mail} />
+      <AdminHeader title="Attendance Emails" subtitle="Automated month-end attendance emails — banded by attendance"
+        Icon={Mail}
+        action={<div className="flex items-center gap-2">
+          <button onClick={() => setShowConfig(v => !v)} className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"><Settings size={14} /> Settings</button>
+          <PrimaryBtn onClick={() => setConfirmRun(true)} disabled={!semester || running}>{running ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Send this month now</>}</PrimaryBtn>
+        </div>} />
 
       {err && <div className="mb-4 flex items-start gap-2 rounded-xl bg-rose-50 px-3.5 py-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={16} className="mt-px shrink-0" />{err}</div>}
 
-      {loading ? <div className="skeleton h-64 rounded-2xl" /> : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          {/* Left — range + student list */}
-          <div className="flex flex-col gap-4 lg:col-span-2">
-            <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-              <div className="flex flex-wrap items-end gap-4">
-                <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Min attendance %</label>
-                  <input type="number" min={0} max={100} value={minPct} onChange={e => setMinPct(e.target.value)} className={`${inputCls} mt-1 w-28`} />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Max attendance %</label>
-                  <input type="number" min={0} max={100} value={maxPct} onChange={e => setMaxPct(e.target.value)} className={`${inputCls} mt-1 w-28`} />
-                </div>
-                <div className="ml-auto text-right">
-                  <p className="text-3xl font-extrabold leading-none" style={{ color: NAVY }}>{inRange.length}</p>
-                  <p className="mt-1 text-xs text-slate-500">students {lo}%–{hi}%</p>
-                </div>
-              </div>
-              <p className="mt-3 text-[11px] text-slate-400">Students with no marked sessions yet aren't shown. <b>{selectedInRange.length}</b> selected to email.</p>
-            </div>
-
-            <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200">
-              <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
-                <Search size={15} className="text-slate-400" />
-                <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, email, course…" className="w-full bg-transparent text-sm outline-none" />
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-sm">
-                  <thead>
-                    <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
-                      <th className="px-3 py-2"><input type="checkbox" checked={allChecked} onChange={toggleAll} className="h-4 w-4 accent-blue-600" /></th>
-                      <th className="px-3 py-2">Student</th>
-                      <th className="px-3 py-2">Course / Cohort</th>
-                      <th className="px-3 py-2">Email</th>
-                      <th className="px-3 py-2 text-right">Attendance</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map(r => (
-                      <tr key={r.id} className="border-t border-slate-50 hover:bg-slate-50/60">
-                        <td className="px-3 py-2"><input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} className="h-4 w-4 accent-blue-600" /></td>
-                        <td className="px-3 py-2 font-semibold text-slate-700">{r.name || "—"}</td>
-                        <td className="px-3 py-2 text-slate-500">{r.course || "—"}{r.cohort ? ` · ${r.cohort}` : ""}</td>
-                        <td className="px-3 py-2 text-slate-500">{r.email || "—"}</td>
-                        <td className="px-3 py-2 text-right"><span className={`inline-block rounded-full px-2 py-0.5 text-xs font-bold ${pctColour(r.pct)}`}>{r.pct}%</span></td>
-                      </tr>
-                    ))}
-                    {filtered.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-slate-400">No students in this attendance range.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          {/* Right — composer + preview */}
-          <div className="flex flex-col gap-4">
-            <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-              <p className="mb-3 text-sm font-extrabold" style={{ color: NAVY_DARK }}>Compose email</p>
-              <Field label="Subject"><input value={subject} onChange={e => setSubject(e.target.value)} className={inputCls} /></Field>
-              <div className="mt-3"><Field label="Message"><textarea rows={9} value={message} onChange={e => setMessage(e.target.value)} className={`${inputCls} resize-y`} /></Field></div>
-              <p className="mt-2 text-[11px] leading-relaxed text-slate-400">Placeholders (filled per student): <b>{"{firstName}"}</b> <b>{"{name}"}</b> <b>{"{pct}"}</b> <b>{"{course}"}</b></p>
-              <PrimaryBtn onClick={() => setConfirm(true)} disabled={sending || !selectedInRange.length || !subject.trim() || !message.trim()} className="mt-4 w-full">
-                {sending ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Send to {selectedInRange.length} student{selectedInRange.length === 1 ? "" : "s"}</>}
-              </PrimaryBtn>
-            </div>
-
-            {preview && (
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Preview · {preview.name}</p>
-                <p className="text-sm font-bold text-slate-700">{fillAttendanceTemplate(subject, preview)}</p>
-                <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-500">{fillAttendanceTemplate(message, preview)}</p>
-              </div>
-            )}
-
-            {result && (
-              <div className="rounded-2xl bg-white p-4 text-sm ring-1 ring-slate-200">
-                <p className="font-bold text-slate-700">Last send</p>
-                <p className="mt-1 text-slate-500">{result.sent} sent{result.failed ? `, ${result.failed} failed` : ""}{result.skipped ? `, ${result.skipped} skipped (no email / email off)` : ""}</p>
-                {result.errors?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-rose-600">{result.errors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
-              </div>
-            )}
-          </div>
+      {!semester ? (
+        <div className="rounded-2xl bg-amber-50 p-6 text-center ring-1 ring-amber-200">
+          <CalendarClock size={28} className="mx-auto mb-2 text-amber-500" />
+          <p className="font-bold text-amber-800">No current semester</p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-amber-700">Attendance is scoped to the semester whose dates include today. Set up the current semester (with start &amp; end dates) so these emails can run.</p>
         </div>
+      ) : (
+        <>
+          <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+            <div><p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Current semester</p><p className="text-sm font-bold text-slate-700">{semester.name || "—"}</p><p className="text-xs text-slate-400">{semester.start} → {semester.end}</p></div>
+            <div><p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Students with data</p><p className="text-sm font-bold text-slate-700">{withData.length}{noData ? <span className="font-normal text-slate-400"> · {noData} no marks yet</span> : null}</p></div>
+            <div className="ml-auto flex items-center gap-2">
+              <span className={`rounded-full px-3 py-1 text-xs font-bold ${config?.autoEnabled ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{config?.autoEnabled ? "Automation ON" : "Automation OFF"}</span>
+              {config?.lastRunPeriod && <span className="text-xs text-slate-400">last sent {config.lastRunPeriod}</span>}
+            </div>
+          </div>
+
+          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+            {bandsArr.map(b => (
+              <button key={b.key} onClick={() => setBandFilter(f => f === b.key ? "" : b.key)} className={`rounded-xl p-3 text-left ring-1 transition ${bandFilter === b.key ? "ring-2" : "ring-slate-200"} ${BAND_STYLE[b.key] || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
+                <p className="text-2xl font-extrabold leading-none">{b.count}</p>
+                <p className="mt-1 text-[11px] font-bold leading-tight">{b.label}</p>
+                <p className="text-[10px] opacity-70">{b.min}–{b.max}%</p>
+              </button>
+            ))}
+          </div>
+
+          <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200">
+            <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+              <Search size={15} className="text-slate-400" />
+              <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, email, programme…" className="w-full bg-transparent text-sm outline-none" />
+              {bandFilter && <button onClick={() => setBandFilter("")} className="shrink-0 text-xs font-semibold text-blue-600">Clear filter</button>}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[680px] text-sm">
+                <thead><tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                  <th className="px-3 py-2">Student</th><th className="px-3 py-2">Programme</th><th className="px-3 py-2 text-right">Overall</th><th className="px-3 py-2">Band</th><th className="px-3 py-2">Modules (this term)</th>
+                </tr></thead>
+                <tbody>
+                  {shown.map(s => (
+                    <tr key={s.id} className="border-t border-slate-50 align-top hover:bg-slate-50/60">
+                      <td className="px-3 py-2"><p className="font-semibold text-slate-700">{s.name}</p><p className="text-[11px] text-slate-400">{s.email}</p></td>
+                      <td className="px-3 py-2 text-slate-500">{s.programme || "—"}</td>
+                      <td className="px-3 py-2 text-right font-bold text-slate-700">{s.pct}%</td>
+                      <td className="px-3 py-2"><span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ${BAND_STYLE[s.bandKey] || ""}`}>{bandLabel(s.bandKey)}</span></td>
+                      <td className="px-3 py-2 text-[11px] text-slate-500">{s.modules?.length ? s.modules.map(m => `${m.code} ${m.pct}%`).join(" · ") : "—"}</td>
+                    </tr>
+                  ))}
+                  {shown.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-sm text-slate-400">No students match.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {runResult && runResult.ok && (
+            <div className="mt-4 rounded-2xl bg-white p-4 text-sm ring-1 ring-slate-200">
+              <p className="font-bold text-slate-700">Last send · {runResult.period}</p>
+              <p className="mt-1 text-slate-500">{runResult.sent} sent, {runResult.failed} failed, {runResult.skipped} skipped</p>
+              {runResult.errors?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-rose-600">{runResult.errors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
+            </div>
+          )}
+        </>
       )}
 
-      <Modal open={confirm} onClose={() => setConfirm(false)} title="Send attendance emails?">
-        <p className="text-sm leading-relaxed text-slate-600">This will email <b>{selectedInRange.length}</b> student{selectedInRange.length === 1 ? "" : "s"} with attendance between <b>{lo}%</b> and <b>{hi}%</b>. Each email is personalised and shows the student's own attendance.</p>
+      {/* Settings modal — automation, signature/contacts, per-band templates + preview */}
+      <Modal open={showConfig && !!config} onClose={() => setShowConfig(false)} title="Attendance email settings" width={860}>
+        <div className="max-h-[68vh] overflow-y-auto pr-1">
+          <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200">
+            <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
+              <input type="checkbox" checked={!!config?.autoEnabled} onChange={e => setCfg({ autoEnabled: e.target.checked })} className="h-4 w-4 accent-blue-600" />
+              Send automatically on the last day of each month
+            </label>
+            <div className="mt-3 flex flex-wrap gap-4">
+              <div><label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Send at hour (0–23)</label><input type="number" min={0} max={23} value={config?.sendHour ?? 9} onChange={e => setCfg({ sendHour: Number(e.target.value) })} className={`${inputCls} mt-1 w-24`} /></div>
+              <div><label className="text-[11px] font-bold uppercase tracking-wide text-slate-400">"Respond by" working days</label><input type="number" min={1} max={30} value={config?.respondDays ?? 5} onChange={e => setCfg({ respondDays: Number(e.target.value) })} className={`${inputCls} mt-1 w-24`} /></div>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400">Scoped to the current semester and sent to every enrolled student, using the template for their attendance band.</p>
+          </div>
+
+          <p className="mb-2 mt-5 text-sm font-extrabold" style={{ color: NAVY_DARK }}>Signature &amp; contacts</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {ATTENDANCE_VALUE_FIELDS.map(f => (
+              <Field key={f.key} label={f.label}><input value={config?.values?.[f.key] ?? ""} onChange={e => setValue(f.key, e.target.value)} className={inputCls} /></Field>
+            ))}
+          </div>
+
+          <p className="mb-2 mt-5 text-sm font-extrabold" style={{ color: NAVY_DARK }}>Band templates</p>
+          <p className="mb-3 text-[11px] leading-relaxed text-slate-400">Placeholders: <b>{"{firstName}"}</b> <b>{"{pct}"}</b> <b>{"{period}"}</b> <b>{"{programme}"}</b> <b>{"{missedRate}"}</b> <b>{"{modules}"}</b> plus the signature/contact fields above. <b>{"{modules}"}</b> becomes the per-module table.</p>
+          <div className="flex flex-col gap-3">
+            {bandsArr.map(b => {
+              const sample = students.find(s => s.bandKey === b.key);
+              return (
+                <details key={b.key} className="rounded-xl ring-1 ring-slate-200">
+                  <summary className="flex cursor-pointer items-center gap-2 px-4 py-2.5 text-sm font-bold text-slate-700"><span className={`rounded-full px-2 py-0.5 text-[10px] ring-1 ${BAND_STYLE[b.key]}`}>{b.min}–{b.max}%</span> {b.label} <span className="ml-auto text-[11px] font-normal text-slate-400">{b.count} student{b.count === 1 ? "" : "s"}</span></summary>
+                  <div className="border-t border-slate-100 p-4">
+                    <Field label="Subject"><input value={config?.templates?.[b.key]?.subject ?? ""} onChange={e => setTemplate(b.key, "subject", e.target.value)} className={inputCls} /></Field>
+                    <div className="mt-3"><Field label="Body"><textarea rows={10} value={config?.templates?.[b.key]?.body ?? ""} onChange={e => setTemplate(b.key, "body", e.target.value)} className={`${inputCls} resize-y font-mono text-xs`} /></Field></div>
+                    {sample && (
+                      <div className="mt-3 rounded-lg bg-slate-50 p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Preview · {sample.name} ({sample.pct}%)</p>
+                        <p className="mt-1 text-xs font-bold text-slate-600">{previewAttendance(config?.templates?.[b.key]?.subject, config?.values, sample, data?.period)}</p>
+                        <p className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-500">{previewAttendance(config?.templates?.[b.key]?.body, config?.values, sample, data?.period)}</p>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              );
+            })}
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+          <button onClick={() => setShowConfig(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50">Close</button>
+          <PrimaryBtn onClick={saveConfig} disabled={saving} colour={NAVY}>{saving ? <><Loader2 size={16} className="animate-spin" /> Saving…</> : <><Save size={16} /> Save settings</>}</PrimaryBtn>
+        </div>
+      </Modal>
+
+      {/* Run-now confirm */}
+      <Modal open={confirmRun} onClose={() => setConfirmRun(false)} title="Send this month's attendance emails?">
+        <p className="text-sm leading-relaxed text-slate-600">This emails <b>every enrolled student</b> in <b>{semester?.name}</b> their band's template, with their overall % and per-module breakdown. Students with no attendance marks yet are skipped.</p>
+        {!config?.values?.tutorName && <p className="mt-2 flex items-start gap-1.5 text-[12px] font-semibold text-amber-600"><AlertCircle size={13} className="mt-px shrink-0" /> Tip: fill the signature fields in Settings first, or the sign-off will be blank.</p>}
         <div className="mt-5 flex gap-2">
-          <button onClick={() => setConfirm(false)} className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50">Cancel</button>
-          <PrimaryBtn colour={NAVY} onClick={send} className="flex-1"><Send size={16} /> Send</PrimaryBtn>
+          <button onClick={() => setConfirmRun(false)} className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
+          <PrimaryBtn colour={MAROON} onClick={runNow} className="flex-1"><Send size={16} /> Send now</PrimaryBtn>
         </div>
       </Modal>
     </>
