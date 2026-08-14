@@ -39,6 +39,7 @@ function Shell({ center = false, children }) {
 
 export default function AdmissionUpload({ token }) {
   const [state, setState] = useState({ status: "checking" }); // checking | ready | invalid
+  const [submitted, setSubmitted] = useState(false);         // true after the applicant clicks Done
   const [busy, setBusy] = useState({});   // { [docKey]: true } while that doc uploads
   const [errors, setErrors] = useState({}); // { [docKey]: "message" } inline per doc
   const inputs = useRef({});               // hidden <input> element per doc
@@ -117,6 +118,23 @@ export default function AdmissionUpload({ token }) {
         <h1 className="text-xl font-extrabold tracking-tight text-slate-800">This link is invalid or has expired</h1>
         <p className="mt-1 text-sm text-slate-500">
           {state.error || "Please contact the admissions team for a new upload link."}
+        </p>
+      </div>
+    </Shell>
+  );
+
+  // ---- Submitted (the applicant clicked Done) ------------------------------
+  // A dead-end thank-you screen — no buttons, no dashboard access.
+  if (submitted) return (
+    <Shell center>
+      <div className="scale-in rounded-2xl bg-white p-8 text-center shadow-2xl ring-1 ring-black/5">
+        <div className="mb-4 flex justify-center"><BrandLockup /></div>
+        <div className="bounce-in mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200">
+          <CheckCircle2 size={34} />
+        </div>
+        <h1 className="text-xl font-extrabold tracking-tight text-slate-800">Documents submitted</h1>
+        <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
+          Thank you! You will hear from the Admissions team as soon as possible.
         </p>
       </div>
     </Shell>
@@ -246,6 +264,17 @@ export default function AdmissionUpload({ token }) {
             </p>
           )}
         </div>
+
+        {/* Done — the applicant confirms they've finished. Leads to a dead-end
+            thank-you screen; there is deliberately no dashboard access. */}
+        <button
+          type="button"
+          onClick={() => { setSubmitted(true); if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" }); }}
+          className="press mt-6 flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl px-6 py-3 text-base font-bold text-white shadow-lg transition"
+          style={{ background: `linear-gradient(135deg, ${NAVY}, ${MAROON})` }}
+        >
+          <CheckCircle2 size={18} /> Done
+        </button>
       </div>
     </Shell>
   );

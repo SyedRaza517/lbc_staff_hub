@@ -251,14 +251,50 @@ router.post("/:id/send-offer", async (req, res) => {
 
   // Sign-off carries the sender's typed name over "Admissions Officer, London
   // Brookes College" — matching the PDF. The HTML copy is escaped defensively.
-  const escName = senderName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const escName = esc(senderName);
+  const firstEsc = esc(a.firstName || name);
+  const courseEsc = esc(a.course || "your course");
   const textSignOff = `${senderName}\nAdmissions Officer\nLondon Brookes College`;
-  const htmlSignOff = `${escName}<br>Admissions Officer<br>London Brookes College`;
+  const htmlSignOff = `<b>${escName}</b><br>Admissions Officer<br>London Brookes College`;
 
   const acceptLink = `${CLIENT_URL}/?offer=${raw}`;
   const subject = `London Brookes College — Your offer for ${a.course || "your course"}`;
-  const text = `Dear ${a.firstName || name},\n\nCongratulations! Following your application, we are delighted to offer you a place on ${a.course || "your course"} at London Brookes College. Your official offer letter is attached to this email as a PDF.\n\nTo confirm your place, please accept your offer here:\n${acceptLink}\n\nIf you have any questions, contact our Admissions Team at admissions@londonbrookescollege.co.uk or +447946830578.\n\nKind regards,\n${textSignOff}`;
-  const html = `<p>Dear ${a.firstName || name},</p><p><b>Congratulations!</b> Following your application, we are delighted to offer you a place on <b>${a.course || "your course"}</b> at London Brookes College. Your official offer letter is attached to this email as a PDF.</p><p>To confirm your place, please accept your offer:</p><p><a href="${acceptLink}" style="display:inline-block;background:#1a3a8f;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:bold">Accept my offer</a></p><p>Or paste this link into your browser:<br>${acceptLink}</p><p>If you have any questions, contact our Admissions Team at admissions@londonbrookescollege.co.uk or +447946830578.</p><p>Kind regards,<br>${htmlSignOff}</p>`;
+  const text = `Dear ${a.firstName || name},\n\nCongratulations! Following a review of your application, we are delighted to offer you a place on ${a.course || "your course"} at London Brookes College. Your official offer letter is attached to this email as a PDF.\n\nTo confirm your place, please accept your offer here:\n${acceptLink}\n\nIf you have any questions, contact our Admissions Team at admissions@londonbrookescollege.co.uk or +44 7946 830578.\n\nKind regards,\n${textSignOff}`;
+
+  // Branded, celebratory HTML email — mirrors the offer letter's look (gradient header,
+  // coloured "Congratulations" headline, course card, Accept button). Table-based with
+  // inline styles for broad email-client support.
+  const html = `<div style="margin:0;padding:24px;background:#eef1f6;font-family:'Segoe UI',Roboto,system-ui,-apple-system,sans-serif">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(15,23,42,.08)">
+    <tr><td style="background:linear-gradient(135deg,#1a3a8f,#9e1b32);padding:24px 28px">
+      <p style="margin:0;color:#ffffff;font-size:18px;font-weight:800">London Brookes College</p>
+      <p style="margin:3px 0 0;color:rgba(255,255,255,.75);font-size:11px;font-weight:700;letter-spacing:.18em">ADMISSIONS</p>
+    </td></tr>
+    <tr><td style="padding:30px 28px 6px;text-align:center">
+      <div style="font-size:36px;line-height:1">&#127881;</div>
+      <h1 style="margin:12px 0 0;font-size:25px;font-weight:800;color:#9e1b32">Congratulations, ${firstEsc}!</h1>
+      <p style="margin:8px 0 0;font-size:12px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#1a3a8f">Unconditional Offer</p>
+    </td></tr>
+    <tr><td style="padding:18px 28px 4px">
+      <p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#334155">Dear ${firstEsc}, following a review of your application, we are delighted to offer you a place on the programme below at London Brookes College. Your official offer letter is attached to this email as a PDF.</p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 22px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
+        <tr><td style="padding:16px 18px;font-size:13px;color:#334155"><span style="font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#64748b">Your course</span><br><b style="font-size:16px;color:#0f172a">${courseEsc}</b></td></tr>
+      </table>
+      <p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#334155">To confirm your place, simply click the button below.</p>
+      <table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:0 auto 18px"><tr><td style="border-radius:10px" bgcolor="#1a3a8f">
+        <a href="${acceptLink}" style="display:inline-block;padding:14px 34px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;background:linear-gradient(135deg,#1a3a8f,#9e1b32)">Accept my offer</a>
+      </td></tr></table>
+      <p style="margin:0 0 4px;font-size:12px;line-height:1.5;color:#64748b;text-align:center">Or paste this link into your browser:</p>
+      <p style="margin:0 0 20px;font-size:12px;line-height:1.5;word-break:break-all;text-align:center"><a href="${acceptLink}" style="color:#1a3a8f">${acceptLink}</a></p>
+      <p style="margin:0;font-size:12px;line-height:1.6;color:#94a3b8">If you have any questions before joining us, please contact our Admissions Team at <a href="mailto:admissions@londonbrookescollege.co.uk" style="color:#1a3a8f">admissions@londonbrookescollege.co.uk</a> or +44&nbsp;7946&nbsp;830578.</p>
+      <p style="margin:18px 0 24px;font-size:14px;line-height:1.6;color:#334155">Kind regards,<br>${htmlSignOff}</p>
+    </td></tr>
+    <tr><td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0">
+      <p style="margin:0;font-size:11px;line-height:1.6;color:#94a3b8">London Brookes College &middot; 42 The Burroughs, Hendon, London NW4 4AP<br>info@londonbrookescollege.co.uk &middot; www.londonbrookescollege.co.uk</p>
+    </td></tr>
+  </table>
+</div>`;
   const fileName = `Offer Letter - ${name}.pdf`;
 
   let emailed = false, warning = null;
