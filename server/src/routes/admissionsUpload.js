@@ -64,16 +64,23 @@ router.post("/:token", express.raw({ type: "*/*", limit: sharepoint.MAX_BYTES })
   const type = String(req.query.type || "");
   if (!DOC_KEYS.includes(type)) return res.status(400).json({ error: "Unknown document type." });
 
-  const buffer = req.body;
-  if (!buffer || !buffer.length) return res.status(400).json({ error: "The file is empty." });
+  if (!req.body || !req.body.length) return res.status(400).json({ error: "The file is empty." });
 
-  // decodeURIComponent throws on a malformed %-sequence; fall back to the raw header so a
-  // bad X-File-Name header can't turn a valid upload into a 500.
-  let hdrName = req.headers["x-file-name"] || "";
-  try { hdrName = decodeURIComponent(hdrName); } catch (_) { /* keep the raw header */ }
-  const origName = hdrName || `${docLabel(type)}${extOf(req.query.name)}`;
-  const contentType = req.headers["content-type"] || "application/octet-stream";
-  const storedName = `${safeName(docLabel(type))}${extOf(origName)}`;
+  // Everything is stored as a PDF: a real PDF passes through untouched, a JPG/PNG photo is
+  // wrapped in a single-page PDF, and anything else is rejected with a friendly message.
+  let buffer, contentType;
+  try {
+    const out = await require("../uploadToPdf").ensurePdf(req.body);
+    buffer = out.buffer;
+    contentType = out.contentType;
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+
+  // The stored file is always a .pdf named after the document label (e.g. "Passport.pdf").
+  // We no longer keep the original extension — the bytes are PDF regardless of what the
+  // applicant uploaded.
+  const storedName = `${safeName(docLabel(type))}.pdf`;
 
   // Replace any previous file for this document type so nothing is orphaned.
   const existing = await prisma.admissionDocument.findUnique({
@@ -93,12 +100,12 @@ router.post("/:token", express.raw({ type: "*/*", limit: sharepoint.MAX_BYTES })
       }
       if (existing?.spItemId) await sharepoint.deleteItem(existing.spItemId);
       const up = await sharepoint.uploadFile(folderId, storedName, buffer, contentType);
-      data = { fileName: origName, mimeType: contentType, sizeBytes: up.size, spItemId: up.id, webUrl: up.webUrl, storagePath: null };
+      data = { fileName: storedName, mimeType: "application/pdf", sizeBytes: up.size, spItemId: up.id, webUrl: up.webUrl, storagePath: null };
     } else if (storage.isConfigured()) {
       if (existing?.storagePath) await storage.removeObject(existing.storagePath);
       const key = `adm_${admission.id}_${type}`; // deterministic per (applicant, doc type)
-      const up = await storage.putObject(key, origName, contentType, buffer);
-      data = { fileName: origName, mimeType: contentType, sizeBytes: up.size, spItemId: null, webUrl: null, storagePath: up.path };
+      const up = await storage.putObject(key, storedName, contentType, buffer);
+      data = { fileName: storedName, mimeType: "application/pdf", sizeBytes: up.size, spItemId: null, webUrl: null, storagePath: up.path };
     } else {
       return res.status(503).json({ error: "Document storage isn't set up on the server yet." });
     }

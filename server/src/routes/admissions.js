@@ -216,6 +216,15 @@ router.put("/:id/status", async (req, res) => {
           ? await sharepoint.renameItem(row.spFolderId, `${row.studentId} - ${name}`)
           : await sharepoint.ensureFolderPath(admissionFolderSegments(row));
         row = await prisma.admission.update({ where: { id: row.id }, data: { spFolderId: folder.id, spFolderUrl: folder.webUrl } });
+
+        // Drop a printable copy of the completed application form into the student's
+        // folder. Best-effort and separate from the folder step: a PDF/upload failure
+        // must not undo the enrolment or the folder rename above.
+        try {
+          const { buildApplicationPdf } = require("../applicationPdf");
+          const appPdf = await buildApplicationPdf(row);
+          await sharepoint.uploadFile(folder.id, "Application Form.pdf", appPdf, "application/pdf");
+        } catch (e) { warning = (warning ? warning + " " : "") + `Enrolled, but the application-form PDF couldn't be saved to SharePoint: ${e.message}`; }
       } catch (e) { warning = `Enrolled, but the SharePoint folder couldn't be set: ${e.message}`; }
     }
   }

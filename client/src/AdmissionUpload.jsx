@@ -17,7 +17,7 @@ const NAVY = "#1a3a8f", NAVY_DARK = "#14306f", MAROON = "#9e1b32";
 
 // 15 MB, matching the client-side guard the server also enforces.
 const MAX_BYTES = 15 * 1024 * 1024;
-const ACCEPT = ".pdf,.jpg,.jpeg,.png,.doc,.docx";
+const ACCEPT = ".pdf,.jpg,.jpeg,.png";
 
 // Unit scope, NOT inside the component — a component declared inside another's body
 // is a new type on every render, so React would unmount and remount its whole subtree.
