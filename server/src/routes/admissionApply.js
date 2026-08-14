@@ -8,10 +8,29 @@ const { pick, str } = require("../admissionFields");
 
 // GET /api/admission-apply/courses — the course list for the application form's course
 // dropdown. PUBLIC (the form is open) and only exposes course names, nothing sensitive.
+// Sourced from the admissions-managed AdmissionCourse list (NOT the Moodle Course table),
+// so admissions decides what an applicant can apply for. Only active courses are shown.
 router.get("/courses", async (_req, res) => {
   try {
-    const rows = await prisma.course.findMany({ orderBy: { name: "asc" }, select: { name: true } });
+    const rows = await prisma.admissionCourse.findMany({
+      where: { active: true },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      select: { name: true },
+    });
     res.json(rows.map((r) => r.name));
+  } catch (_) { res.json([]); }
+});
+
+// GET /api/admission-apply/intakes — the intake list ("September 2026", …) for the
+// application form's intake dropdown. PUBLIC; only active intakes, admin-ordered.
+router.get("/intakes", async (_req, res) => {
+  try {
+    const rows = await prisma.admissionIntake.findMany({
+      where: { active: true },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      select: { label: true },
+    });
+    res.json(rows.map((r) => r.label));
   } catch (_) { res.json([]); }
 });
 

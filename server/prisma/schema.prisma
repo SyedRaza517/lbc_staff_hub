@@ -921,3 +921,24 @@ model AdmissionDocument {
   @@unique([admissionId, docType])
   @@index([admissionId])
 }
+
+// Admissions-managed course list — the courses shown on the application form's course
+// dropdown. Deliberately SEPARATE from the Moodle-synced `Course` table: admissions
+// decides what a prospective student can apply for, independent of what's live in Moodle.
+model AdmissionCourse {
+  id        String   @id @default(cuid())
+  name      String
+  active    Boolean  @default(true)   // hidden from the form when false, without deleting
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+// Admissions-managed intake list, e.g. "September 2026". A single combined label the
+// admin adds/removes here and the applicant picks from on the application form.
+model AdmissionIntake {
+  id        String   @id @default(cuid())
+  label     String
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}

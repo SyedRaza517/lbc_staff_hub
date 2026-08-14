@@ -188,9 +188,24 @@ export const api = {
   addIsm: (data) => request("/ism", { method: "POST", body: data }),
   updateIsm: (id, data) => request(`/ism/${id}`, { method: "PUT", body: data }),
   removeIsm: (id) => request(`/ism/${id}`, { method: "DELETE" }),
+  // admissions config (admin) — the course + intake lists shown on the application form
+  admissionCourseList: () => request("/admission-config/courses"),
+  addAdmissionCourse: (name) => request("/admission-config/courses", { method: "POST", body: { name } }),
+  updateAdmissionCourse: (id, data) => request(`/admission-config/courses/${id}`, { method: "PUT", body: data }),
+  removeAdmissionCourse: (id) => request(`/admission-config/courses/${id}`, { method: "DELETE" }),
+  admissionIntakeList: () => request("/admission-config/intakes"),
+  addAdmissionIntake: (label) => request("/admission-config/intakes", { method: "POST", body: { label } }),
+  updateAdmissionIntake: (id, data) => request(`/admission-config/intakes/${id}`, { method: "PUT", body: data }),
+  removeAdmissionIntake: (id) => request(`/admission-config/intakes/${id}`, { method: "DELETE" }),
   // public: the course list for the application form's course dropdown (no login)
   applicationCourses: async () => {
     const res = await fetch(`${BASE}/admission-apply/courses`);
+    const data = await res.json().catch(() => []);
+    return Array.isArray(data) ? data : [];
+  },
+  // public: the intake list ("September 2026", …) for the application form (no login)
+  applicationIntakes: async () => {
+    const res = await fetch(`${BASE}/admission-apply/intakes`);
     const data = await res.json().catch(() => []);
     return Array.isArray(data) ? data : [];
   },

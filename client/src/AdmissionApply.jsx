@@ -90,9 +90,13 @@ export default function AdmissionApply() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-  const [courseOptions, setCourseOptions] = useState([]); // the live courses table
+  const [courseOptions, setCourseOptions] = useState([]); // admissions-managed course list
+  const [intakeOptions, setIntakeOptions] = useState([]); // admissions-managed intake list
 
-  useEffect(() => { api.applicationCourses().then(setCourseOptions).catch(() => {}); }, []);
+  useEffect(() => {
+    api.applicationCourses().then(setCourseOptions).catch(() => {});
+    api.applicationIntakes().then(setIntakeOptions).catch(() => {});
+  }, []);
 
   // Editing a field clears its "missing" flag so its rose ring disappears as it fills.
   const set = (k, v) => {
@@ -175,7 +179,9 @@ export default function AdmissionApply() {
               {sec.note && <p className="mt-1 text-xs leading-relaxed text-slate-400">{sec.note}</p>}
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {sec.fields.map((f) => {
-                  const ff = (f.key === "course" && courseOptions.length) ? { ...f, options: courseOptions } : f;
+                  const ff = (f.key === "course" && courseOptions.length) ? { ...f, options: courseOptions }
+                    : (f.key === "intake" && intakeOptions.length) ? { ...f, options: intakeOptions }
+                    : f;
                   return <Field key={f.key} f={ff} value={form[f.key]} missing={missing.has(f.key)} onChange={set} />;
                 })}
               </div>

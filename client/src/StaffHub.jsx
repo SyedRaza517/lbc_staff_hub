@@ -10058,7 +10058,10 @@ const YES_NO = ["Yes", "No"];
 // The four intake months, and a rolling range of years (this year − 1 … + 5) for the
 // intake-year picker.
 const INTAKE_MONTHS = ["January", "April", "June", "September"];
-const INTAKE_YEARS = Array.from({ length: 7 }, (_, i) => String(new Date().getFullYear() - 1 + i));
+// Fallback for the application form's intake dropdown — the real options come from the
+// admin-managed AdmissionIntake list (the "Courses & intakes" manager). Until an admin
+// adds their own, offer the four standard months across the current and next year.
+const INTAKE_FALLBACK = (() => { const y = new Date().getFullYear(); return [y, y + 1].flatMap((yr) => INTAKE_MONTHS.map((m) => `${m} ${yr}`)); })();
 // Transcribed verbatim from the college's "London Brookes College HND Application Form"
 // (Microsoft Forms, 61 questions across 9 pages). Question text, option lists, required
 // flags and the page/section help notes match the original one-for-one so an admin can
@@ -10068,8 +10071,7 @@ const INTAKE_YEARS = Array.from({ length: 7 }, (_, i) => String(new Date().getFu
 export const ADMISSION_SECTIONS = [
   { title: "Course Details", fields: [
     { key: "course", label: "Which course are you applying for", type: "select", required: true, options: ["HND - Business", "HND - Sustainable Business Management", "HND - Leadership and Management"] },
-    { key: "intake", label: "Which intake are you applying for?", type: "select", required: true, options: INTAKE_MONTHS },
-    { key: "intakeYear", label: "Intake year", type: "select", required: true, options: INTAKE_YEARS },
+    { key: "intake", label: "Which intake are you applying for?", type: "select", required: true, options: INTAKE_FALLBACK },
     { key: "foundVia", label: "How did you find out about London Brookes College?", type: "select", required: true, options: ["College Website/Social Media", "Agent", "Family Member", "Friend", "Other"] },
     { key: "classOption", label: "Select the class option you would prefer:", type: "select", hint: "You are required to complete 12hrs of onsite study.", options: ["Two days per week - 10 a.m.-5 p.m (12hrs)", "Two evenings online - 6 p.m.-9 p.m. (6hrs) plus One day In-Campus 10 a.m. - 5 p.m. (6hrs)"] },
     { key: "firstName", label: "First Name", type: "text", required: true },
@@ -10164,6 +10166,77 @@ const blankAdmission = () => Object.fromEntries(ADMISSION_KEYS.map(k => [k, ""])
 // A saved row (nulls) → a form (empty strings), so inputs stay controlled.
 const admissionForm = (r) => Object.fromEntries(ADMISSION_KEYS.map(k => [k, r[k] ?? ""]));
 const admissionName = (r) => `${r.firstName || ""} ${r.surname || ""}`.trim();
+
+// The "Courses & intakes" manager — a modal on the Admissions page where an admin curates
+// the course and intake lists that applicants pick from on the public application form.
+// Independent of Moodle: what's here is exactly what a prospective student can choose.
+function AdmissionConfigManager({ open, onClose, store, onSaved }) {
+  const [courses, setCourses] = useState([]);
+  const [intakes, setIntakes] = useState([]);
+  const [newCourse, setNewCourse] = useState("");
+  const [newIntake, setNewIntake] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [c, i] = await Promise.all([api.admissionCourseList(), api.admissionIntakeList()]);
+      setCourses(Array.isArray(c) ? c : []); setIntakes(Array.isArray(i) ? i : []);
+    } catch (e) { store.notify(e.message || "Could not load courses & intakes", "error"); }
+    setLoading(false);
+  }, [store]);
+  useEffect(() => { if (open) load(); }, [open, load]);
+
+  // Run a mutation, then reload the modal's lists and tell the parent to refresh its dropdowns.
+  const run = async (fn) => { setBusy(true); try { await fn(); await load(); onSaved?.(); } catch (e) { store.notify(e.message || "Something went wrong", "error"); } setBusy(false); };
+  const addCourse = () => { const name = newCourse.trim(); if (!name) return; run(async () => { await api.addAdmissionCourse(name); setNewCourse(""); }); };
+  const addIntake = () => { const label = newIntake.trim(); if (!label) return; run(async () => { await api.addAdmissionIntake(label); setNewIntake(""); }); };
+
+  const list = (rows, kind) => (
+    rows.length === 0
+      ? <p className="rounded-lg bg-slate-50 px-3 py-4 text-center text-xs text-slate-400 ring-1 ring-slate-200">None yet — add one above.</p>
+      : <ul className="flex flex-col gap-1.5">
+          {rows.map(r => (
+            <li key={r.id} className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${r.active ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50"}`}>
+              <span className={`min-w-0 flex-1 truncate text-sm font-semibold ${r.active ? "text-slate-700" : "text-slate-400 line-through"}`} title={r.name || r.label}>{r.name || r.label}</span>
+              <button title={r.active ? "Hide from the application form" : "Show on the application form"} disabled={busy}
+                onClick={() => run(() => kind === "course" ? api.updateAdmissionCourse(r.id, { active: !r.active }) : api.updateAdmissionIntake(r.id, { active: !r.active }))}
+                className={`rounded-md px-2 py-1 text-[10px] font-bold ${r.active ? "bg-emerald-50 text-emerald-600" : "bg-slate-200 text-slate-500"}`}>{r.active ? "Active" : "Hidden"}</button>
+              <button title="Delete" disabled={busy}
+                onClick={() => run(() => kind === "course" ? api.removeAdmissionCourse(r.id) : api.removeAdmissionIntake(r.id))}
+                className="rounded-md p-1 text-slate-400 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={15} /></button>
+            </li>
+          ))}
+        </ul>
+  );
+
+  return (
+    <Modal open={open} onClose={onClose} title="Courses & intakes" width={720}>
+      <p className="mb-4 text-xs text-slate-500">These feed the application form's <b>Course</b> and <b>Intake</b> dropdowns — managed here, separate from Moodle. Hide an item to remove it from the form without deleting it.</p>
+      {loading ? <div className="skeleton h-40 rounded-xl" /> : (
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <div>
+            <div className="mb-2 flex items-center gap-1.5 text-sm font-extrabold" style={{ color: NAVY_DARK }}><GraduationCap size={16} /> Courses</div>
+            <div className="mb-3 flex gap-2">
+              <input value={newCourse} onChange={e => setNewCourse(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addCourse(); }} placeholder="e.g. HND Business" className={inputCls} />
+              <button onClick={addCourse} disabled={busy || !newCourse.trim()} className="press flex shrink-0 items-center rounded-xl px-3 text-sm font-bold text-white disabled:opacity-40" style={{ background: NAVY }}><Plus size={16} /></button>
+            </div>
+            {list(courses, "course")}
+          </div>
+          <div>
+            <div className="mb-2 flex items-center gap-1.5 text-sm font-extrabold" style={{ color: NAVY_DARK }}><CalendarDays size={16} /> Intakes</div>
+            <div className="mb-3 flex gap-2">
+              <input value={newIntake} onChange={e => setNewIntake(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addIntake(); }} placeholder="e.g. September 2026" className={inputCls} />
+              <button onClick={addIntake} disabled={busy || !newIntake.trim()} className="press flex shrink-0 items-center rounded-xl px-3 text-sm font-bold text-white disabled:opacity-40" style={{ background: NAVY }}><Plus size={16} /></button>
+            </div>
+            {list(intakes, "intake")}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
 
 function AdmissionField({ f, value, onChange, missing }) {
   // Labels are full questions (not short field names), so they read in normal case; a
@@ -10606,6 +10679,8 @@ function AdminAdmissions({ store }) {
   const selectAllRef = useRef(null);
 
   const [courseOptions, setCourseOptions] = useState([]);
+  const [intakeOptions, setIntakeOptions] = useState([]);
+  const [configOpen, setConfigOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -10614,8 +10689,13 @@ function AdminAdmissions({ store }) {
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
-  // The course dropdown is populated from the live courses table.
-  useEffect(() => { api.applicationCourses().then(setCourseOptions).catch(() => {}); }, []);
+  // The course + intake dropdowns are populated from the admissions-managed lists (the
+  // "Courses & intakes" manager), independent of Moodle. Re-fetched after the admin edits them.
+  const loadOptions = useCallback(() => {
+    api.applicationCourses().then(setCourseOptions).catch(() => {});
+    api.applicationIntakes().then(setIntakeOptions).catch(() => {});
+  }, []);
+  useEffect(() => { loadOptions(); }, [loadOptions]);
 
   // Silent reload after a document action, keeping the open View modal in sync with the
   // fresh row (so a new upload / verification appears without closing the dialog).
@@ -10796,8 +10876,11 @@ function AdminAdmissions({ store }) {
       <AdminHeader title="Admissions" subtitle="HND application entries — create, review, edit and remove"
         Icon={ClipboardList}
         action={<div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => setConfigOpen(true)} className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><Settings size={14} /> Courses &amp; intakes</button>
           <button onClick={async () => { const url = `${window.location.origin}/?apply`; try { await navigator.clipboard.writeText(url); store.notify("Application form link copied — share it with applicants"); } catch { store.notify(url, "info"); } }} className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><Copy size={14} /> Application link</button>
           <ExportBtn onClick={exportCsv} /><PrimaryBtn onClick={openAdd}><Plus size={16} /> Create new entry</PrimaryBtn></div>} />
+
+      <AdmissionConfigManager open={configOpen} onClose={() => setConfigOpen(false)} store={store} onSaved={loadOptions} />
 
       {err && <div className="mb-4 flex items-start gap-2 rounded-xl bg-rose-50 px-3.5 py-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={16} className="mt-px shrink-0" />{err}</div>}
 
@@ -10911,7 +10994,7 @@ function AdminAdmissions({ store }) {
               </div>
               {sec.note && <p className="mb-2.5 rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-snug text-slate-500 ring-1 ring-slate-100">{sec.note}</p>}
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                {sec.fields.map(f => { const ff = (f.key === "course" && courseOptions.length) ? { ...f, options: courseOptions } : f; return <AdmissionField key={f.key} f={ff} value={form[f.key]} onChange={set} missing={missing.has(f.key)} />; })}
+                {sec.fields.map(f => { const ff = (f.key === "course" && courseOptions.length) ? { ...f, options: courseOptions } : (f.key === "intake" && intakeOptions.length) ? { ...f, options: intakeOptions } : f; return <AdmissionField key={f.key} f={ff} value={form[f.key]} onChange={set} missing={missing.has(f.key)} />; })}
               </div>
             </div>
           ))}
