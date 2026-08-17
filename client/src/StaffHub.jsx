@@ -2120,8 +2120,8 @@ function MoreScreen({ store, me, logout, onChangePassword, onSwitchToAdmin }) {
 /* ============================================================ ADMIN DASHBOARD ============================================================ */
 // The assignable admin pages, in nav order. "access" is intentionally excluded —
 // it is Super-Admin-only and never granted. Keep in sync with server validate.js.
-const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "attendance-emails", "assessments", "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "timetable", "admissions", "ism", "passwords", "settings"];
-const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", "attendance-emails": "Attendance Emails", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentreviews: "Student Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", timetable: "Timetable", admissions: "Admissions", ism: "ISM (Interviews)", passwords: "Reset Passwords", settings: "Settings" };
+const ADMIN_PAGES = ["executive", "overview", "kpi", "checkin", "balances", "calendar", "requests", "documents", "approvals", "signups", "summaries", "registers", "students", "attendance-emails", "assessments", "pat", "staffreviews", "studentreviews", "studentqueries", "staff", "timesheets", "timetable", "admissions", "ism", "slc", "passwords", "settings"];
+const PAGE_LABELS = { executive: "Executive Dashboard", overview: "Overview", kpi: "KPIs", checkin: "Check-In", balances: "Holiday Balances", calendar: "Holiday Calendar", requests: "Leave Requests", documents: "Documents", approvals: "Approvals", signups: "Sign-Up Requests", summaries: "Daily Summaries", registers: "Registers — HND", students: "Students", "attendance-emails": "Attendance Emails", assessments: "Assessments", pat: "PAT", staffreviews: "Staff Reviews", studentreviews: "Student Reviews", studentqueries: "Student Queries", staff: "Staff", timesheets: "Timesheets", timetable: "Timetable", admissions: "Admissions", ism: "ISM (Interviews)", slc: "SLC — Student Loans", passwords: "Reset Passwords", settings: "Settings" };
 
 // Can this user see/use a given admin page? The Super Admin gets everything,
 // including the Super-Admin-only Access tab. A page-scoped admin gets only their
@@ -2564,6 +2564,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
     { key: "attendance-emails", label: "Attendance Emails", I: Mail },
     { key: "admissions", label: "Admissions", I: ClipboardList },
     { key: "ism", label: "ISM", I: MessageSquare },
+    { key: "slc", label: "SLC", I: Wallet },
     { key: "assessments", label: "Assessments", I: Award },
     { key: "pat", label: "PAT", I: MessageSquare },
     { key: "staffreviews", label: "Staff Reviews", I: ClipboardList },
@@ -2659,6 +2660,7 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
         {activeKey === "timetable" && <AdminTimetable store={store} />}
         {activeKey === "admissions" && <AdminAdmissions store={store} />}
         {activeKey === "ism" && <AdminIsm store={store} />}
+        {activeKey === "slc" && <AdminSlc store={store} />}
         {activeKey === "settings" && <AdminSettings store={store} />}
         {activeKey === "access" && <AdminAccess store={store} />}
       </main>
@@ -10183,6 +10185,181 @@ const blankAdmission = () => Object.fromEntries(ADMISSION_KEYS.map(k => [k, ""])
 // A saved row (nulls) → a form (empty strings), so inputs stay controlled.
 const admissionForm = (r) => Object.fromEntries(ADMISSION_KEYS.map(k => [k, r[k] ?? ""]));
 const admissionName = (r) => `${r.firstName || ""} ${r.surname || ""}`.trim();
+
+/* ============================================================ SLC (student loans) ============================================================ */
+// Student Loans Company tracking — which students have applied for a student loan and the
+// current status of each application. Standalone records the admin adds/edits; a form can
+// be pre-filled by picking an applicant from Admissions.
+const SLC_STATUSES = ["Not applied", "Applied", "Awaiting evidence", "Approved", "In payment", "Paid", "Declined", "Cancelled"];
+const SLC_LOAN_TYPES = ["Tuition Fee Loan", "Maintenance Loan", "Both", "Other"];
+const SLC_STATUS_STYLE = {
+  "Not applied": "bg-slate-100 text-slate-500",
+  "Applied": "bg-sky-50 text-sky-700",
+  "Awaiting evidence": "bg-amber-50 text-amber-700",
+  "Approved": "bg-emerald-50 text-emerald-700",
+  "In payment": "bg-indigo-50 text-indigo-700",
+  "Paid": "bg-green-50 text-green-700",
+  "Declined": "bg-rose-50 text-rose-700",
+  "Cancelled": "bg-slate-100 text-slate-400",
+};
+const blankSlc = () => ({ studentName: "", studentRef: "", course: "", intake: "", status: "Not applied", loanType: "", crn: "", applicationDate: "", decisionDate: "", amount: "", notes: "", admissionId: "" });
+
+function AdminSlc({ store }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [modal, setModal] = useState(false);   // false | "add" | <id> (editing)
+  const [form, setForm] = useState(blankSlc);
+  const [saving, setSaving] = useState(false);
+  const [del, setDel] = useState(null);
+  const [applicants, setApplicants] = useState([]);
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr("");
+    try { setRows(await api.slcList()); }
+    catch (e) { setErr(e.message || "Could not load SLC records"); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { api.admissions().then(setApplicants).catch(() => {}); }, []);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const openAdd = () => { setForm(blankSlc()); setModal("add"); };
+  const openEdit = (r) => { setForm({ studentName: r.studentName || "", studentRef: r.studentRef || "", course: r.course || "", intake: r.intake || "", status: r.status || "Not applied", loanType: r.loanType || "", crn: r.crn || "", applicationDate: r.applicationDate || "", decisionDate: r.decisionDate || "", amount: r.amount || "", notes: r.notes || "", admissionId: r.admissionId || "" }); setModal(r.id); };
+
+  // Picking an applicant fills name/ID/course/intake but leaves them editable.
+  const pickApplicant = (id) => {
+    const a = applicants.find(x => x.id === id);
+    if (!a) { set("admissionId", ""); return; }
+    setForm(f => ({ ...f, admissionId: a.id,
+      studentName: [a.firstName, a.surname].filter(Boolean).join(" ") || f.studentName,
+      studentRef: a.studentId || f.studentRef,
+      course: a.course || f.course,
+      intake: [a.intake, a.intakeYear].filter(Boolean).join(" ") || f.intake }));
+  };
+
+  const save = async () => {
+    if (!form.studentName.trim()) { store.notify("Enter the student's name", "error"); return; }
+    setSaving(true);
+    try {
+      if (modal === "add") await api.addSlc(form); else await api.updateSlc(modal, form);
+      store.notify(modal === "add" ? "SLC record added" : "SLC record updated", "success");
+      setModal(false); await load();
+    } catch (e) { store.notify(e.message || "Could not save the record", "error"); }
+    setSaving(false);
+  };
+  const remove = async () => {
+    const r = del; setDel(null); if (!r) return;
+    try { await api.removeSlc(r.id); store.notify("Record deleted"); await load(); }
+    catch (e) { store.notify(e.message || "Could not delete", "error"); }
+  };
+
+  const counts = {}; rows.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+  const applied = rows.filter(r => r.status !== "Not applied").length;
+  const q = query.trim().toLowerCase();
+  const filtered = rows.filter(r => (!statusFilter || r.status === statusFilter) && (!q || `${r.studentName} ${r.studentRef} ${r.course} ${r.crn}`.toLowerCase().includes(q)));
+
+  const exportCsv = () => {
+    const cols = ["studentName", "studentRef", "course", "intake", "status", "loanType", "crn", "applicationDate", "decisionDate", "amount", "notes", "updatedBy"];
+    const esc = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+    const csv = [cols.join(","), ...filtered.map(r => cols.map(c => esc(r[c])).join(","))].join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a"); a.href = url; a.download = "slc-records.csv"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+
+  const badge = (s) => <span className={`inline-block rounded-full px-2.5 py-0.5 text-[11px] font-bold ${SLC_STATUS_STYLE[s] || "bg-slate-100 text-slate-500"}`}>{s}</span>;
+
+  return (
+    <>
+      <AdminHeader title="SLC — Student Loans" subtitle="Student Loans Company applications & status"
+        Icon={Wallet}
+        action={<div className="flex items-center gap-2"><ExportBtn onClick={exportCsv} /><PrimaryBtn onClick={openAdd}><Plus size={16} /> New record</PrimaryBtn></div>} />
+
+      {err && <div className="mb-4 flex items-start gap-2 rounded-xl bg-rose-50 px-3.5 py-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={16} className="mt-px shrink-0" />{err}</div>}
+
+      {loading ? <div className="skeleton h-64 rounded-2xl" /> : (
+        <>
+          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+            {SLC_STATUSES.map(s => (
+              <button key={s} onClick={() => setStatusFilter(f => f === s ? "" : s)} className={`rounded-xl p-3 text-left ring-1 transition ${statusFilter === s ? "ring-2" : "ring-slate-200"} ${SLC_STATUS_STYLE[s] || "bg-slate-50 text-slate-600"}`}>
+                <p className="text-xl font-extrabold leading-none">{counts[s] || 0}</p>
+                <p className="mt-1 text-[10px] font-bold leading-tight">{s}</p>
+              </button>
+            ))}
+          </div>
+
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <span className="text-sm text-slate-500"><b className="text-slate-700">{applied}</b> of {rows.length} have applied</span>
+            <div className="ml-auto flex items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200"><Search size={15} className="text-slate-400" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, ID, course, CRN…" className="w-56 bg-transparent text-sm outline-none" /></div>
+            {statusFilter && <button onClick={() => setStatusFilter("")} className="text-xs font-semibold text-blue-600">Clear filter</button>}
+          </div>
+
+          <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200">
+            <div className="overflow-x-auto max-w-full">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead><tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                  <th className="px-3 py-2">Student</th><th className="px-3 py-2">Course / Intake</th><th className="px-3 py-2">Loan type</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">CRN</th><th className="px-3 py-2">Applied</th><th className="px-3 py-2">Decision</th><th className="px-3 py-2">Amount</th><th className="px-3 py-2 text-right">Actions</th>
+                </tr></thead>
+                <tbody>
+                  {filtered.map(r => (
+                    <tr key={r.id} className="border-t border-slate-50 align-top hover:bg-slate-50/60">
+                      <td className="px-3 py-2"><p className="font-semibold text-slate-700">{r.studentName}</p>{r.studentRef && <p className="text-[11px] text-slate-400">{r.studentRef}</p>}</td>
+                      <td className="px-3 py-2 text-slate-500">{r.course || "—"}{r.intake ? ` · ${r.intake}` : ""}</td>
+                      <td className="px-3 py-2 text-slate-500">{r.loanType || "—"}</td>
+                      <td className="px-3 py-2">{badge(r.status)}</td>
+                      <td className="px-3 py-2 text-slate-500">{r.crn || "—"}</td>
+                      <td className="px-3 py-2 text-slate-500">{r.applicationDate ? fmtDate(r.applicationDate) : "—"}</td>
+                      <td className="px-3 py-2 text-slate-500">{r.decisionDate ? fmtDate(r.decisionDate) : "—"}</td>
+                      <td className="px-3 py-2 text-slate-500">{r.amount || "—"}</td>
+                      <td className="px-3 py-2 text-right"><div className="flex justify-end gap-1"><button onClick={() => openEdit(r)} title="Edit" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><Edit3 size={15} /></button><button onClick={() => setDel(r)} title="Delete" className="rounded-lg p-1.5 text-rose-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 size={15} /></button></div></td>
+                    </tr>
+                  ))}
+                  {filtered.length === 0 && <tr><td colSpan={9} className="px-3 py-10 text-center text-sm text-slate-400">No SLC records{statusFilter || q ? " match your filter" : " yet — add one with “New record”"}.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      <Modal open={!!modal} onClose={() => setModal(false)} title={modal === "add" ? "New SLC record" : "Edit SLC record"} width={640}>
+        {applicants.length > 0 && (
+          <Field label="Pick an applicant (optional — fills the details below)">
+            <select value={form.admissionId} onChange={e => pickApplicant(e.target.value)} className={inputCls}>
+              <option value="">— none —</option>
+              {applicants.map(a => <option key={a.id} value={a.id}>{[a.firstName, a.surname].filter(Boolean).join(" ")}{a.course ? ` — ${a.course}` : ""}</option>)}
+            </select>
+          </Field>
+        )}
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Student name *"><input value={form.studentName} onChange={e => set("studentName", e.target.value)} className={inputCls} /></Field>
+          <Field label="Student / College ID"><input value={form.studentRef} onChange={e => set("studentRef", e.target.value)} className={inputCls} /></Field>
+          <Field label="Course"><input value={form.course} onChange={e => set("course", e.target.value)} className={inputCls} /></Field>
+          <Field label="Intake"><input value={form.intake} onChange={e => set("intake", e.target.value)} className={inputCls} /></Field>
+          <Field label="Application status"><select value={form.status} onChange={e => set("status", e.target.value)} className={inputCls}>{SLC_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>
+          <Field label="Loan type"><select value={form.loanType} onChange={e => set("loanType", e.target.value)} className={inputCls}><option value="">—</option>{SLC_LOAN_TYPES.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>
+          <Field label="SLC reference (CRN)"><input value={form.crn} onChange={e => set("crn", e.target.value)} className={inputCls} /></Field>
+          <Field label="Amount"><input value={form.amount} onChange={e => set("amount", e.target.value)} placeholder="e.g. £9,250" className={inputCls} /></Field>
+          <Field label="Application date"><input type="date" value={form.applicationDate} onChange={e => set("applicationDate", e.target.value)} className={inputCls} /></Field>
+          <Field label="Decision date"><input type="date" value={form.decisionDate} onChange={e => set("decisionDate", e.target.value)} className={inputCls} /></Field>
+        </div>
+        <div className="mt-3"><Field label="Notes"><textarea rows={3} value={form.notes} onChange={e => set("notes", e.target.value)} className={`${inputCls} resize-y`} /></Field></div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={() => setModal(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
+          <PrimaryBtn onClick={save} disabled={saving} colour={NAVY}>{saving ? <><Loader2 size={16} className="animate-spin" /> Saving…</> : <><Save size={16} /> Save record</>}</PrimaryBtn>
+        </div>
+      </Modal>
+
+      <Modal open={!!del} onClose={() => setDel(null)} title="Delete SLC record?">
+        <p className="text-sm leading-relaxed text-slate-600">Delete the SLC record for <b>{del?.studentName}</b>? This can't be undone.</p>
+        <div className="mt-5 flex gap-2"><button onClick={() => setDel(null)} className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50">Cancel</button><PrimaryBtn colour={MAROON} onClick={remove} className="flex-1"><Trash2 size={16} /> Delete</PrimaryBtn></div>
+      </Modal>
+    </>
+  );
+}
 
 /* ============================================================ ATTENDANCE EMAILS ============================================================ */
 // Automated month-end attendance emails. Students are banded by their attendance % for the

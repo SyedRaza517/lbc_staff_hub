@@ -963,3 +963,28 @@ model SentNotification {
   key    String   @id
   sentAt DateTime @default(now())
 }
+
+// Student Loans Company (SLC) tracking — one row per student's loan application, with its
+// current status. Standalone (all fields on the row) so it can be recorded whether or not
+// the person exists as an Admission/Student yet; `admissionId` optionally links to an
+// applicant so the list can be pre-filled from admissions who chose Student Loans funding.
+model SlcApplication {
+  id              String   @id @default(cuid())
+  admissionId     String?  // optional link to an Admission (applicant), for convenience
+  studentName     String
+  studentRef      String   @default("")   // college/student ID
+  course          String   @default("")
+  intake          String   @default("")
+  status          String   @default("Not applied") // Not applied | Applied | Awaiting evidence | Approved | In payment | Paid | Declined | Cancelled
+  loanType        String   @default("")   // Tuition Fee Loan | Maintenance Loan | Both | Other
+  crn             String   @default("")   // SLC Customer Reference Number
+  applicationDate String?                 // YYYY-MM-DD
+  decisionDate    String?                 // YYYY-MM-DD
+  amount          String   @default("")   // free text (e.g. "£9,250")
+  notes           String   @default("")
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status])
+}

@@ -156,6 +156,12 @@ export const api = {
   updateTimetableSlot: (id, data) => request(`/timetable/slots/${id}`, { method: "PUT", body: data }),
   removeTimetableSlot: (id) => request(`/timetable/slots/${id}`, { method: "DELETE" }),
 
+  // SLC (admin) — Student Loans Company application tracking
+  slcList: () => request("/slc"),
+  addSlc: (data) => request("/slc", { method: "POST", body: data }),
+  updateSlc: (id, data) => request(`/slc/${id}`, { method: "PUT", body: data }),
+  removeSlc: (id) => request(`/slc/${id}`, { method: "DELETE" }),
+
   // attendance emails (admin) — banded month-end recognition/engagement emails
   attendanceEmailData: () => request("/attendance-emails/data"),
   attendanceEmailConfig: () => request("/attendance-emails/config"),
