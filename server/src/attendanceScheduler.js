@@ -6,6 +6,7 @@
 // attendanceRunner.runMonthly, so a restart mid-day (or an extra tick) can't double-send.
 // Everything is gated by config: with automation off (the default) this does nothing.
 const runner = require("./attendanceRunner");
+const clock = require("./clock");
 
 // True when `d` is the last day of its month (tomorrow rolls into a new month).
 function isLastDayOfMonth(d) {
@@ -17,9 +18,15 @@ async function tick() {
   try {
     const config = await runner.loadConfig();
     if (!config.autoEnabled) return;
-    const now = new Date();
-    if (!isLastDayOfMonth(now)) return;
-    if (now.getHours() < (config.sendHour != null ? config.sendHour : 9)) return;
+    // Evaluate the schedule on the organisation's wall clock (Europe/London), not the
+    // host's (Render/most hosts run UTC): clock.localDate() → "YYYY-MM-DD", clock.localTime()
+    // → "HH:MM". Build a plain Date from the London Y/M/D purely for the calendar arithmetic
+    // in isLastDayOfMonth (timezone-independent), and read the London hour off localTime().
+    const [ly, lm, ld] = clock.localDate().split("-").map(Number);
+    const londonDay = new Date(ly, lm - 1, ld);
+    const londonHour = Number(clock.localTime().slice(0, 2));
+    if (!isLastDayOfMonth(londonDay)) return;
+    if (londonHour < (config.sendHour != null ? config.sendHour : 9)) return;
     const out = await runner.runMonthly({ force: false }); // de-dupe handled inside
     if (out.ok) {
       console.log(`[attendance-scheduler] ${out.period}: ${out.sent} sent, ${out.failed} failed, ${out.skipped} skipped`);

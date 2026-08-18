@@ -300,6 +300,7 @@ export const api = {
   // adjustments
   listAdjustments: () => request("/adjustments"),
   addAdjustment: (data) => request("/adjustments", { method: "POST", body: data }),
+  removeAdjustment: (id) => request(`/adjustments/${id}`, { method: "DELETE" }),
   // documents
   listDocuments: () => request("/documents"),
   addDocument: (data) => request("/documents", { method: "POST", body: data }),
@@ -358,7 +359,8 @@ export const api = {
   listSessions: (unitId) => request(`/hnd/sessions${unitId ? `?unitId=${unitId}` : ""}`),
   addSession: (data) => request("/hnd/sessions", { method: "POST", body: data }),
   updateSession: (id, data) => request(`/hnd/sessions/${id}`, { method: "PUT", body: data }),
-  removeSession: (id) => request(`/hnd/sessions/${id}`, { method: "DELETE" }),
+  // `override:true` forces deletion of a term-locked register (server replies 423 without it).
+  removeSession: (id, override) => request(`/hnd/sessions/${id}`, { method: "DELETE", body: override ? { override: true } : undefined }),
   getRegister: (sessionId) => request(`/hnd/sessions/${sessionId}/register`),
   saveRegister: (sessionId, marks, override) => request(`/hnd/sessions/${sessionId}/register`, { method: "PUT", body: { marks, ...(override ? { override: true } : {}) } }),
   // semesterId: "" = all semesters, "unassigned" = sessions outside every semester

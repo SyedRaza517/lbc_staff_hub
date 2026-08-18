@@ -265,7 +265,7 @@ router.post("/:id/send-offer", async (req, res) => {
     where: { id: a.id },
     // Don't regress an already-accepted offer to "sent" on a re-send (the admin may just be
     // sending the applicant another copy); keep the acceptance intact.
-    data: { offerStatus: a.offerStatus === "accepted" ? "accepted" : "sent", offerSentAt: new Date(), offerTokenHash: hashToken(raw), offerInductionDate: inductionDate || null },
+    data: { offerStatus: a.offerStatus === "accepted" ? "accepted" : "sent", offerSentAt: new Date(), offerTokenHash: hashToken(raw), offerInductionDate: inductionDate || null, offerSignatoryName: senderName },
   });
 
   // Sign-off carries the sender's typed name over "Admissions Officer, London

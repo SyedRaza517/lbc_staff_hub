@@ -44,7 +44,8 @@ router.put("/config", async (req, res) => {
   const patch = {};
   if (b.autoEnabled != null) patch.autoEnabled = !!b.autoEnabled;
   if (b.respondDays != null) patch.respondDays = Math.max(1, Math.min(30, Number(b.respondDays) || 5));
-  if (b.sendHour != null) patch.sendHour = Math.max(0, Math.min(23, Number(b.sendHour) || 9));
+  // NaN-safe and allows 0 (midnight): `Number(0) || 9` wrongly forced a valid 0 to 9.
+  if (b.sendHour != null) { const h = Number(b.sendHour); if (Number.isFinite(h)) patch.sendHour = Math.max(0, Math.min(23, Math.trunc(h))); }
   if (b.values && typeof b.values === "object") patch.values = b.values;
   if (b.templates && typeof b.templates === "object") patch.templates = b.templates;
   res.json(await runner.saveConfig(patch));

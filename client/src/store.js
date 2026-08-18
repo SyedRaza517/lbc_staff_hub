@@ -360,7 +360,9 @@ export function useApiStore(notify, user) {
     }, "Holiday added to the calendar"),
     decideLeave: run((id, status, note) => api.decideLeave(id, status, note), (id, status) => `Request ${status}`, "info"),
     // balances
-    adjustBalance: run((staffId, days, note) => api.addAdjustment({ staffId, days, note }), "Adjustment applied"),
+    // `date` (optional) files the adjustment against a specific leave year; omitted = today.
+    adjustBalance: run((staffId, days, note, date) => api.addAdjustment({ staffId, days, note, ...(date ? { date } : {}) }), "Adjustment applied"),
+    removeAdjustment: run((id) => api.removeAdjustment(id), "Adjustment removed", "error"),
     setAllowance: run((id, allowance) => api.updateStaff(id, { allowance }), "Allowance updated"),
     // documents
     addDoc: run((data) => api.addDocument(data), (d) => `"${d.name}" published`),
@@ -435,7 +437,8 @@ export function useApiStore(notify, user) {
     setEnrolments: runHnd((id, unitIds) => api.setEnrolments(id, unitIds), "Enrolments updated"),
     addSession: runHnd((data) => api.addSession(data), "Session added"),
     updateSession: runHnd((id, data) => api.updateSession(id, data), "Session updated"),
-    removeSession: runHnd((id) => api.removeSession(id), "Session removed", "error"),
+    // `override` forces deletion of a term-locked register (caller re-invokes on a 423).
+    removeSession: runHnd((id, override) => api.removeSession(id, override), "Session removed", "error"),
     saveRegister: runHnd((sessionId, marks, override) => api.saveRegister(sessionId, marks, override), "Register saved"),
     getRegister: (sessionId) => api.getRegister(sessionId),
     getStudentTermAttendance: (id) => api.studentTermAttendance(id),

@@ -858,6 +858,7 @@ model Admission {
   offerSentAt        DateTime?
   offerAcceptedAt    DateTime?
   offerInductionDate String?
+  offerSignatoryName String?
   offerTokenHash     String?   @unique
 
   documents AdmissionDocument[]

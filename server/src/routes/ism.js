@@ -91,8 +91,9 @@ router.put("/:id", async (req, res) => {
   const existing = await prisma.ism.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "ISM not found." });
   const data = pick(req.body);
-  // Allow re-linking or unlinking the applicant.
-  data.admissionId = (typeof req.body?.admissionId === "string" && req.body.admissionId) ? req.body.admissionId : null;
+  // Allow re-linking or unlinking the applicant, but ONLY when the caller actually sent the
+  // key — an omitted admissionId must leave the existing link intact, not silently null it.
+  if (req.body && "admissionId" in req.body) data.admissionId = (typeof req.body.admissionId === "string" && req.body.admissionId) ? req.body.admissionId : null;
   // Backfill the interviewer for rows recorded before we captured it; otherwise leave it.
   if (!str(existing.interviewerName)) data.interviewerName = req.user?.name || req.user?.email || null;
   const row = await prisma.ism.update({ where: { id: req.params.id }, data });

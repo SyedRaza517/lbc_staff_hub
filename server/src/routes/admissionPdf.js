@@ -41,7 +41,7 @@ router.get("/:id/offer-letter.pdf", async (req, res) => {
   try {
     const buf = await require("../offerLetter").buildOfferLetterPdf(a, {
       inductionDate: a.offerInductionDate || "",
-      signatoryName: "Swaroop Arja",
+      signatoryName: a.offerSignatoryName || "Swaroop Arja",
       signatoryTitle: "Admissions Officer",
     });
     send(res, `Offer Letter - ${nameOf(a)}.pdf`, buf);

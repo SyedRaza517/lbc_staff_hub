@@ -148,6 +148,9 @@ router.put("/", requireAuth, requirePage("checkin"), async (req, res) => {
   if (!isString(staffId)) return res.status(400).json({ error: "staffId must be text" });
   if (!isTime(tIn)) return res.status(400).json({ error: "in must be a time in HH:MM format" });
   if (out != null && out !== "" && !isTime(out)) return res.status(400).json({ error: "out must be a time in HH:MM format" });
+  // When both times are present, out must be after in. Zero-padded 24h HH:MM strings sort
+  // chronologically, so a plain string compare is enough. Records with in-only are untouched.
+  if (out != null && out !== "" && out <= tIn) return res.status(400).json({ error: "Check-out must be after check-in." });
   if (!isSite(site)) return res.status(400).json({ error: "site must be Onsite or Online" });
   // Calendar validity, matching PUT /summary. Without it an admin could file a record
   // on 2026-02-30: the staff app rolls it to 2 March while the dashboard filters on

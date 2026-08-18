@@ -1125,12 +1125,12 @@ function MonthGrid({ store, big, showPending }) {
                   the cell itself is the hit target. */}
               <span className={`block text-xs font-bold ${isToday ? "text-blue-700" : bh ? "text-amber-700" : "text-slate-400"}`}>{d}</span>
               {bh && <span className="mt-0.5 block truncate rounded bg-amber-400 px-1 py-0.5 text-[8px] font-bold text-white">🏛 {bh}</span>}
-              <span className="mt-1 block space-y-0.5">{evts.slice(0, 3).map(e => { const p = store.staff.find(s => s.id === e.staffId); const t = LEAVE_TYPES.find(x => x.key === e.type); return <span key={e.id} title={`${p?.name || "Unknown"} — ${t.label}`} className="block truncate rounded px-1 py-0.5 text-[9px] font-bold text-white" style={{ background: t.colour }}>{shortName(p?.name) || p?.initials}</span>; })}{evts.length > 3 && <span className="block text-[9px] font-semibold text-slate-400">+{evts.length - 3} more</span>}</span>
+              <span className="mt-1 block space-y-0.5">{evts.slice(0, 3).map(e => { const p = store.staff.find(s => s.id === e.staffId); const t = leaveTypeMeta(e.type); /* safe fallback so an unknown type can't crash the calendar */ return <span key={e.id} title={`${p?.name || "Unknown"} — ${t.label}`} className="block truncate rounded px-1 py-0.5 text-[9px] font-bold text-white" style={{ background: t.colour }}>{shortName(p?.name) || p?.initials}</span>; })}{evts.length > 3 && <span className="block text-[9px] font-semibold text-slate-400">+{evts.length - 3} more</span>}</span>
             </button>
           );
           return (
             <button key={d} type="button" onClick={() => setDayOpen(iso)} title={dayLabel} aria-label={dayLabel} className={`press relative flex h-9 flex-col items-center justify-center rounded-lg text-[13px] transition-all duration-200 ${isToday ? "font-bold text-white glow-pulse" : bh ? "bg-amber-100 font-semibold text-amber-700" : "text-slate-600 hover:bg-slate-100"}`} style={isToday ? { background: NAVY } : {}}>
-              {d}{(evts.length > 0 || bh) && <span className="absolute bottom-1 flex gap-0.5">{bh && <span className="h-1 w-1 rounded-full bg-amber-500" />}{evts.slice(0, 2).map((e, k) => <span key={k} className="h-1 w-1 rounded-full" style={{ background: LEAVE_TYPES.find(t => t.key === e.type).colour }} />)}</span>}
+              {d}{(evts.length > 0 || bh) && <span className="absolute bottom-1 flex gap-0.5">{bh && <span className="h-1 w-1 rounded-full bg-amber-500" />}{evts.slice(0, 2).map((e, k) => <span key={k} className="h-1 w-1 rounded-full" style={{ background: leaveTypeMeta(e.type).colour }} />)}</span>}
             </button>
           );
         })}
@@ -2450,7 +2450,7 @@ function ExecutiveDashboard({ store }) {
           <FilterSelect label="Year / Term" value={stage} onChange={onStage}
             options={[{ v: "all", l: "Whole course" }, ...stages.map(s => ({ v: s, l: `Year ${s.split("-")[0]} · Term ${s.split("-")[1]}` }))]} />
         )}
-        <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...unitsForCourse.map(m => ({ v: m.id, l: course === "all" ? `${m.code} — ${m.name} · ${courses.find(c => c.id === m.courseId)?.code || "unassigned"}` : `${m.code} — ${m.name}` }))]} />
+        <FilterSelect label="Unit" value={unit} onChange={onUnit} options={[{ v: "all", l: "All units" }, ...unitsForCourse.map(m => ({ v: m.id, l: course === "all" ? `${m.code} — ${m.name} · ${courses.find(c => c.courseId === m.courseId)?.code || "unassigned"}` : `${m.code} — ${m.name}` }))]} />
       </div>
       {err && <div className="mb-3 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 ring-1 ring-rose-200"><AlertCircle size={15} /> {err}</div>}
       {unitScoped && <p className="mb-3 text-[11px] text-slate-400">The {unit !== "all" && stage !== "all" ? "Year / Term and Unit filters apply" : unit !== "all" ? "Unit filter applies" : "Year / Term filter applies"} to the attendance figures; student and results figures cover the whole {course === "all" ? "college" : "course"}.</p>}
@@ -2586,7 +2586,8 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
   const handset = useIsHandset();
   // Android back (mobile dashboard): return to the first tab, then out to the staff app.
   useBackHandler(handset, () => {
-    if (activeKey !== nav[0]?.key) { setTab(nav[0].key); return true; }
+    // Guard nav[0]: an admin granted no pages has an empty nav, so nav[0].key would throw.
+    if (nav[0] && activeKey !== nav[0].key) { setTab(nav[0].key); return true; }
     if (onExitToStaffApp) { onExitToStaffApp(); return true; }
     return false;
   });
@@ -2635,6 +2636,8 @@ export function AdminDashboard({ store, onExitToStaffApp }) {
           {onExitToStaffApp && <button onClick={onExitToStaffApp} className="flex shrink-0 items-center gap-1.5 rounded-full border-2 border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 active:scale-95"><ChevronLeft size={14} /> Staff App</button>}
           {nav.map(n => <button key={n.key} onClick={() => setTab(n.key)} className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm transition-all active:scale-95 ${activeKey === n.key ? "text-white" : "bg-white text-slate-500 hover:bg-blue-50 hover:text-blue-700"}`} style={activeKey === n.key ? { background: `linear-gradient(135deg, ${BLUE}, ${NAVY_DARK})`, boxShadow: `0 6px 16px -6px ${BLUE}99` } : {}}><n.I size={14} /> {n.label}</button>)}
         </div>
+        {/* An admin granted no pages: show a friendly note rather than an empty console. */}
+        {nav.length === 0 && <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70"><EmptyState Icon={ShieldCheck} title="No admin pages yet" msg="You don't have access to any admin pages — ask a super admin to grant access." /></div>}
         {activeKey === "executive" && <ExecutiveDashboard store={store} />}
         {activeKey === "overview" && <AdminOverview store={store} setTab={setTab} />}
         {activeKey === "kpi" && <AdminKPI store={store} />}
@@ -3135,10 +3138,12 @@ function AdminCheckin({ store }) {
 function AdminBalances({ store }) {
   const [adjModal, setAdjModal] = useState(null); // staff obj
   const [editModal, setEditModal] = useState(null);
-  const [adj, setAdj] = useState({ days: 1, note: "" });
+  const [adj, setAdj] = useState({ days: 1, note: "", date: "" });
   const [alw, setAlw] = useState(28);
   const [query, setQuery] = useState("");
-  const applyAdj = async () => { await store.adjustBalance(adjModal.id, Number(adj.days), adj.note); setAdjModal(null); setAdj({ days: 1, note: "" }); };
+  const applyAdj = async () => { await store.adjustBalance(adjModal.id, Number(adj.days), adj.note, adj.date || undefined); setAdjModal(null); setAdj({ days: 1, note: "", date: "" }); };
+  // Undo an adjustment filed in error, with a confirm.
+  const removeAdj = async (a) => { if (!window.confirm(`Delete this ${a.days >= 0 ? "+" : ""}${a.days}d adjustment${a.note ? ` — "${a.note}"` : ""}? This cannot be undone.`)) return; await store.removeAdjustment(a.id); };
   const saveAlw = async () => { await store.setAllowance(editModal.id, Number(alw)); setEditModal(null); };
   const ql = query.trim().toLowerCase();
   const filteredStaff = store.staff.filter(s => !ql || s.name.toLowerCase().includes(ql) || (s.dept || "").toLowerCase().includes(ql));
@@ -3187,11 +3192,13 @@ function AdminBalances({ store }) {
         </table>
       </div>
       <Pagination className="mt-4" page={paged.page} setPage={paged.setPage} totalPages={paged.totalPages} total={paged.total} />
-      {store.adjustments.length > 0 && <div className="mt-5 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 fade-up"><p className="mb-3 text-sm font-bold text-slate-700">Adjustment history</p><div className="space-y-2">{store.adjustments.slice().reverse().map(a => { const s = store.staff.find(x => x.id === a.staffId); return <div key={a.id} className="flex items-center gap-3 text-sm"><span className="font-semibold" style={{ color: a.days >= 0 ? "#059669" : MAROON }}>{a.days >= 0 ? "+" : ""}{a.days}d</span><span className="text-slate-700">{s?.name}</span><span className="text-slate-400">— {a.note}</span><span className="ml-auto text-xs text-slate-400">{fmtDate(a.date)}</span></div>; })}</div></div>}
+      {store.adjustments.length > 0 && <div className="mt-5 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 fade-up"><p className="mb-3 text-sm font-bold text-slate-700">Adjustment history</p><div className="space-y-2">{store.adjustments.slice().reverse().map(a => { const s = store.staff.find(x => x.id === a.staffId); return <div key={a.id} className="flex items-center gap-3 text-sm"><span className="font-semibold" style={{ color: a.days >= 0 ? "#059669" : MAROON }}>{a.days >= 0 ? "+" : ""}{a.days}d</span><span className="text-slate-700">{s?.name}</span><span className="text-slate-400">— {a.note}</span><span className="ml-auto text-xs text-slate-400">{fmtDate(a.date)}</span><button onClick={() => removeAdj(a)} title="Delete adjustment" className="rounded-lg p-1 text-slate-300 transition hover:bg-rose-50 hover:text-rose-500"><Trash2 size={14} /></button></div>; })}</div></div>}
       <Modal open={!!adjModal} onClose={() => setAdjModal(null)} title={`Adjust days — ${adjModal?.name || ""}`}>
         <div className="space-y-3">
           <Field label="Days (use negative to deduct)"><div className="flex items-center gap-2"><button onClick={() => setAdj(a => ({ ...a, days: a.days - 1 }))} className="rounded-lg bg-slate-100 p-2 hover:bg-slate-200"><MinusCircle size={18} /></button><input type="number" value={adj.days} onChange={e => setAdj(a => ({ ...a, days: e.target.value }))} className={inputCls + " text-center"} /><button onClick={() => setAdj(a => ({ ...a, days: Number(a.days) + 1 }))} className="rounded-lg bg-slate-100 p-2 hover:bg-slate-200"><PlusCircle size={18} /></button></div></Field>
           <Field label="Reason"><input value={adj.note} onChange={e => setAdj(a => ({ ...a, note: e.target.value }))} placeholder="e.g. Long-service bonus day" className={inputCls} /></Field>
+          {/* Optional: file the adjustment against a specific leave year; blank = today. */}
+          <Field label="Date (optional)"><input type="date" value={adj.date} onChange={e => setAdj(a => ({ ...a, date: e.target.value }))} className={inputCls} /></Field>
           <PrimaryBtn onClick={applyAdj} className="w-full"><Check size={16} /> Apply adjustment</PrimaryBtn>
         </div>
       </Modal>
@@ -3276,6 +3283,9 @@ function AdminCalendar({ store }) {
 function AdminRequests({ store }) {
   const [filter, setFilter] = useState("all");
   const [modal, setModal] = useState(false);
+  // The row currently being approved/declined, so a double-click can't fire a second
+  // decideLeave (which 409s on an already-decided request and toasts an error).
+  const [decidingId, setDecidingId] = useState(null);
   // No hard-coded staff id: "s1" was a leftover demo id, so the dropdown showed the
   // first real person while the form still held "s1" and the server rejected it as an
   // unknown staff member. Default to nothing and require an explicit choice.
@@ -3290,6 +3300,13 @@ function AdminRequests({ store }) {
     if (reqBlocked) return;
     try { await store.requestLeave({ staffId: form.staffId, type: form.type, start: form.start, end: form.end, reason: form.reason }); setModal(false); }
     catch (_) { /* store toasts; keep the modal open so the admin can adjust */ }
+  };
+  const decide = async (l, status) => {
+    if (decidingId) return;              // a request is already in flight
+    setDecidingId(l.id);
+    try { await store.decideLeave(l.id, status); }
+    catch (_) { /* store toasts the failure */ }
+    finally { setDecidingId(null); }
   };
   const list = store.leave.filter(l => filter === "all" ? true : l.status === filter).slice().reverse();
   const counts = { all: store.leave.length, pending: store.leave.filter(l => l.status === "pending").length, approved: store.leave.filter(l => l.status === "approved").length, rejected: store.leave.filter(l => l.status === "rejected").length };
@@ -3314,7 +3331,7 @@ function AdminRequests({ store }) {
               <div className="flex flex-wrap items-center gap-2"><p className="font-bold text-slate-700">{p?.name}</p><span className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: t.colour + "1a", color: t.colour }}><T size={11} /> {t.label}</span><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${statusBadge(l.status)}`}>{l.status}</span></div>
               <p className="mt-1 text-sm text-slate-500">{fmtDate(l.start)}{l.end !== l.start && ` → ${fmtDate(l.end)}`} · <b>{store.chargeableDays(l.start, l.end)}d</b> · <span className="italic">"{l.reason}"</span></p>
             </div>
-            {l.status === "pending" && <div className="flex gap-2"><button onClick={() => store.decideLeave(l.id, "rejected")} className="flex items-center gap-1 rounded-xl border-2 border-rose-200 px-3 py-2 text-sm font-bold text-rose-600 hover:bg-rose-50"><XCircle size={15} /> Decline</button><PrimaryBtn colour="#059669" onClick={() => store.decideLeave(l.id, "approved")} className="!py-2"><CheckCircle2 size={15} /> Approve</PrimaryBtn></div>}
+            {l.status === "pending" && <div className="flex gap-2"><button disabled={decidingId === l.id} onClick={() => decide(l, "rejected")} className="flex items-center gap-1 rounded-xl border-2 border-rose-200 px-3 py-2 text-sm font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-50"><XCircle size={15} /> Decline</button><PrimaryBtn colour="#059669" disabled={decidingId === l.id} onClick={() => decide(l, "approved")} className="!py-2"><CheckCircle2 size={15} /> Approve</PrimaryBtn></div>}
           </div>
         ); })}
       </div>
@@ -4232,7 +4249,17 @@ function HndSessions({ store, unitId, setUnitId, selected, onTake, scoped }) {
     // names printed "undefined–undefined", so the two registers that share a date were
     // indistinguishable and it was easy to delete the marked one by mistake.
     if (!window.confirm(`Delete the ${s.kind || "session"} on ${fmtDate(s.date)} at ${s.start}–${s.end}?${marks}\n\nThis cannot be undone.`)) return;
-    await store.removeSession(s.id);
+    try {
+      await store.removeSession(s.id);
+    } catch (err) {
+      // 423 = the register's term is locked. Offer an explicit override rather than failing.
+      if (err?.status === 423) {
+        if (window.confirm(`${err.message}\n\nDelete it anyway? This overrides the term lock and cannot be undone.`)) {
+          await store.removeSession(s.id, true);
+        }
+      }
+      // Any other error was already toasted by the store.
+    }
   };
   const exportSessions = () => {
     downloadCSV(`sessions-${selected?.code || "hnd"}.csv`,
@@ -9182,7 +9209,7 @@ function AdminPAT({ store }) {
                   </tr>
                 );
               })}
-              {paged.slice.length === 0 && <tr><td colSpan={8} className="px-5 py-10"><EmptyState Icon={MessageSquare} title={total === 0 ? "No interactions yet" : "No interactions match"} msg={total === 0 ? "Log your first student interaction with “Log interaction”." : "Try a different search or filter."} /></td></tr>}
+              {paged.slice.length === 0 && <tr><td colSpan={9} className="px-5 py-10"><EmptyState Icon={MessageSquare} title={total === 0 ? "No interactions yet" : "No interactions match"} msg={total === 0 ? "Log your first student interaction with “Log interaction”." : "Try a different search or filter."} /></td></tr>}
             </tbody>
           </table>
         </div>
@@ -9255,8 +9282,9 @@ function computeStaffKpis(store) {
     const onTime = cis.filter(c => c.in && c.in <= ON_TIME_BY).length;
     const punctuality = days ? Math.round((onTime / days) * 100) : null;
 
-    // 2) Teaching load — courses this person tutors
-    const mods = store.units.filter(m => m.tutor && m.tutor === s.name);
+    // 2) Teaching load — courses this person tutors. Match on tutorStaffId (the linked
+    // staff id) when present, falling back to the legacy free-text name for old units.
+    const mods = store.units.filter(m => m.tutorStaffId ? m.tutorStaffId === s.id : (m.tutor && m.tutor === s.name));
     const courses = mods.length;
     const studentsTaught = mods.reduce((a, m) => a + (m.studentCount || 0), 0);
 
@@ -9418,7 +9446,7 @@ function AdminKPI({ store }) {
         </div>
       </div>
       <p className="mt-3 text-[11px] text-slate-400">
-        <b>KPI score</b> is the mean of register submission, student attendance and own punctuality (whichever apply). Green ≥85% · amber 70–85% · red below. Click a row for the full breakdown.
+        <b>KPI score</b> is the mean of register submission, student attendance and own punctuality (whichever apply). Green 70%+ · amber 50–70% · orange 40–50% · red below 40% (90%+ shows violet). Click a row for the full breakdown.
       </p>
 
       <Modal open={!!detail} onClose={() => setDetail(null)} title="Staff KPI breakdown" width={560}>
@@ -11265,11 +11293,15 @@ function AdminAdmissions({ store }) {
   const confirmBulkRemove = async () => {
     setBusy(true);
     try {
-      await Promise.all(selectedRows.map(r => api.removeAdmission(r.id)));
-      store.notify(`Deleted ${selectedRows.length} application${selectedRows.length === 1 ? "" : "s"}`, "error");
-      setBulkDelete(false); clearSelection(); await load();
+      // allSettled, not all: one failed delete must not abort the rest or skip the refresh.
+      const results = await Promise.allSettled(selectedRows.map(r => api.removeAdmission(r.id)));
+      const failed = results.filter(r => r.status === "rejected").length;
+      if (failed) store.notify(`Deleted ${selectedRows.length - failed} of ${selectedRows.length}; ${failed} could not be removed`, "error");
+      else store.notify(`Deleted ${selectedRows.length} application${selectedRows.length === 1 ? "" : "s"}`, "error");
     } catch (e) { store.notify(e.message || "Could not delete the selected applications", "error"); }
-    setBusy(false);
+    // Always refresh the list and clear the selection so no stale rows linger, even if
+    // some deletes failed.
+    finally { setBulkDelete(false); clearSelection(); await load(); setBusy(false); }
   };
 
   const exportCsv = () => {

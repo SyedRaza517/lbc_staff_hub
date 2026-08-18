@@ -19,6 +19,7 @@ const email = require("./email");
 const bands = require("./attendanceBands");
 const mailFrom = require("./mailFrom");
 const mailAssets = require("./mailAssets");
+const clock = require("./clock");
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -86,7 +87,7 @@ function rangeLabel(start, end) {
 //   unitIds — the running units; attendance is restricted to these. null in the Semester
 //   fallback, where we scope by the date range instead.
 async function currentTerm() {
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const today = clock.localDate(); // YYYY-MM-DD in London (Europe/London), not UTC
 
   const running = await prisma.unit.findMany({
     where: { startDate: { not: null, lte: today }, endDate: { not: null, gte: today } },
