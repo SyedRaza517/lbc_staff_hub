@@ -10446,16 +10446,21 @@ function AdminAttendanceEmails({ store }) {
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState(null);
   const [sendingId, setSendingId] = useState(null);
+  const [range, setRange] = useState({ from: "", to: "" });  // custom reporting period; both blank = auto current term
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (r) => {
     setLoading(true); setErr("");
     try {
-      const [d, c] = await Promise.all([api.attendanceEmailData(), api.attendanceEmailConfig()]);
+      const useR = r && r.from && r.to ? r : null;
+      const [d, c] = await Promise.all([api.attendanceEmailData(useR?.from, useR?.to), api.attendanceEmailConfig()]);
       setData(d); setConfig(c);
     } catch (e) { setErr(e.message || "Could not load attendance data"); }
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  const applyRange = () => { if (range.from && range.to) load(range); };
+  const resetRange = () => { setRange({ from: "", to: "" }); load({ from: "", to: "" }); };
 
   const setCfg = (patch) => setConfig(c => ({ ...c, ...patch }));
   const setValue = (k, v) => setConfig(c => ({ ...c, values: { ...c.values, [k]: v } }));
@@ -10477,9 +10482,9 @@ function AdminAttendanceEmails({ store }) {
   const runNow = async () => {
     setConfirmRun(false); setRunning(true); setRunResult(null);
     try {
-      const res = await api.runAttendanceEmails(true);
+      const res = await api.runAttendanceEmails({ force: true, from: range.from || undefined, to: range.to || undefined });
       setRunResult(res);
-      if (res.ok) { store.notify(`Sent ${res.sent} · failed ${res.failed} · skipped ${res.skipped}`, res.failed ? "error" : "success"); await load(); }
+      if (res.ok) { store.notify(`Sent ${res.sent} · failed ${res.failed} · skipped ${res.skipped}`, res.failed ? "error" : "success"); await load(range); }
       else store.notify(res.reason === "no-current-term" ? "No current term" : "Nothing to send", "info");
     } catch (e) { store.notify(e.message || "Could not send", "error"); }
     setRunning(false);
@@ -10489,13 +10494,13 @@ function AdminAttendanceEmails({ store }) {
   const sendOne = async (s) => {
     setSendingId(s.id);
     try {
-      const res = await api.sendAttendanceEmailToStudent(s.id);
+      const res = await api.sendAttendanceEmailToStudent(s.id, { from: range.from || undefined, to: range.to || undefined });
       store.notify(`Emailed ${res.student || s.name} — ${res.band || s.bandLabel}`, "success");
     } catch (e) { store.notify(e.message || "Could not send the email", "error"); }
     setSendingId(null);
   };
 
-  if (loading) return (<><AdminHeader title="Attendance Emails" subtitle="Automated month-end attendance emails" Icon={Mail} /><div className="skeleton h-64 rounded-2xl" /></>);
+  if (loading && !data) return (<><AdminHeader title="Attendance Emails" subtitle="Automated month-end attendance emails" Icon={Mail} /><div className="skeleton h-64 rounded-2xl" /></>);
 
   const term = data?.term;
   const students = data?.students || [];
@@ -10512,21 +10517,35 @@ function AdminAttendanceEmails({ store }) {
         Icon={Mail}
         action={<div className="flex items-center gap-2">
           <button onClick={() => setShowConfig(v => !v)} className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"><Settings size={14} /> Settings</button>
-          <PrimaryBtn onClick={() => setConfirmRun(true)} disabled={!term || running}>{running ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Send this month now</>}</PrimaryBtn>
+          <PrimaryBtn onClick={() => setConfirmRun(true)} disabled={!term || running}>{running ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> {data?.custom ? "Send for this range now" : "Send this month now"}</>}</PrimaryBtn>
         </div>} />
 
       {err && <div className="mb-4 flex items-start gap-2 rounded-xl bg-rose-50 px-3.5 py-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200"><AlertCircle size={16} className="mt-px shrink-0" />{err}</div>}
+
+      {/* Reporting period — leave blank for the auto current term, or pick a From–To range to
+          recalculate the %, bands and email period over any month. */}
+      <div className="mb-4 flex flex-wrap items-end gap-x-4 gap-y-3 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
+        <div className="mr-auto">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Reporting period</p>
+          <p className="max-w-xs text-xs text-slate-400">Leave blank to use the current term, or pick a date range to send for any month.</p>
+        </div>
+        <div><label className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">From</label><input type="date" value={range.from} onChange={e => setRange(r => ({ ...r, from: e.target.value }))} className={`${inputCls} mt-1`} /></div>
+        <div><label className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">To</label><input type="date" value={range.to} onChange={e => setRange(r => ({ ...r, to: e.target.value }))} className={`${inputCls} mt-1`} /></div>
+        <button onClick={applyRange} disabled={!range.from || !range.to || loading} className="press h-[38px] rounded-lg px-3.5 text-xs font-bold text-white transition disabled:opacity-40" style={{ background: NAVY }}>Apply range</button>
+        {(data?.custom || range.from || range.to) && <button onClick={resetRange} disabled={loading} className="press h-[38px] rounded-lg border border-slate-200 px-3.5 text-xs font-bold text-slate-600 hover:bg-slate-50">Current term</button>}
+        {data?.custom && <span className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700 ring-1 ring-blue-200">Custom · {term?.start} → {term?.end}</span>}
+      </div>
 
       {!term ? (
         <div className="rounded-2xl bg-amber-50 p-6 text-center ring-1 ring-amber-200">
           <CalendarClock size={28} className="mx-auto mb-2 text-amber-500" />
           <p className="font-bold text-amber-800">No current term</p>
-          <p className="mx-auto mt-1 max-w-md text-sm text-amber-700">The current term is taken from the units running now on your registers. Set the teaching <b>start &amp; end dates</b> on the current units (Registers) so this term is detected and attendance can be scoped to it.</p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-amber-700">The current term is taken from the units running now on your registers. Set the teaching <b>start &amp; end dates</b> on the current units (Registers) so this term is detected — or pick a <b>From–To date range</b> above to send for a specific period right now.</p>
         </div>
       ) : (
         <>
           <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-2xl bg-white p-4 ring-1 ring-slate-200">
-            <div><p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Current term</p><p className="text-sm font-bold text-slate-700">{term.name || "—"}</p><p className="text-xs text-slate-400">{term.start} → {term.end}</p></div>
+            <div><p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{data?.custom ? "Reporting period" : "Current term"}</p><p className="text-sm font-bold text-slate-700">{term.name || "—"}</p><p className="text-xs text-slate-400">{term.start} → {term.end}</p></div>
             <div><p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Students with data</p><p className="text-sm font-bold text-slate-700">{withData.length}{noData ? <span className="font-normal text-slate-400"> · {noData} no marks yet</span> : null}</p></div>
             <div className="ml-auto flex items-center gap-2">
               <span className={`rounded-full px-3 py-1 text-xs font-bold ${config?.autoEnabled ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{config?.autoEnabled ? "Automation ON" : "Automation OFF"}</span>
@@ -10580,7 +10599,7 @@ function AdminAttendanceEmails({ store }) {
 
           {runResult && runResult.ok && (
             <div className="mt-4 rounded-2xl bg-white p-4 text-sm ring-1 ring-slate-200">
-              <p className="font-bold text-slate-700">Last send · {runResult.period}</p>
+              <p className="font-bold text-slate-700">Last send · {runResult.term || runResult.period}</p>
               <p className="mt-1 text-slate-500">{runResult.sent} sent, {runResult.failed} failed, {runResult.skipped} skipped</p>
               {runResult.errors?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-rose-600">{runResult.errors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
             </div>
@@ -10641,8 +10660,8 @@ function AdminAttendanceEmails({ store }) {
       </Modal>
 
       {/* Run-now confirm */}
-      <Modal open={confirmRun} onClose={() => setConfirmRun(false)} title="Send this month's attendance emails?">
-        <p className="text-sm leading-relaxed text-slate-600">This emails <b>every enrolled student</b> in <b>{term?.name}</b> their band's template, with their overall % and per-module breakdown. Students with no attendance marks yet are skipped.</p>
+      <Modal open={confirmRun} onClose={() => setConfirmRun(false)} title={data?.custom ? "Send attendance emails for this range?" : "Send this month's attendance emails?"}>
+        <p className="text-sm leading-relaxed text-slate-600">This emails <b>every enrolled student</b> in <b>{term?.name}</b> their band's template, with their overall % and per-module breakdown. Students with no attendance marks yet are skipped.{data?.custom && <span className="mt-2 block text-[12px] font-semibold text-blue-700">Custom period: {term?.start} → {term?.end}. Figures are recalculated over these dates.</span>}</p>
         {!config?.values?.tutorName && <p className="mt-2 flex items-start gap-1.5 text-[12px] font-semibold text-amber-600"><AlertCircle size={13} className="mt-px shrink-0" /> Tip: fill the signature fields in Settings first, or the sign-off will be blank.</p>}
         <div className="mt-5 flex gap-2">
           <button onClick={() => setConfirmRun(false)} className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50">Cancel</button>

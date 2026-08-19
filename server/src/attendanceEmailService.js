@@ -137,6 +137,17 @@ async function currentTerm() {
   return null;
 }
 
+// A custom, admin-chosen reporting period: attendance is computed over [from, to] across
+// ALL of each student's current enrolments (no unit restriction), and the email's {period}
+// reads as the month/range label. Both dates are "YYYY-MM-DD"; returns null if either is
+// missing. Swapped inputs are tolerated. This backs the From–To picker on the tab.
+function termFromRange(from, to) {
+  if (!from || !to) return null;
+  const a = String(from) <= String(to) ? from : to;
+  const b = String(from) <= String(to) ? to : from;
+  return { name: rangeLabel(a, b), start: a, end: b, unitIds: null };
+}
+
 // ---------------------------------------------------------------------------
 // 2) computeCurrentTermAttendance
 // ---------------------------------------------------------------------------
@@ -450,4 +461,4 @@ async function sendToStudents(students, config = {}, opts = {}) {
   return result;
 }
 
-module.exports = { currentTerm, computeCurrentTermAttendance, buildEmailFor, sendToStudents };
+module.exports = { currentTerm, termFromRange, computeCurrentTermAttendance, buildEmailFor, sendToStudents };

@@ -14,18 +14,25 @@ const bands = require("../attendanceBands");
 
 router.use(requireAuth, requirePage("attendance-emails"));
 
-// GET /data — the current term (from the registers), every active student's attendance
-// (overall % + band + per-module), and a per-band headcount. Empty when no term is running.
-router.get("/data", async (_req, res) => {
-  const term = await service.currentTerm();
+// Accept a "YYYY-MM-DD" query/body date, or null. Backs the optional custom From–To range.
+const validDate = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+
+// GET /data — attendance for the reporting period: the auto current term (from the registers)
+// by default, or a custom ?from=YYYY-MM-DD&to=YYYY-MM-DD range. Returns every active student's
+// attendance (overall % + band + per-module) and a per-band headcount. `custom` flags a range.
+router.get("/data", async (req, res) => {
+  const from = validDate(req.query.from), to = validDate(req.query.to);
+  const custom = !!(from && to);
+  const term = custom ? service.termFromRange(from, to) : await service.currentTerm();
   if (!term) {
-    return res.json({ term: null, period: "", bands: bands.BANDS.map((b) => ({ ...b, count: 0 })), students: [] });
+    return res.json({ term: null, custom, period: "", bands: bands.BANDS.map((b) => ({ ...b, count: 0 })), students: [] });
   }
   const out = await service.computeCurrentTermAttendance(term);
   const counts = {};
   for (const s of out.students) if (s.bandKey) counts[s.bandKey] = (counts[s.bandKey] || 0) + 1;
   res.json({
     term: out.term,
+    custom,
     period: out.period,
     bands: bands.BANDS.map((b) => ({ ...b, count: counts[b.key] || 0 })),
     students: out.students,
@@ -55,9 +62,11 @@ router.put("/config", async (req, res) => {
 // once-a-month de-dupe); pass { force:false } to respect it.
 router.post("/run", async (req, res) => {
   const force = req.body?.force !== false;
-  const out = await runner.runMonthly({ force });
+  const from = validDate(req.body?.from), to = validDate(req.body?.to);
+  const range = from && to ? { from, to } : {};
+  const out = await runner.runMonthly({ force, ...range });
   if (!out.ok && out.reason === "no-current-term") {
-    return res.status(400).json({ error: "No teaching term is running right now (no units have current start/end dates on the registers), so there is nothing to send." });
+    return res.status(400).json({ error: "No teaching term is running right now (no units have current start/end dates on the registers). Pick a From–To date range to send for a specific period instead." });
   }
   res.json(out);
 });
@@ -66,7 +75,8 @@ router.post("/run", async (req, res) => {
 router.post("/send-one", async (req, res) => {
   const studentId = String(req.body?.studentId || "");
   if (!studentId) return res.status(400).json({ error: "A student is required." });
-  const out = await runner.sendOneStudent(studentId);
+  const from = validDate(req.body?.from), to = validDate(req.body?.to);
+  const out = await runner.sendOneStudent(studentId, from && to ? { from, to } : {});
   if (!out.ok) {
     const msg = {
       "no-current-term": "No teaching term is running right now.",

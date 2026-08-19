@@ -163,11 +163,11 @@ export const api = {
   removeSlc: (id) => request(`/slc/${id}`, { method: "DELETE" }),
 
   // attendance emails (admin) — banded month-end recognition/engagement emails
-  attendanceEmailData: () => request("/attendance-emails/data"),
+  attendanceEmailData: (from, to) => request("/attendance-emails/data" + (from && to ? `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` : "")),
   attendanceEmailConfig: () => request("/attendance-emails/config"),
   saveAttendanceEmailConfig: (data) => request("/attendance-emails/config", { method: "PUT", body: data }),
-  runAttendanceEmails: (force = true) => request("/attendance-emails/run", { method: "POST", body: { force } }),
-  sendAttendanceEmailToStudent: (studentId) => request("/attendance-emails/send-one", { method: "POST", body: { studentId } }),
+  runAttendanceEmails: (opts = {}) => { const o = typeof opts === "boolean" ? { force: opts } : (opts || {}); return request("/attendance-emails/run", { method: "POST", body: { force: o.force !== false, from: o.from || undefined, to: o.to || undefined } }); },
+  sendAttendanceEmailToStudent: (studentId, opts = {}) => request("/attendance-emails/send-one", { method: "POST", body: { studentId, from: opts.from || undefined, to: opts.to || undefined } }),
 
   // admissions (admin) — HND application entries: create, list, edit, delete
   admissions: () => request("/admissions"),

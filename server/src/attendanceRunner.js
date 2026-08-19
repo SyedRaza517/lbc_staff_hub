@@ -70,30 +70,38 @@ const MO = ["January", "February", "March", "April", "May", "June", "July", "Aug
 const fmtDate = (d) => `${WD[d.getDay()]}, ${d.getDate()} ${MO[d.getMonth()]} ${d.getFullYear()}`;
 const ymPeriod = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 
-// Send the monthly banded emails to every current-semester student. De-duplicates on the
-// YYYY-MM period (skips if already run this month) unless `force` — a manual "send now"
-// press passes force:true. Returns { ok, reason?, period, semester?, sent, failed, skipped, ... }.
-async function runMonthly({ force = false } = {}) {
-  const term = await service.currentTerm();
+// Send the banded emails to every current student. Normally over the current term, but an
+// admin-chosen { from, to } range (from the tab's date picker) computes over any period
+// instead. De-duplicates the AUTOMATIC current-term run on the YYYY-MM period (skips if
+// already run this month) unless `force`; a custom range is always a manual, forced send
+// and never touches the month marker. Returns { ok, reason?, period, term, custom, sent, ... }.
+async function runMonthly({ force = false, from = null, to = null } = {}) {
+  const custom = from && to ? service.termFromRange(from, to) : null;
+  const term = custom || await service.currentTerm();
   if (!term) return { ok: false, reason: "no-current-term" };
 
   const now = new Date();
   const period = ymPeriod(now);
   const config = await loadConfig();
-  if (!force && config.lastRunPeriod === period) return { ok: false, reason: "already-run", period };
+  // The once-a-month de-dupe only guards the automatic current-term run.
+  if (!custom && !force && config.lastRunPeriod === period) return { ok: false, reason: "already-run", period };
 
   const { period: periodLabel, students } = await service.computeCurrentTermAttendance(term);
   const respondByDate = fmtDate(addWorkingDays(now, config.respondDays));
   const summary = await service.sendToStudents(students, config, { period: periodLabel, respondByDate });
 
-  await saveConfig({ lastRunPeriod: period });
-  return { ok: true, period, term: term.name, ...summary };
+  // Only the current-term run advances the month marker; a custom range must not mark the
+  // current month as "already sent".
+  if (!custom) await saveConfig({ lastRunPeriod: period });
+  return { ok: true, period: custom ? periodLabel : period, term: term.name, custom: !!custom, ...summary };
 }
 
-// Send ONE student their band email right now (the per-student send from the tab). Uses
-// the same freshly-computed figures + band template as the monthly run, from attendance@.
-async function sendOneStudent(studentId) {
-  const term = await service.currentTerm();
+// Send ONE student their band email right now (the per-student send from the tab). Uses the
+// same freshly-computed figures + band template as the bulk run — over the current term, or
+// over an admin-chosen { from, to } range when the date picker is set.
+async function sendOneStudent(studentId, { from = null, to = null } = {}) {
+  const custom = from && to ? service.termFromRange(from, to) : null;
+  const term = custom || await service.currentTerm();
   if (!term) return { ok: false, reason: "no-current-term" };
   const { period, students } = await service.computeCurrentTermAttendance(term);
   const student = students.find((s) => s.id === studentId);
