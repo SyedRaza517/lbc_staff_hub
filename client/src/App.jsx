@@ -14,6 +14,7 @@ import AdmissionApply from "./AdmissionApply";
 import { useIsHandset, isNativeApp } from "./PhoneShell";
 import { BrandMark } from "./Brand";
 import StudentApp from "./StudentApp";
+import ApplicantPortal, { ApplicantAuth } from "./ApplicantPortal";
 import ConfirmDialog from "./ConfirmDialog";
 import BiometricGate, { useAppLock, BiometricSetupPrompt } from "./BiometricGate";
 import { useBackHandler } from "./backButton";
@@ -294,6 +295,9 @@ export default function App() {
     // view. The web build keeps the Landing chooser so a browser visitor can pick.
     const native = isNativeApp();
     if (entry === "admin") return (<><style>{GLOBAL_STYLE}</style><Login onBack={() => setEntry(null)} /></>);
+    // The Student Portal — a prospective student registers / signs in to track their
+    // application. A separate front door from the staff app and admin dashboard.
+    if (entry === "applicant") return (<><style>{GLOBAL_STYLE}</style><ApplicantAuth onBack={() => setEntry(null)} /></>);
     if (entry === "app" || native) return (
       // 100dvh (not vh) so collapsing mobile browser chrome can't clip the page.
       <div className="w-full" style={{ minHeight: "100dvh", height: "100dvh", fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", background: "radial-gradient(1200px 600px at 50% -10%, #e7ecf6 0%, #f1f5f9 45%, #eef1f6 100%)" }}>
@@ -302,7 +306,7 @@ export default function App() {
         <MobileAuth onExit={native ? undefined : () => setEntry(null)} />
       </div>
     );
-    return (<><style>{GLOBAL_STYLE}</style><Landing onStaffApp={() => setEntry("app")} onAdmin={() => setEntry("admin")} /></>);
+    return (<><style>{GLOBAL_STYLE}</style><Landing onStaffApp={() => setEntry("app")} onAdmin={() => setEntry("admin")} onStudent={() => setEntry("applicant")} /></>);
   }
 
   // App lock sits in front of everything a signed-in user can see, including the
@@ -322,6 +326,16 @@ export default function App() {
   // collapsed to auto, the inner overflow-y-auto never became a real scrollport, and
   // the bottom tab bar's sticky positioning had nothing to stick to — the navigation
   // scrolled away with the content. Every other screen already sets this.
+  // A prospective student (applicant) lands in the Student Portal — register/track their
+  // application, documents, offer and interview. A separate world from staff/admin.
+  if (user.kind === "applicant") return (
+    <>
+      <style>{GLOBAL_STYLE}</style>
+      <div className="w-full" style={{ minHeight: "100dvh" }}>
+        <ApplicantPortal user={user} logout={logout} />
+      </div>
+    </>
+  );
   if (user.kind === "student") return (
     <>
       <style>{GLOBAL_STYLE}</style>

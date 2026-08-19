@@ -10993,6 +10993,77 @@ function AdmissionOfferPanel({ r, store, onChanged }) {
   );
 }
 
+// The interview-call panel inside an application's View modal: schedule an interview
+// (date/time, online or in-person, link/location, note), email the applicant, and show it
+// in their Student Portal. The interview OUTCOME is recorded separately via the ISM tab and
+// shown here (r.ismOutcome).
+function AdmissionInterviewPanel({ r, store, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ date: "", time: "", mode: "In person", location: "", link: "", note: "" });
+
+  const invited = !!r.interviewInviteSentAt;
+  const outcome = r.ismOutcome; // "Yes" | "No" | "May Be" | null
+  const seed = () => setF({
+    date: r.interviewInviteDate || "", time: r.interviewInviteTime || "",
+    mode: r.interviewInviteMode || "In person", location: r.interviewInviteLocation || "",
+    link: r.interviewInviteLink || "", note: r.interviewInviteNote || "",
+  });
+
+  const send = async () => {
+    if (!f.date) { store.notify("Please pick an interview date.", "error"); return; }
+    setBusy(true);
+    try {
+      const res = await api.sendAdmissionInterviewInvite(r.id, f);
+      store.notify(res.emailed ? `Interview invitation emailed to ${r.email}` : "Saved — email isn't set up, so tell the applicant directly", res.emailed ? "success" : "info");
+      if (res.warning) store.notify(res.warning, "error");
+      setOpen(false);
+      onChanged?.();
+    } catch (e) { store.notify(e.message || "Could not send the invitation", "error"); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="mt-4 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200/70">
+      <div className="flex flex-wrap items-center gap-2">
+        <CalendarClock size={16} style={{ color: NAVY }} />
+        <p className="text-sm font-extrabold" style={{ color: NAVY_DARK }}>Interview call</p>
+        {invited
+          ? <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-[11px] font-bold text-blue-700">Scheduled{r.interviewInviteDate ? ` · ${fmtDate(r.interviewInviteDate)}` : ""}</span>
+          : <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-400">Not scheduled</span>}
+        {outcome && <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${outcome === "Yes" ? "bg-emerald-100 text-emerald-700" : outcome === "No" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>Outcome: {outcome}</span>}
+        <div className="ml-auto">
+          <button onClick={() => { setOpen(o => !o); if (!open) seed(); }} disabled={!r.email} title={!r.email ? "Add an email address first" : ""}
+            className="press flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white transition hover:opacity-95 disabled:opacity-40" style={{ background: NAVY }}>
+            <Send size={13} /> {invited ? "Reschedule / resend" : "Schedule interview"}
+          </button>
+        </div>
+      </div>
+      {!r.email && <p className="mt-2 flex items-start gap-1.5 text-[11px] font-semibold text-amber-600"><AlertCircle size={12} className="mt-px shrink-0" /> This application has no email address — add one (Edit) before scheduling an interview.</p>}
+      <p className="mt-2 text-[11px] text-slate-400">The applicant sees these details in the Student Portal and receives a branded email. The interview <b>outcome</b> is recorded separately in the Interviews (ISM) tab.</p>
+
+      {open && (
+        <div className="mt-3 rounded-xl bg-white p-3 ring-1 ring-slate-200">
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Date"><input type="date" value={f.date} onChange={e => setF(s => ({ ...s, date: e.target.value }))} className={inputCls} /></Field>
+            <Field label="Time"><input type="time" value={f.time} onChange={e => setF(s => ({ ...s, time: e.target.value }))} className={inputCls} /></Field>
+          </div>
+          <div className="mt-2"><Field label="Mode">
+            <select value={f.mode} onChange={e => setF(s => ({ ...s, mode: e.target.value }))} className={inputCls}>
+              <option>In person</option><option>Online</option>
+            </select>
+          </Field></div>
+          {f.mode === "Online"
+            ? <div className="mt-2"><Field label="Meeting link"><input type="url" value={f.link} onChange={e => setF(s => ({ ...s, link: e.target.value }))} placeholder="https://teams.microsoft.com/…" className={inputCls} /></Field></div>
+            : <div className="mt-2"><Field label="Location"><input type="text" value={f.location} onChange={e => setF(s => ({ ...s, location: e.target.value }))} placeholder="e.g. London Brookes College, 42 The Burroughs, room 2" className={inputCls} /></Field></div>}
+          <div className="mt-2"><Field label="Note (optional)"><textarea rows={2} value={f.note} onChange={e => setF(s => ({ ...s, note: e.target.value }))} placeholder="Anything the applicant should bring or know." className={`${inputCls} resize-y`} /></Field></div>
+          <PrimaryBtn colour={NAVY} onClick={send} disabled={busy} className="mt-3 w-full">{busy ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Save & send interview call</>}</PrimaryBtn>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ============================================================ ISM (interviews) ============================================================ */
 // The Intention to Study Meeting — the admission interview, transcribed from the college's
 // 12-question interview form. Each record links to an applicant; the "Admitted?" outcome
@@ -11487,6 +11558,7 @@ function AdminAdmissions({ store }) {
           <>
             <AdmissionDetail r={viewing} />
             <AdmissionDocsPanel r={viewing} store={store} onChanged={refresh} />
+            <AdmissionInterviewPanel r={viewing} store={store} onChanged={refresh} />
             <AdmissionOfferPanel r={viewing} store={store} onChanged={refresh} />
             <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
               <button onClick={() => exportOneCsv(viewing)} className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><Download size={14} /> Export CSV</button>

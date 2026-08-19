@@ -89,6 +89,7 @@ app.use("/api/slc", wrapAsync(require("./routes/slc")));
 app.use("/api/admission-uploads", wrapAsync(require("./routes/admissionsUpload")));
 app.use("/api/admission-offers", wrapAsync(require("./routes/admissionOffer")));
 app.use("/api/admission-apply", wrapAsync(require("./routes/admissionApply")));
+app.use("/api/applicant", wrapAsync(require("./routes/applicant")));
 app.use("/api/ism", wrapAsync(require("./routes/ism")));
 
 // 404 + error handlers

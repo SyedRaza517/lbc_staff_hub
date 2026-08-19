@@ -2,8 +2,8 @@ const router = require("express").Router();
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const prisma = require("../db");
-const { sStaff, sStudent } = require("../serializers");
-const { verifyPassword, hashPassword, signToken, signStudentToken, requireAuth, SECRET } = require("../auth");
+const { sStaff, sStudent, sApplicant } = require("../serializers");
+const { verifyPassword, hashPassword, signToken, signStudentToken, signApplicantToken, requireAuth, SECRET } = require("../auth");
 // A fixed hash to compare against on the login miss path, so a non-existent account
 // costs the same bcrypt time as a real one (see the /login handler). Computed once.
 const DUMMY_HASH = hashPassword("timing-equalizer-not-a-real-password");
@@ -234,7 +234,18 @@ router.post("/login", async (req, res) => {
     return res.json({ token: signStudentToken(student), user: { ...sStudent(student), kind: "student" } });
   }
 
-  // Neither a staff nor a student match. Run one bcrypt against a fixed dummy hash so
+  // Not staff or student — try an applicant (prospective-student portal) account: an
+  // Admission row that has been given a passwordHash via /api/applicant/register. Matched
+  // case-insensitively; a deactivated one cannot sign in.
+  const applicant = await prisma.admission.findFirst({
+    where: { email: { equals: emailLc, mode: "insensitive" }, passwordHash: { not: null } },
+  });
+  if (applicant && applicant.active !== false && verifyPassword(password, applicant.passwordHash)) {
+    ATTEMPTS.delete(key); ATTEMPTS.delete(acctKey);
+    return res.json({ token: signApplicantToken(applicant), user: { ...sApplicant(applicant), kind: "applicant" } });
+  }
+
+  // Neither a staff, student nor applicant match. Run one bcrypt against a fixed dummy hash so
   // a miss costs the same ~100ms as a real password check. Without this, an unknown
   // email returns in a few milliseconds (both findUnique calls short-circuit before
   // any bcrypt) while a real account pays for the compare — a timing oracle that tells
@@ -372,6 +383,15 @@ router.put("/change-password", requireAuth, async (req, res) => {
     if (verifyPassword(newPassword, student.passwordHash)) return res.status(400).json({ error: "New password must be different from your current one" });
     const updated = await prisma.student.update({ where: { id: student.id }, data: { passwordHash: hashPassword(newPassword), tokenVersion: { increment: 1 } } });
     return res.json({ ok: true, user: { ...sStudent(updated), kind: "student" }, token: signStudentToken(updated) });
+  }
+
+  // Applicant (prospective-student portal) accounts change their own password too.
+  if (req.user.kind === "applicant") {
+    const applicant = await prisma.admission.findUnique({ where: { id: req.user.id } });
+    if (!applicant || !applicant.passwordHash || !verifyPassword(currentPassword, applicant.passwordHash)) return res.status(400).json({ error: "Current password is incorrect" });
+    if (verifyPassword(newPassword, applicant.passwordHash)) return res.status(400).json({ error: "New password must be different from your current one" });
+    const updated = await prisma.admission.update({ where: { id: applicant.id }, data: { passwordHash: hashPassword(newPassword), tokenVersion: { increment: 1 } } });
+    return res.json({ ok: true, user: { ...sApplicant(updated), kind: "applicant" }, token: signApplicantToken(updated) });
   }
 
   const staff = await prisma.staff.findUnique({ where: { id: req.user.id } });

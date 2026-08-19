@@ -2,7 +2,7 @@
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const prisma = require("./db");
-const { sStaff, sStudent } = require("./serializers");
+const { sStaff, sStudent, sApplicant } = require("./serializers");
 
 // In production a real secret MUST be provided — never silently fall back to a
 // publicly-known string (that would let anyone forge an admin token).
@@ -27,6 +27,9 @@ const EXPIRES = process.env.JWT_EXPIRES || "1d";
 const signToken = (staff) => jwt.sign({ sub: staff.id, kind: "staff", role: staff.accountRole, purpose: "session", ver: staff.tokenVersion ?? 0 }, SECRET, { expiresIn: EXPIRES });
 // A student session token. kind:"student" routes requireAuth down the student path.
 const signStudentToken = (student) => jwt.sign({ sub: student.id, kind: "student", purpose: "session", ver: student.tokenVersion ?? 0 }, SECRET, { expiresIn: EXPIRES });
+// An applicant session token. kind:"applicant" routes requireAuth down the applicant path
+// (a prospective student tracking their own Admission record).
+const signApplicantToken = (applicant) => jwt.sign({ sub: applicant.id, kind: "applicant", purpose: "session", ver: applicant.tokenVersion ?? 0 }, SECRET, { expiresIn: EXPIRES });
 
 // The ONLY routers a student session may reach.
 //   /api/student  — their own data, every route scoped to req.user.id
@@ -34,6 +37,10 @@ const signStudentToken = (student) => jwt.sign({ sub: student.id, kind: "student
 //                   req.user.kind === "student" before it touches a staff table
 // Nothing else. See the check in requireAuth below.
 const STUDENT_ROUTERS = ["/api/student", "/api/auth"];
+// The ONLY routers an applicant session may reach — same isolation idea as students.
+//   /api/applicant — their own Admission (register is public; everything else scoped to req.user.id)
+//   /api/auth      — /login and /change-password, which branch on kind before touching a staff table
+const APPLICANT_ROUTERS = ["/api/applicant", "/api/auth"];
 
 // Attaches req.user = { id, accountRole, ...publicStaff } when a valid Bearer token is present.
 async function requireAuth(req, res, next) {
@@ -70,6 +77,19 @@ async function requireAuth(req, res, next) {
       return next();
     }
 
+    // Applicant session — a prospective student tracking their own admission. Isolated to
+    // /api/applicant + /api/auth by the allowlist, exactly like the student path above.
+    if (payload.kind === "applicant") {
+      if (!APPLICANT_ROUTERS.includes(req.baseUrl)) {
+        return res.status(403).json({ error: "Not available for applicant accounts" });
+      }
+      const applicant = await prisma.admission.findUnique({ where: { id: payload.sub } });
+      if (!applicant || !applicant.passwordHash || applicant.active === false) return res.status(401).json({ error: "Invalid token" });
+      if ((payload.ver ?? 0) !== (applicant.tokenVersion ?? 0)) return res.status(401).json({ error: "Session expired — please sign in again" });
+      req.user = { id: applicant.id, kind: "applicant", isApplicant: true, ...sApplicant(applicant) };
+      return next();
+    }
+
     const staff = await prisma.staff.findUnique({ where: { id: payload.sub } });
     if (!staff) return res.status(401).json({ error: "Invalid token" });
     // Tokens issued before the last password reset/change are dead. Tokens minted
@@ -98,6 +118,13 @@ function requireAdmin(req, res, next) {
 // cross.
 function requireStudent(req, res, next) {
   if (req.user?.kind !== "student") return res.status(403).json({ error: "Student access required" });
+  next();
+}
+
+// One definition of "this is an applicant", and the guard for the applicant router.
+const isApplicant = (user) => user?.kind === "applicant" || user?.isApplicant === true;
+function requireApplicant(req, res, next) {
+  if (req.user?.kind !== "applicant") return res.status(403).json({ error: "Applicant access required" });
   next();
 }
 
@@ -182,4 +209,4 @@ function blockedByRank(actor, target) {
   return "You can't change an administrator whose access is broader than your own";
 }
 
-module.exports = { hashPassword, verifyPassword, signToken, signStudentToken, requireAuth, requireAdmin, requireStudent, requireSuperAdmin, requirePage, requireAnyPage, hasPage, isStudent, outranks, blockedByRank, STUDENT_ROUTERS, SECRET };
+module.exports = { hashPassword, verifyPassword, signToken, signStudentToken, signApplicantToken, requireAuth, requireAdmin, requireStudent, requireApplicant, requireSuperAdmin, requirePage, requireAnyPage, hasPage, isStudent, isApplicant, outranks, blockedByRank, STUDENT_ROUTERS, APPLICANT_ROUTERS, SECRET };

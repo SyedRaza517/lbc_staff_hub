@@ -48,7 +48,23 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ error: "Please enter at least your first name or surname." });
   }
 
-  const row = await prisma.admission.create({ data });
+  // One email = one account. If this email already belongs to a login (staff, student, or
+  // an applicant portal account), reject it so we don't create a duplicate — tell them to
+  // use a different email or sign in to the Student Portal instead.
+  if (data.email) {
+    const emailLc = String(data.email).toLowerCase();
+    const [staff, student, appl] = await Promise.all([
+      prisma.staff.findUnique({ where: { email: emailLc } }).catch(() => null),
+      prisma.student.findUnique({ where: { email: emailLc } }).catch(() => null),
+      prisma.admission.findFirst({ where: { email: { equals: emailLc, mode: "insensitive" }, passwordHash: { not: null } } }).catch(() => null),
+    ]);
+    if (staff || student || appl) {
+      return res.status(409).json({ error: "This email is already in use. Please use a different email, or sign in to the Student Portal to continue your application." });
+    }
+    data.email = emailLc;
+  }
+
+  const row = await prisma.admission.create({ data: { ...data, source: "apply" } });
   // A public caller needs nothing back beyond confirmation and the new id.
   res.status(201).json({ ok: true, id: row.id });
 });

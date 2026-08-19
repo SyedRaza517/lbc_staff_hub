@@ -861,6 +861,33 @@ model Admission {
   offerSignatoryName String?
   offerTokenHash     String?   @unique
 
+  // --- Applicant portal login ---
+  // A prospective student can self-register and sign in to track their application (fill
+  // the form, upload documents, see the offer and interview). passwordHash is NULL for
+  // records created by an admin or the public apply form (they have no login). Login is
+  // the shared /api/auth/login, issuing a kind:"applicant" token confined to /api/applicant.
+  // Email uniqueness (vs Staff, Student and other applicant accounts) is enforced in code.
+  passwordHash    String?
+  active          Boolean  @default(true)
+  tokenVersion    Int      @default(0)
+  // Set when the applicant presses "Submit application" in the portal — drives the
+  // progress tracker. Null = still a draft. Independent of admin-created records.
+  applicationSubmittedAt DateTime?
+  // How this record was created, for the admin list: "portal" (self-registered),
+  // "apply" (public form) or null/"admin" (entered by an admin).
+  source          String?
+
+  // --- Interview call (invitation) ---
+  // The admin schedules an interview; the applicant sees it in the portal and is emailed.
+  // Distinct from Ism.interviewDate (which records when the meeting actually happened).
+  interviewInviteDate     String?   // YYYY-MM-DD
+  interviewInviteTime     String?   // HH:MM
+  interviewInviteMode     String?   // "Online" | "In person"
+  interviewInviteLocation String?   // room / address (in-person)
+  interviewInviteLink     String?   // meeting link (online)
+  interviewInviteNote     String?
+  interviewInviteSentAt   DateTime?
+
   documents AdmissionDocument[]
   isms      Ism[]
 

@@ -34,7 +34,7 @@ function Choice({ Icon, title, subtitle, points, onClick, accent, delay }) {
   );
 }
 
-export default function Landing({ onStaffApp, onAdmin }) {
+export default function Landing({ onStaffApp, onAdmin, onStudent }) {
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
       <div className="animated-gradient absolute inset-0" style={{ background: `linear-gradient(135deg, ${NAVY_DARK} 0%, ${NAVY} 30%, #2b3f9e 55%, ${MAROON} 100%)`, backgroundSize: "220% 220%" }} />
@@ -45,7 +45,7 @@ export default function Landing({ onStaffApp, onAdmin }) {
         <div className="float absolute -bottom-28 left-1/4 h-72 w-72 rounded-full blur-3xl" style={{ background: "rgba(73,99,205,0.30)", animationDelay: "2.4s" }} />
       </div>
 
-      <div className="relative w-full max-w-3xl">
+      <div className="relative w-full max-w-5xl">
         <div className="scale-in mb-8 flex flex-col items-center text-center">
           <div className="float mb-3 flex flex-col items-center justify-center gap-1 rounded-2xl bg-white px-5 py-3 shadow-lg ring-1 ring-slate-200/80">
             <BrandLockup />
@@ -54,7 +54,7 @@ export default function Landing({ onStaffApp, onAdmin }) {
           <p className="mt-1 text-sm text-white/70">Choose how you'd like to continue</p>
         </div>
 
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           <Choice
             Icon={Smartphone}
             title="Staff App"
@@ -68,11 +68,23 @@ export default function Landing({ onStaffApp, onAdmin }) {
             ]}
           />
           <Choice
+            Icon={GraduationCap}
+            title="Student Portal"
+            subtitle="Applicants & prospective students"
+            accent="linear-gradient(135deg, #0f766e, #14b8a6)"
+            delay="0.14s"
+            onClick={onStudent}
+            points={[
+              { Icon: UserPlus, label: "Register & track your application" },
+              { Icon: GraduationCap, label: "Documents, offer & interview" },
+            ]}
+          />
+          <Choice
             Icon={Monitor}
             title="Admin Dashboard"
             subtitle="College administrators only"
             accent={`linear-gradient(135deg, ${MAROON}, #d14a63)`}
-            delay="0.14s"
+            delay="0.23s"
             onClick={onAdmin}
             points={[
               { Icon: ShieldCheck, label: "Approve sign-ups & leave" },
@@ -81,7 +93,7 @@ export default function Landing({ onStaffApp, onAdmin }) {
           />
         </div>
 
-        <p className="fade-up mt-7 text-center text-[11px] text-white/50" style={{ animationDelay: "0.25s" }}>
+        <p className="fade-up mt-7 text-center text-[11px] text-white/50" style={{ animationDelay: "0.3s" }}>
           Administrators can switch to the staff app at any time once signed in.
         </p>
       </div>

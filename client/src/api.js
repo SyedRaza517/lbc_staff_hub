@@ -182,6 +182,7 @@ export const api = {
   // admissions — decision (interview/enrol/studentId) + offer letter (admin)
   updateAdmissionStatus: (id, data) => request(`/admissions/${id}/status`, { method: "PUT", body: data }),
   sendAdmissionOffer: (id, data) => request(`/admissions/${id}/send-offer`, { method: "POST", body: data }),
+  sendAdmissionInterviewInvite: (id, data) => request(`/admissions/${id}/send-interview-invite`, { method: "POST", body: data }),
   // admissions — server-generated PDF downloads (admin). Fetch the PDF as a Blob and
   // trigger a real file download. This works uniformly across Chrome, Firefox,
   // Safari/Mac and Edge, unlike the old window.open()+print() export (pop-up blockers,
@@ -263,6 +264,44 @@ export const api = {
     if (!res.ok) { const e = new Error(data?.error || `Upload failed (${res.status})`); e.status = res.status; throw e; }
     return data;
   },
+
+  // ---- Applicant / Student Portal (a prospective student's own login) ----
+  // register is PUBLIC (no token yet) and returns { token, user } so we sign in straight
+  // away. Signing IN later uses the shared api.login (server returns kind:"applicant").
+  applicantRegister: async (data) => {
+    const res = await fetch(`${BASE}/applicant/register`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+    });
+    const out = await res.json().catch(() => null);
+    if (!res.ok) { const e = new Error(out?.error || `Could not register (${res.status})`); e.status = res.status; throw e; }
+    return out;
+  },
+  applicantCheckEmail: async (email) => {
+    try {
+      const res = await fetch(`${BASE}/applicant/check-email`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+      return await res.json().catch(() => ({ valid: false, available: false }));
+    } catch { return { valid: false, available: false }; }
+  },
+  // authed applicant calls — the stored kind:"applicant" token is attached by request()
+  applicantMe: () => request("/applicant/me"),
+  saveApplicantApplication: (data) => request("/applicant/me", { method: "PUT", body: data }),
+  submitApplicantApplication: (data) => request("/applicant/me/submit", { method: "POST", body: data }),
+  applicantDocuments: () => request("/applicant/documents"),
+  applicantOffer: () => request("/applicant/offer"),
+  acceptApplicantOffer: () => request("/applicant/offer/accept", { method: "POST" }),
+  uploadApplicantDoc: async (type, file) => {
+    const token = getToken();
+    const res = await fetch(`${BASE}/applicant/documents?type=${encodeURIComponent(type)}`, {
+      method: "POST",
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) },
+      body: file,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { const e = new Error(data?.error || `Upload failed (${res.status})`); e.status = res.status; throw e; }
+    return data;
+  },
+  downloadApplicantOfferLetter: (filename) => api.downloadPdf(`/applicant/offer-letter.pdf`, filename || "Offer Letter.pdf"),
+  downloadApplicantApplication: (filename) => api.downloadPdf(`/applicant/application.pdf`, filename || "Application Form.pdf"),
 
   // admin: student queries tab
   listStudentQueries: (status) => request(`/student-queries${status ? `?status=${status}` : ""}`),

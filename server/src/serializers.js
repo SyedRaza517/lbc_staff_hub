@@ -99,6 +99,16 @@ const sStudent = (s) => ({
   cohortId: s.cohortId ?? null,
   ...(s.enrolments ? { unitIds: s.enrolments.map((e) => e.unitId) } : {}),
 });
+// The applicant (prospective-student portal) identity attached to req.user by requireAuth.
+// Deliberately minimal and secret-free — NEVER the passwordHash, and no admin fields, so an
+// applicant object can't masquerade as staff/admin. The full application record is assembled
+// by the /api/applicant routes themselves.
+const sApplicant = (a) => ({
+  id: a.id, email: a.email || "",
+  firstName: a.firstName || "", surname: a.surname || "",
+  name: [a.firstName, a.surname].filter(Boolean).join(" ") || a.email || "Applicant",
+  course: a.course || "", intake: a.intake || "", active: a.active !== false,
+});
 const sSession = (x) => ({
   id: x.id, unitId: x.unitId, date: x.date, start: x.startTime, end: x.endTime,
   description: x.description, audience: x.audience, kind: x.kind ?? "",
@@ -167,4 +177,4 @@ const sTermCalendar = (c) => ({
   published: !!c.published,
 });
 
-module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sCourse, sCohort, sTerm, sUnit, sStudent, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet, sStudentQuery, sTimetableSlot, sTermCalendar, parseAdminPages };
+module.exports = { sStaff, sSignup, sCheckin, sLeave, sDoc, sAdj, sNotification, sSemester, sCourse, sCohort, sTerm, sUnit, sStudent, sApplicant, sSession, sMark, sInteraction, sAssessment, sGrade, sTimesheet, sStudentQuery, sTimetableSlot, sTermCalendar, parseAdminPages };

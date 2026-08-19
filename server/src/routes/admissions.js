@@ -330,6 +330,86 @@ router.post("/:id/send-offer", async (req, res) => {
   res.json({ admission: sAdmission(updated), emailed, link: acceptLink, warning });
 });
 
+// POST /:id/send-interview-invite — schedule an interview and send the applicant the
+// "interview call". The details are saved on the record so the applicant sees them in the
+// portal, and a branded email is sent. The interview OUTCOME is separate (recorded via ISM).
+router.post("/:id/send-interview-invite", async (req, res) => {
+  const a = await prisma.admission.findUnique({ where: { id: req.params.id } });
+  if (!a) return res.status(404).json({ error: "Application not found." });
+  if (!a.email) return res.status(400).json({ error: "This applicant has no email address on file — add one first." });
+
+  const b = req.body || {};
+  const date = str(b.date);          // YYYY-MM-DD
+  const time = str(b.time);          // HH:MM
+  const mode = str(b.mode);          // "Online" | "In person"
+  const location = str(b.location);  // room / address
+  const link = str(b.link);          // meeting link
+  const note = str(b.note);
+  if (!date) return res.status(400).json({ error: "Please choose an interview date." });
+
+  await prisma.admission.update({
+    where: { id: a.id },
+    data: {
+      interviewInviteDate: date || null,
+      interviewInviteTime: time || null,
+      interviewInviteMode: mode || null,
+      interviewInviteLocation: location || null,
+      interviewInviteLink: link || null,
+      interviewInviteNote: note || null,
+      interviewInviteSentAt: new Date(),
+    },
+  });
+
+  const name = [a.firstName, a.surname].filter(Boolean).join(" ") || "Applicant";
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const firstEsc = esc(a.firstName || name);
+  const whenText = `${formatOfferDate(date)}${time ? ` at ${time}` : ""}`;
+  const isOnline = mode === "Online";
+  const whereText = isOnline ? (link ? "Online (link below)" : "Online") : (location || "London Brookes College, 42 The Burroughs, Hendon, London NW4 4AP");
+  const portalLink = `${CLIENT_URL}/`;
+
+  const text = `Dear ${a.firstName || name},\n\nWe would like to invite you to an interview for your application to ${a.course || "your course"} at London Brookes College.\n\nWhen: ${whenText}\nWhere: ${whereText}\n${isOnline && link ? `Join link: ${link}\n` : ""}${note ? `\n${note}\n` : ""}\nYou can see these details any time by signing in to the Student Portal: ${portalLink}\n\nIf the time does not suit you, reply to this email and we will rearrange.\n\nKind regards,\nAdmissions Team\nLondon Brookes College`;
+
+  const html = `<div style="margin:0;padding:24px;background:#eef1f6;font-family:'Segoe UI',Roboto,system-ui,-apple-system,sans-serif">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(15,23,42,.08)">
+    <tr><td style="background:linear-gradient(135deg,#1a3a8f,#9e1b32);padding:24px 28px">
+      <img src="${mailAssets.logoUrl}" width="44" height="26" alt="London Brookes College" style="display:block;margin:0 0 10px;border:0;outline:none;max-width:44px" />
+      <p style="margin:0;color:#ffffff;font-size:18px;font-weight:800">London Brookes College</p>
+      <p style="margin:3px 0 0;color:rgba(255,255,255,.75);font-size:11px;font-weight:700;letter-spacing:.18em">INTERVIEW INVITATION</p>
+    </td></tr>
+    <tr><td style="padding:26px 28px 4px">
+      <h1 style="margin:0 0 12px;font-size:22px;font-weight:800;color:#1a3a8f">You're invited to an interview</h1>
+      <p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#334155">Dear ${firstEsc}, we would like to invite you to an interview for your application to <b>${esc(a.course || "your course")}</b>.</p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
+        <tr><td style="padding:14px 18px;border-bottom:1px solid #eef1f6;font-size:13px;color:#334155"><span style="font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#64748b">When</span><br><b style="font-size:15px;color:#0f172a">${esc(whenText)}</b></td></tr>
+        <tr><td style="padding:14px 18px;${isOnline && link ? "border-bottom:1px solid #eef1f6;" : ""}font-size:13px;color:#334155"><span style="font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#64748b">Where</span><br><b style="font-size:15px;color:#0f172a">${esc(whereText)}</b></td></tr>
+        ${isOnline && link ? `<tr><td style="padding:14px 18px;font-size:13px;color:#334155"><span style="font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#64748b">Join link</span><br><a href="${esc(link)}" style="color:#1a3a8f;word-break:break-all">${esc(link)}</a></td></tr>` : ""}
+      </table>
+      ${note ? `<p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#334155">${esc(note)}</p>` : ""}
+      <table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:0 auto 16px"><tr><td style="border-radius:10px" bgcolor="#1a3a8f">
+        <a href="${portalLink}" style="display:inline-block;padding:13px 30px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;background:linear-gradient(135deg,#1a3a8f,#9e1b32)">Open the Student Portal</a>
+      </td></tr></table>
+      <p style="margin:0 0 4px;font-size:12px;line-height:1.6;color:#94a3b8;text-align:center">You can see these details any time by signing in to the Student Portal.</p>
+      <p style="margin:16px 0 22px;font-size:14px;line-height:1.6;color:#334155">If the time does not suit you, simply reply to this email and we will rearrange.<br><br>Kind regards,<br><b>Admissions Team</b><br>London Brookes College</p>
+    </td></tr>
+    <tr><td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0">
+      <p style="margin:0;font-size:11px;line-height:1.6;color:#94a3b8">London Brookes College &middot; 42 The Burroughs, Hendon, London NW4 4AP<br>info@londonbrookescollege.co.uk &middot; www.londonbrookescollege.co.uk</p>
+    </td></tr>
+  </table>
+</div>`;
+
+  const subject = `London Brookes College — Interview invitation for ${a.course || "your application"}`;
+  let emailed = false, warning = null;
+  try {
+    const sent = await email.sendEmail(a.email, subject, text, { html });
+    emailed = !!sent.sent;
+    if (!sent.sent && !sent.stubbed) warning = `The interview was saved but the email could not be sent: ${sent.error || "unknown error"}`;
+  } catch (e) { warning = `The interview was saved but the email could not be sent: ${e.message}`; }
+
+  const updated = await prisma.admission.findUnique({ where: { id: a.id }, ...withDocs });
+  res.json({ admission: sAdmission(updated), emailed, warning });
+});
+
 router.put("/:id", async (req, res) => {
   const existing = await prisma.admission.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: "Application not found." });
