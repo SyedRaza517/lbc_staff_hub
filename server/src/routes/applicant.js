@@ -90,6 +90,8 @@ function meView(a) {
       offerAccepted: a.offerStatus === "accepted",
       enrollStatus: a.enrollStatus || null,     // "Enroll" | "Rejected" | "Withdraw" | null
       enrolled: a.enrollStatus === "Enroll",
+      inductionDate: a.enrolInductionDate || "",
+      inductionTime: a.enrolInductionTime || "",
     },
   };
 }

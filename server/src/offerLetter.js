@@ -192,7 +192,9 @@ async function buildOfferLetterPdf(admission = {}, opts = {}) {
 
       // ---- Your First Day ----
       head("YOUR FIRST DAY", 13.5, { gapAfter: 8 });
-      para([["Induction: ", "Times-Bold"], [inductionDate || "", "Times-Roman"]], { gapAfter: 3 });
+      // Only show the Induction line when a date was set. An empty final run leaves the
+      // line un-finalised in pdfkit, so the next line (Arrival/Start) overprints it.
+      if (inductionDate) para([["Induction: ", "Times-Bold"], [inductionDate, "Times-Roman"]], { gapAfter: 3 });
       para([
         ["Arrival: ", "Times-Bold"], [reportTime, "Times-Roman"],
         ["  |  ", "Times-Roman"],

@@ -888,6 +888,11 @@ model Admission {
   interviewInviteNote     String?
   interviewInviteSentAt   DateTime?
 
+  // --- Enrolment induction (set when an admin clicks Enroll) ---
+  enrolInductionDate String?   // YYYY-MM-DD
+  enrolInductionTime String?   // HH:MM
+  enrolEmailSentAt   DateTime?
+
   documents AdmissionDocument[]
   isms      Ism[]
 

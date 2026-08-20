@@ -324,8 +324,14 @@ function Overview({ me, go }) {
       </div>
 
       {p.enrolled && (
-        <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 p-4 text-emerald-800 ring-1 ring-emerald-200">
-          <PartyPopper size={22} /> <p className="text-sm font-bold">Congratulations — you've been enrolled! The admissions team will be in touch with your next steps.</p>
+        <div className="flex items-start gap-3 rounded-2xl bg-emerald-50 p-4 text-emerald-800 ring-1 ring-emerald-200">
+          <PartyPopper size={22} className="mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-bold">Congratulations — you've been enrolled!</p>
+            {p.inductionDate
+              ? <p className="mt-0.5 text-[13px] font-semibold">Your induction is on {fmtDate(p.inductionDate)}{p.inductionTime ? ` at ${p.inductionTime}` : ""} — London Brookes College. Please bring photo ID.</p>
+              : <p className="mt-0.5 text-[13px]">The admissions team will be in touch with your next steps.</p>}
+          </div>
         </div>
       )}
     </div>

@@ -39,6 +39,45 @@ function formatLetterDate(d) {
   return `${d.getDate()}${ordinal(d.getDate())} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+// The "You're enrolled" congratulations email, sent when an admin enrols an applicant and
+// sets their induction date/time. Branded, celebratory, table-based for broad client support.
+function buildEnrolEmail(a) {
+  const name = [a.firstName, a.surname].filter(Boolean).join(" ") || "there";
+  const first = a.firstName || name;
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const when = `${formatOfferDate(a.enrolInductionDate)}${a.enrolInductionTime ? ` at ${a.enrolInductionTime}` : ""}`;
+  const course = a.course || "your course";
+  const subject = "London Brookes College — You're enrolled! 🎉";
+  const text = `Dear ${first},\n\nCongratulations! We are delighted to confirm that you are now enrolled on ${course} at London Brookes College.\n\nYour induction is on:\n${when}\nLocation: London Brookes College, 42 The Burroughs, Hendon, London NW4 4AP\n\nPlease arrive a little early and bring a form of photo ID. During induction you will receive your timetable, student ID card and programme information.\n\nWe look forward to welcoming you.\n\nKind regards,\nAdmissions Team\nLondon Brookes College`;
+  const html = `<div style="margin:0;padding:24px;background:#eef1f6;font-family:'Segoe UI',Roboto,system-ui,-apple-system,sans-serif">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(15,23,42,.08)">
+    <tr><td style="background:linear-gradient(135deg,#0f766e,#15803d);padding:24px 28px">
+      <img src="${mailAssets.logoUrl}" width="44" height="26" alt="London Brookes College" style="display:block;margin:0 0 10px;border:0;outline:none;max-width:44px" />
+      <p style="margin:0;color:#ffffff;font-size:18px;font-weight:800">London Brookes College</p>
+      <p style="margin:3px 0 0;color:rgba(255,255,255,.8);font-size:11px;font-weight:700;letter-spacing:.18em">ENROLMENT CONFIRMED</p>
+    </td></tr>
+    <tr><td style="padding:30px 28px 4px;text-align:center">
+      <div style="font-size:38px;line-height:1">&#127881;</div>
+      <h1 style="margin:12px 0 0;font-size:25px;font-weight:800;color:#15803d">Congratulations, ${esc(first)}!</h1>
+      <p style="margin:8px 0 0;font-size:12px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#0f766e">You're enrolled</p>
+    </td></tr>
+    <tr><td style="padding:18px 28px 4px">
+      <p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#334155">We are delighted to confirm that you are now enrolled on <b>${esc(course)}</b> at London Brookes College. Here are your induction details.</p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
+        <tr><td style="padding:14px 18px;border-bottom:1px solid #eef1f6;font-size:13px;color:#334155"><span style="font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#64748b">Induction</span><br><b style="font-size:16px;color:#0f172a">${esc(when)}</b></td></tr>
+        <tr><td style="padding:14px 18px;font-size:13px;color:#334155"><span style="font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#64748b">Location</span><br><b style="font-size:15px;color:#0f172a">London Brookes College, 42 The Burroughs, Hendon, London NW4 4AP</b></td></tr>
+      </table>
+      <p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#334155">Please arrive a little early and bring a form of photo ID. During induction you will receive your <b>timetable, student ID card and programme information</b>.</p>
+      <p style="margin:0 0 22px;font-size:14px;line-height:1.6;color:#334155">We look forward to welcoming you.<br><br>Kind regards,<br><b>Admissions Team</b><br>London Brookes College</p>
+    </td></tr>
+    <tr><td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0">
+      <p style="margin:0;font-size:11px;line-height:1.6;color:#94a3b8">London Brookes College &middot; 42 The Burroughs, Hendon, London NW4 4AP<br>info@londonbrookescollege.co.uk &middot; www.londonbrookescollege.co.uk</p>
+    </td></tr>
+  </table>
+</div>`;
+  return { subject, text, html };
+}
+
 router.use(requireAuth, requirePage("admissions"));
 
 const withDocs = { include: { documents: { orderBy: { uploadedAt: "asc" } } } };
@@ -201,6 +240,15 @@ router.put("/:id/status", async (req, res) => {
   if ("interviewStatus" in b) data.interviewStatus = str(b.interviewStatus) || null;
   if ("enrollStatus" in b) data.enrollStatus = str(b.enrollStatus) || null;
   if ("studentId" in b) data.studentId = str(b.studentId).slice(0, 100) || null;
+
+  // Enrolling with an induction date (the Enroll dialog): store the induction date/time and
+  // send the student a "You're enrolled" confirmation email below. A plain inline studentId
+  // edit or a Reject/Withdraw carries no inductionDate, so it never triggers the email.
+  const enrolling = data.enrollStatus === "Enroll" && !!str(b.inductionDate);
+  if (enrolling) {
+    data.enrolInductionDate = str(b.inductionDate) || null;
+    data.enrolInductionTime = str(b.inductionTime) || null;
+  }
   let row = await prisma.admission.update({ where: { id: req.params.id }, data });
 
   // On enrolment, the applicant's SharePoint folder is named "<studentId> - <name>".
@@ -231,9 +279,27 @@ router.put("/:id/status", async (req, res) => {
     }
   }
 
+  // Send the enrolment confirmation email (best-effort; a send failure must never undo the
+  // enrolment or the folder work above).
+  let emailed = false;
+  if (enrolling) {
+    if (!row.email) {
+      warning = (warning ? warning + " " : "") + "Enrolled — no email address on file, so no confirmation was sent.";
+    } else {
+      try {
+        const { subject, text, html } = buildEnrolEmail(row);
+        const sent = await email.sendEmail(row.email, subject, text, { html });
+        emailed = !!sent.sent;
+        row = await prisma.admission.update({ where: { id: row.id }, data: { enrolEmailSentAt: new Date() } });
+        if (!sent.sent && !sent.stubbed) warning = (warning ? warning + " " : "") + `Enrolled, but the confirmation email could not be sent: ${sent.error || "unknown error"}`;
+      } catch (e) { warning = (warning ? warning + " " : "") + `Enrolled, but the confirmation email could not be sent: ${e.message}`; }
+    }
+  }
+
   const full = await prisma.admission.findUnique({ where: { id: row.id }, ...withDocs });
   const out = sAdmission(full);
   if (warning) out.warning = warning;
+  out.emailed = emailed;
   res.json(out);
 });
 

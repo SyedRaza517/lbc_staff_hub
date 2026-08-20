@@ -11301,14 +11301,40 @@ function AdminAdmissions({ store }) {
   // One reusable confirm dialog for the consequential list actions — the enrol decisions
   // and Edit. Each button opens it with a tailored message instead of acting immediately.
   const [confirmAction, setConfirmAction] = useState(null);
+  // Enrolling opens a dialog for the induction date/time, then emails the student.
+  const [enrollFor, setEnrollFor] = useState(null);
+  const [enrollDate, setEnrollDate] = useState("");
+  const [enrollTime, setEnrollTime] = useState("10:00");
+  const [enrolling, setEnrolling] = useState(false);
+  const doEnroll = async () => {
+    if (!enrollDate) { store.notify("Please choose the induction date.", "error"); return; }
+    setEnrolling(true);
+    try {
+      const res = await api.updateAdmissionStatus(enrollFor.id, { enrollStatus: "Enroll", inductionDate: enrollDate, inductionTime: enrollTime });
+      if (res?.warning) store.notify(res.warning, "info");
+      store.notify(
+        res?.emailed ? `Enrolled — confirmation emailed to ${enrollFor.email}`
+          : enrollFor.email ? "Enrolled — email isn't set up, so tell the student their induction directly"
+            : "Enrolled — no email on file for this student",
+        res?.emailed ? "success" : "info");
+      setEnrollFor(null);
+      await refresh();
+    } catch (e) { store.notify(e.message || "Could not enrol", "error"); }
+    setEnrolling(false);
+  };
   const askEnroll = (r, status) => {
     const nm = admissionName(r) || "this applicant";
     const label = status === "Rejected" ? "Reject" : status;
     if (r.enrollStatus === status) { setConfirmAction({ title: `Clear "${label}"?`, message: `Remove the "${label}" decision from ${nm}?`, confirmLabel: "Clear", run: () => saveStatus(r.id, { enrollStatus: "" }) }); return; }
-    const msg = status === "Enroll"
-      ? `Mark ${nm} as enrolled? Their SharePoint folder will be renamed to "<Student ID> - ${nm}".`
-      : status === "Rejected" ? `Mark ${nm}'s application as rejected?` : `Mark ${nm} as withdrawn?`;
-    setConfirmAction({ title: `${label} ${nm}?`, message: msg, confirmLabel: label, danger: status !== "Enroll", run: () => saveStatus(r.id, { enrollStatus: status }) });
+    if (status === "Enroll") {
+      // Ask for the induction date/time; doEnroll enrols and emails the student.
+      setEnrollFor(r);
+      setEnrollDate(r.enrolInductionDate || "");
+      setEnrollTime(r.enrolInductionTime || "10:00");
+      return;
+    }
+    const msg = status === "Rejected" ? `Mark ${nm}'s application as rejected?` : `Mark ${nm} as withdrawn?`;
+    setConfirmAction({ title: `${label} ${nm}?`, message: msg, confirmLabel: label, danger: true, run: () => saveStatus(r.id, { enrollStatus: status }) });
   };
   const askEdit = (r) => setConfirmAction({ title: "Edit this application?", message: `Open ${admissionName(r) || "this application"} for editing?`, confirmLabel: "Edit", run: () => openEdit(r) });
 
@@ -11563,6 +11589,25 @@ function AdminAdmissions({ store }) {
             <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
               <button onClick={() => exportOneCsv(viewing)} className="press flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"><Download size={14} /> Export CSV</button>
               <button onClick={() => exportPdf(viewing)} className="press flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold text-white transition hover:opacity-95" style={{ background: MAROON }}><FileText size={14} /> Export PDF</button>
+            </div>
+          </>
+        )}
+      </Modal>
+
+      {/* Enrol — pick the induction date/time, then enrol + email the student. */}
+      <Modal open={!!enrollFor} onClose={() => setEnrollFor(null)} title={enrollFor ? `Enrol ${admissionName(enrollFor) || "applicant"}` : "Enrol"} width={460}>
+        {enrollFor && (
+          <>
+            <p className="text-sm leading-relaxed text-slate-600">Choose the <b>induction date and time</b>. We'll mark <b>{admissionName(enrollFor)}</b> as enrolled and email them a congratulations with these details.</p>
+            {!enrollFor.email && <p className="mt-2 flex items-start gap-1.5 text-[12px] font-semibold text-amber-600"><AlertCircle size={13} className="mt-px shrink-0" /> No email on file — they'll be enrolled but won't receive the confirmation. Add an email (Edit) to send it.</p>}
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <Field label="Induction date"><input type="date" value={enrollDate} onChange={e => setEnrollDate(e.target.value)} className={inputCls} /></Field>
+              <Field label="Induction time"><input type="time" value={enrollTime} onChange={e => setEnrollTime(e.target.value)} className={inputCls} /></Field>
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-400">The email location is London Brookes College, 42 The Burroughs, Hendon, London NW4 4AP. On enrol, the applicant's SharePoint folder is renamed to "&lt;Student ID&gt; - {admissionName(enrollFor)}".</p>
+            <div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button onClick={() => setEnrollFor(null)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
+              <PrimaryBtn colour="#059669" onClick={doEnroll} disabled={enrolling}>{enrolling ? <><Loader2 size={16} className="animate-spin" /> Enrolling…</> : <><CheckCircle2 size={16} /> Enrol &amp; send email</>}</PrimaryBtn>
             </div>
           </>
         )}
